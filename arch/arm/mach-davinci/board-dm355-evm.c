@@ -25,6 +25,7 @@
 #include <linux/spi/spi.h>
 #include <linux/spi/eeprom.h>
 #include <linux/i2c/dm355evm_msp.h>
+#include <linux/spi/davinci_spi.h>
 
 #include <asm/setup.h>
 #include <asm/mach-types.h>
@@ -430,6 +431,19 @@ static struct davinci_mmc_config dm355evm_mmc_config = {
 #define USB_ID_VALUE	1	/* ID pulled low */
 #endif
 
+struct davinci_spi_config davinci_spi_eeprom_spi_cfg = {
+	.wdelay		= 0,
+	.odd_parity	= 0,
+	.parity_enable	= 0,
+	.wait_enable	= 0,
+	.timer_disable	= 0,
+	.clk_internal	= 1,
+	.cs_hold	= 1,
+	.intr_level	= 0,
+	.pin_op_modes	= OPMODE_SPISCS_4PIN,
+	.poll_mode	= 1,
+};
+
 static struct spi_eeprom at25640a = {
 	.byte_len	= SZ_64K / 8,
 	.name		= "at25640a",
@@ -441,10 +455,11 @@ static struct spi_board_info dm355_evm_spi_info[] __initconst = {
 	{
 		.modalias	= "at25",
 		.platform_data	= &at25640a,
+		.controller_data = &davinci_spi_eeprom_spi_cfg,
 		.max_speed_hz	= 10 * 1000 * 1000,	/* at 3v3 */
 		.bus_num	= 0,
 		.chip_select	= 0,
-		.mode		= SPI_MODE_0,
+		.mode		= SPI_MODE_1,
 	},
 };
 
