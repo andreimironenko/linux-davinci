@@ -17,7 +17,7 @@
 #include <linux/gpio.h>
 
 #include <linux/spi/spi.h>
-
+#include <linux/spi/davinci_spi.h>
 #include <asm/mach/map.h>
 
 #include <mach/dm355.h>
@@ -365,9 +365,9 @@ static struct davinci_clk dm355_clks[] = {
 	CLK("davinci-asp.1", NULL, &asp1_clk),
 	CLK("davinci_mmc.0", NULL, &mmcsd0_clk),
 	CLK("davinci_mmc.1", NULL, &mmcsd1_clk),
-	CLK(NULL, "spi0", &spi0_clk),
-	CLK(NULL, "spi1", &spi1_clk),
-	CLK(NULL, "spi2", &spi2_clk),
+	CLK("spi_davinci.0", NULL, &spi0_clk),
+	CLK("spi_davinci.1", NULL, &spi1_clk),
+	CLK("spi_davinci.2", NULL, &spi2_clk),
 	CLK(NULL, "gpio", &gpio_clk),
 	CLK(NULL, "aemif", &aemif_clk),
 	CLK(NULL, "pwm0", &pwm0_clk),
@@ -386,6 +386,12 @@ static struct davinci_clk dm355_clks[] = {
 /*----------------------------------------------------------------------*/
 
 static u64 dm355_spi0_dma_mask = DMA_BIT_MASK(32);
+
+static struct davinci_spi_platform_data dm355_spi0_pdata = {
+	.version = DAVINCI_SPI_VERSION_1,
+	.num_chipselect = 2,
+	.instance = 0,
+};
 
 static struct resource dm355_spi0_resources[] = {
 	{
@@ -412,6 +418,7 @@ static struct platform_device dm355_spi0_device = {
 	.dev = {
 		.dma_mask = &dm355_spi0_dma_mask,
 		.coherent_dma_mask = DMA_BIT_MASK(32),
+		.platform_data = &dm355_spi0_pdata,
 	},
 	.num_resources = ARRAY_SIZE(dm355_spi0_resources),
 	.resource = dm355_spi0_resources,
