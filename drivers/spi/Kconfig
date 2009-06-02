@@ -77,6 +77,15 @@ config SPI_AU1550
 	  This driver can also be built as a module.  If so, the module
 	  will be called au1550_spi.
 
+config SPI_DAVINCI
+	tristate "SPI controller driver for DaVinci SoC"
+	depends on SPI_MASTER && ARCH_DAVINCI
+	select SPI_BITBANG
+	default y
+	help
+	  SPI master controller for DaVinci SPI modules.  Currently,
+	  SPI is only officially supported for DM646x, DM355, DM365 and DA8xx.
+
 config SPI_BITBANG
 	tristate "Utilities for Bitbanging SPI masters"
 	help
