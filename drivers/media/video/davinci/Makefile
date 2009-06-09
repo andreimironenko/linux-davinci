@@ -12,3 +12,9 @@ dm355_aew_driver-objs		+= dm355_aew.o dm355_aew_hw.o
 obj-$(CONFIG_VIDEO_DM355_AEW)	+= dm355_aew_driver.o
 dm355_ipipe_driver-objs 	+= dm355_ipipe.o dm355_ipipe_hw.o
 obj-$(CONFIG_VIDEO_DM355_IPIPE) += dm355_ipipe_driver.o
+
+# VPIF
+obj-$(CONFIG_VIDEO_DAVINCI_VPIF) += vpif.o
+
+#DM646x EVM Display driver
+obj-$(CONFIG_DISPLAY_DAVINCI_DM646X_EVM) += vpif_display.o

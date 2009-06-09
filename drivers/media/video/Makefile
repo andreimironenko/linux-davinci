@@ -162,6 +162,8 @@ obj-$(CONFIG_USB_VIDEO_CLASS)	+= uvc/
 
 obj-$(CONFIG_VIDEO_IR_I2C)  += ir-kbd-i2c.o
 
+obj-$(CONFIG_ARCH_DAVINCI)	+= davinci/
+
 EXTRA_CFLAGS += -Idrivers/media/dvb/dvb-core
 EXTRA_CFLAGS += -Idrivers/media/dvb/frontends
 EXTRA_CFLAGS += -Idrivers/media/common/tuners
