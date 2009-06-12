@@ -28,7 +28,7 @@
 #include <mach/serial.h>
 #include <mach/common.h>
 #include <mach/asp.h>
-
+#include <video/davincifb.h>
 #include "clock.h"
 #include "mux.h"
 
@@ -634,6 +634,41 @@ void dm644x_set_vpfe_config(struct vpfe_config *cfg)
 }
 
 /*----------------------------------------------------------------------*/
+static struct resource vpbe_resources[] = {
+	{
+		.start          = IRQ_VENCINT,
+		.end            = IRQ_VENCINT,
+		.flags          = IORESOURCE_IRQ,
+	},
+	{
+		.start          = OSD_REG_BASE,
+		.end            = OSD_REG_BASE + OSD_REG_SIZE,
+		.flags          = IORESOURCE_MEM,
+	},
+	{
+		.start          = VENC_REG_BASE,
+		.end            = VENC_REG_BASE + 0x150,
+		.flags          = IORESOURCE_MEM,
+	},
+};
+
+static u64 vpbe_dma_mask = DMA_BIT_MASK(32);
+
+static struct davinci_vpbe_platform_data dm644x_vpbe_pdata = {
+	.type = DM6446,
+};
+
+static struct platform_device vpbe_display_dev = {
+	.name		= "davinci_framebuffer",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(vpbe_resources),
+	.resource	= vpbe_resources,
+	.dev = {
+		.dma_mask		= &vpbe_dma_mask,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
+		.platform_data		= &dm644x_vpbe_pdata,
+	},
+};
 
 static struct map_desc dm644x_io_desc[] = {
 	{
@@ -770,6 +805,9 @@ static int __init dm644x_init_devices(void)
 	platform_device_register(&dm644x_emac_device);
 	platform_device_register(&dm644x_vpss_device);
 	platform_device_register(&vpfe_capture_dev);
+
+	/* Register VPBE display device */
+	platform_device_register(&vpbe_display_dev);
 
 	return 0;
 }
