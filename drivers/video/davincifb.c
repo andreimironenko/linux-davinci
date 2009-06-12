@@ -48,24 +48,77 @@
 #define TRIPLE_BUF	1
 #endif
 
+#define VPSS_EVTSEL				0x01c70814
+static void *__iomem osd_base_addr;
+static void *__iomem venc_base_addr;
+enum soc_type vpbe_soc;
+
 /*
  * display controller register I/O routines
  */
-static __inline__ u32 dispc_reg_in(u32 reg)
+inline u32 dispc_reg_in(u32 reg)
 {
 	return ioread32(IO_ADDRESS(reg));
 }
-static __inline__ u32 dispc_reg_out(u32 reg, u32 val)
+
+inline u32 dispc_reg_out(u32 reg, u32 val)
 {
 	iowrite32(val, IO_ADDRESS(reg));
 	return (val);
 }
-static __inline__ u32 dispc_reg_merge(u32 reg, u32 val, u32 mask)
+
+inline u32 dispc_reg_merge(u32 reg, u32 val, u32 mask)
 {
 	u32 new_val = (ioread32(IO_ADDRESS(reg)) & ~mask) | (val & mask);
 
 	iowrite32(new_val, IO_ADDRESS(reg));
 	return (new_val);
+}
+
+/* FOR OSD */
+inline u32 osd_reg_in(u32 reg)
+{
+	return __raw_readl(osd_base_addr + reg);
+}
+
+inline u32 osd_reg_out(u32 reg, u32 val)
+{
+	__raw_writel(val, (osd_base_addr + reg));
+
+	return val;
+}
+
+inline u32 osd_reg_merge(u32 reg, u32 val, u32 mask)
+{
+	u32 new_val = (__raw_readl((osd_base_addr + reg)) & ~mask) |
+			(val & mask);
+
+	__raw_writel(new_val, (osd_base_addr + reg));
+
+	return new_val;
+}
+
+/* FOR VENC */
+inline u32 venc_reg_in(u32 reg)
+{
+	return __raw_readl(venc_base_addr + reg);
+}
+
+inline u32 venc_reg_out(u32 reg, u32 val)
+{
+	__raw_writel(val, (venc_base_addr + reg));
+
+	return val;
+}
+
+inline u32 venc_reg_merge(u32 reg, u32 val, u32 mask)
+{
+	u32 new_val = (__raw_readl((venc_base_addr + reg)) & ~mask) |
+			(val & mask);
+
+	__raw_writel(new_val, (venc_base_addr + reg));
+
+	return new_val;
 }
 
 /* There are 4 framebuffers, each represented by an fb_info and
@@ -107,6 +160,12 @@ static struct dm_info {
 	dma_addr_t mmio_base_phys;
 	unsigned long mmio_base;
 	unsigned long mmio_size;
+
+	dma_addr_t venc_base_phys;
+	unsigned long venc_base;
+	unsigned long venc_size;
+
+	unsigned int vpbe_irq;
 
 	wait_queue_head_t vsync_wait;
 	unsigned long vsync_cnt;
@@ -294,7 +353,7 @@ static irqreturn_t davincifb_isr(int irq, void *arg)
 	struct dm_info *dm = (struct dm_info *)arg;
 	unsigned long addr=0;
 
-	if ((dispc_reg_in(VENC_VSTAT) & 0x00000010) == 0x10) {
+	if ((venc_reg_in(VENC_VSTAT) & 0x00000010) == 0x10) {
 		xchg(&addr, dm->osd0->sdram_address);
 		if (addr) {
 			set_sdram_params(dm->osd0->info.fix.id,
@@ -414,10 +473,10 @@ static void set_win_position(char *id, u32 xp, u32 yp, u32 xl, u32 yl)
 		i = 3;
 	}
 
-	dispc_reg_out(OSD_WINXP(i), xp);
-	dispc_reg_out(OSD_WINYP(i), yp);
-	dispc_reg_out(OSD_WINXL(i), xl);
-	dispc_reg_out(OSD_WINYL(i), yl);
+	osd_reg_out(OSD_WINXP(i), xp);
+	osd_reg_out(OSD_WINYP(i), yp);
+	osd_reg_out(OSD_WINXL(i), xl);
+	osd_reg_out(OSD_WINYL(i), yl);
 }
 
 static inline void get_win_position(struct dm_win_info *w,
@@ -603,13 +662,13 @@ static void set_interlaced(char *id, unsigned int on)
 	on = (on == 0) ? 0 : ~0;
 
 	if (is_win(id, VID0))
-		dispc_reg_merge(OSD_VIDWINMD, on, OSD_VIDWINMD_VFF0);
+		osd_reg_merge(OSD_VIDWINMD, on, OSD_VIDWINMD_VFF0);
 	else if (is_win(id, VID1))
-		dispc_reg_merge(OSD_VIDWINMD, on, OSD_VIDWINMD_VFF1);
+		osd_reg_merge(OSD_VIDWINMD, on, OSD_VIDWINMD_VFF1);
 	else if (is_win(id, OSD0))
-		dispc_reg_merge(OSD_OSDWIN0MD, on, OSD_OSDWIN0MD_OFF0);
+		osd_reg_merge(OSD_OSDWIN0MD, on, OSD_OSDWIN0MD_OFF0);
 	else if (is_win(id, OSD1))
-		dispc_reg_merge(OSD_OSDWIN1MD, on, OSD_OSDWIN1MD_OFF1);
+		osd_reg_merge(OSD_OSDWIN1MD, on, OSD_OSDWIN1MD_OFF1);
 }
 
 /* For zooming, we just have to set the start of framebuffer, the zoom factors
@@ -622,34 +681,34 @@ static void set_zoom(int WinID, int h_factor, int v_factor)
 {
 	switch (WinID) {
 	case 0:		//VID0
-		dispc_reg_merge(OSD_VIDWINMD,
+		osd_reg_merge(OSD_VIDWINMD,
 				h_factor << OSD_VIDWINMD_VHZ0_SHIFT,
 				OSD_VIDWINMD_VHZ0);
-		dispc_reg_merge(OSD_VIDWINMD,
+		osd_reg_merge(OSD_VIDWINMD,
 				v_factor << OSD_VIDWINMD_VVZ0_SHIFT,
 				OSD_VIDWINMD_VVZ0);
 		break;
 	case 1:		//VID1
-		dispc_reg_merge(OSD_VIDWINMD,
+		osd_reg_merge(OSD_VIDWINMD,
 				h_factor << OSD_VIDWINMD_VHZ1_SHIFT,
 				OSD_VIDWINMD_VHZ1);
-		dispc_reg_merge(OSD_VIDWINMD,
+		osd_reg_merge(OSD_VIDWINMD,
 				v_factor << OSD_VIDWINMD_VVZ1_SHIFT,
 				OSD_VIDWINMD_VVZ1);
 		break;
 	case 2:		//OSD0
-		dispc_reg_merge(OSD_OSDWIN0MD,
+		osd_reg_merge(OSD_OSDWIN0MD,
 				h_factor << OSD_OSDWIN0MD_OHZ0_SHIFT,
 				OSD_OSDWIN0MD_OHZ0);
-		dispc_reg_merge(OSD_OSDWIN0MD,
+		osd_reg_merge(OSD_OSDWIN0MD,
 				v_factor << OSD_OSDWIN0MD_OVZ0_SHIFT,
 				OSD_OSDWIN0MD_OVZ0);
 		break;
 	case 3:
-		dispc_reg_merge(OSD_OSDWIN1MD,
+		osd_reg_merge(OSD_OSDWIN1MD,
 				h_factor << OSD_OSDWIN1MD_OHZ1_SHIFT,
 				OSD_OSDWIN1MD_OHZ1);
-		dispc_reg_merge(OSD_OSDWIN1MD,
+		osd_reg_merge(OSD_OSDWIN1MD,
 				v_factor << OSD_OSDWIN1MD_OVZ1_SHIFT,
 				OSD_OSDWIN1MD_OVZ1);
 		break;
@@ -661,31 +720,77 @@ static void set_bg_color(u8 clut, u8 color_offset)
 {
 	clut = 0;		/* 0 = ROM, 1 = RAM */
 
-	dispc_reg_merge(OSD_MODE, OSD_MODE_BCLUT & clut, OSD_MODE_BCLUT);
-	dispc_reg_merge(OSD_MODE, color_offset << OSD_MODE_CABG_SHIFT,
+	osd_reg_merge(OSD_MODE, OSD_MODE_BCLUT & clut, OSD_MODE_BCLUT);
+	osd_reg_merge(OSD_MODE, color_offset << OSD_MODE_CABG_SHIFT,
 			OSD_MODE_CABG);
 }
 
 static void set_sdram_params(char *id, u32 addr, u32 line_length)
 {
-	/* The parameters to be written to the registers should be in
-	 * multiple of 32 bytes
-	 */
-	addr = addr;		/* div by 32 */
-	line_length = line_length / 32;
+	unsigned long fb_offset_32;
 
-	if (is_win(id, VID0)) {
-		dispc_reg_out(OSD_VIDWIN0ADR, addr);
-		dispc_reg_out(OSD_VIDWIN0OFST, line_length);
-	} else if (is_win(id, VID1)) {
-		dispc_reg_out(OSD_VIDWIN1ADR, addr);
-		dispc_reg_out(OSD_VIDWIN1OFST, line_length);
-	} else if (is_win(id, OSD0)) {
-		dispc_reg_out(OSD_OSDWIN0ADR, addr);
-		dispc_reg_out(OSD_OSDWIN0OFST, line_length);
-	} else if (is_win(id, OSD1)) {
-		dispc_reg_out(OSD_OSDWIN1ADR, addr);
-		dispc_reg_out(OSD_OSDWIN1OFST, line_length);
+	if (vpbe_soc == DM355) {
+		addr = addr;
+		line_length = line_length / 32;
+
+		fb_offset_32 = (addr - DAVINCI_DDR_BASE) >> 5;
+
+		if (is_win(id, VID0)) {
+			osd_reg_merge(OSD_VIDWINADH, fb_offset_32 >>
+					(16 - OSD_VIDWINADH_V0AH_SHIFT),
+					OSD_VIDWINADH_V0AH);
+			osd_reg_out(OSD_VIDWIN0ADR,
+					fb_offset_32 &
+					OSD_VIDWIN0ADL_V0AL);
+
+			osd_reg_out(OSD_VIDWIN0OFST, line_length);
+		} else if (is_win(id, VID1)) {
+			osd_reg_merge(OSD_VIDWINADH, fb_offset_32 >>
+					(16 - OSD_VIDWINADH_V1AH_SHIFT),
+					OSD_VIDWINADH_V1AH);
+			osd_reg_out(OSD_VIDWIN1ADL, fb_offset_32 &
+					OSD_VIDWIN1ADL_V1AL);
+
+			osd_reg_out(OSD_VIDWIN1OFST, line_length);
+		} else if (is_win(id, OSD0)) {
+
+			osd_reg_merge(OSD_OSDWINADH, fb_offset_32 >>
+					(16 - OSD_OSDWINADH_O0AH_SHIFT),
+					OSD_OSDWINADH_O0AH);
+			osd_reg_out(OSD_OSDWIN0ADL, fb_offset_32 &
+					OSD_OSDWIN0ADL_O0AL);
+
+			osd_reg_out(OSD_OSDWIN0OFST, line_length);
+		} else if (is_win(id, OSD1)) {
+			osd_reg_merge(OSD_OSDWINADH, fb_offset_32 >>
+					(16 - OSD_OSDWINADH_O1AH_SHIFT),
+					OSD_OSDWINADH_O1AH);
+			osd_reg_out(OSD_OSDWIN1ADL, fb_offset_32 &
+					OSD_OSDWIN1ADL_O1AL);
+
+			osd_reg_out(OSD_OSDWIN1OFST, line_length);
+		}
+	} else {
+		/*
+		 * The parameters to be written to the registers should be in
+		 * multiple of 32 bytes
+		 */
+		addr = addr;		/* div by 32 */
+		line_length = line_length / 32;
+
+		if (is_win(id, VID0)) {
+			osd_reg_out(OSD_VIDWIN0ADR, addr);
+			osd_reg_out(OSD_VIDWIN0OFST, line_length);
+		} else if (is_win(id, VID1)) {
+			osd_reg_out(OSD_VIDWIN1ADR, addr);
+			osd_reg_out(OSD_VIDWIN1OFST, line_length);
+		} else if (is_win(id, OSD0)) {
+			osd_reg_out(OSD_OSDWIN0ADR, addr);
+			osd_reg_out(OSD_OSDWIN0OFST, line_length);
+		} else if (is_win(id, OSD1)) {
+			osd_reg_out(OSD_OSDWIN1ADR, addr);
+			osd_reg_out(OSD_OSDWIN1OFST, line_length);
+		}
 	}
 }
 
@@ -695,17 +800,17 @@ static void set_win_enable(char *id, unsigned int on)
 
 	if (is_win(id, VID0))
 		/* Turning off VID0 use due to field inversion issue */
-		dispc_reg_merge(OSD_VIDWINMD, 0, OSD_VIDWINMD_ACT0);
+		osd_reg_merge(OSD_VIDWINMD, 0, OSD_VIDWINMD_ACT0);
 	else if (is_win(id, VID1))
-		dispc_reg_merge(OSD_VIDWINMD, on, OSD_VIDWINMD_ACT1);
+		osd_reg_merge(OSD_VIDWINMD, on, OSD_VIDWINMD_ACT1);
 	else if (is_win(id, OSD0))
-		dispc_reg_merge(OSD_OSDWIN0MD, on, OSD_OSDWIN0MD_OACT0);
+		osd_reg_merge(OSD_OSDWIN0MD, on, OSD_OSDWIN0MD_OACT0);
 	else if (is_win(id, OSD1)) {
 		/* The OACT1 bit is applicable only if OSD1 is not used as
 		 * the attribute window
 		 */
-		if (!(dispc_reg_in(OSD_OSDWIN1MD) & OSD_OSDWIN1MD_OASW))
-			dispc_reg_merge(OSD_OSDWIN1MD, on, OSD_OSDWIN1MD_OACT1);
+		if (!(osd_reg_in(OSD_OSDWIN1MD) & OSD_OSDWIN1MD_OASW))
+			osd_reg_merge(OSD_OSDWIN1MD, on, OSD_OSDWIN1MD_OACT1);
 	}
 }
 
@@ -714,15 +819,15 @@ static void set_win_mode(char *id)
 	if (is_win(id, VID0)) ;
 	else if (is_win(id, VID1)) {
 		if (dm->vid1->info.var.bits_per_pixel == 32)
-			dispc_reg_merge(OSD_MISCCT, ~0,
+			osd_reg_merge(OSD_MISCCT, ~0,
 					OSD_MISCCT_RGBWIN | OSD_MISCCT_RGBEN);
 	} else if (is_win(id, OSD0))
 		/* Set RGB565 mode */
-		dispc_reg_merge(OSD_OSDWIN0MD, OSD_OSDWIN0MD_RGB0E,
+		osd_reg_merge(OSD_OSDWIN0MD, OSD_OSDWIN0MD_RGB0E,
 				OSD_OSDWIN0MD_RGB0E);
 	else if (is_win(id, OSD1)) {
 		/* Set as attribute window */
-		dispc_reg_merge(OSD_OSDWIN1MD, OSD_OSDWIN1MD_OASW,
+		osd_reg_merge(OSD_OSDWIN1MD, OSD_OSDWIN1MD_OASW,
 				OSD_OSDWIN1MD_OASW);
 	}
 
@@ -918,7 +1023,7 @@ static int davincifb_pan_display(struct fb_var_screeninfo *var,
 	    var->xoffset * var->bits_per_pixel / 8;
 	start = (u32) w->fb_base_phys + offset;
 
-	if ((dispc_reg_in(VENC_VSTAT) & 0x00000010)==0x10)
+	if ((venc_reg_in(VENC_VSTAT) & 0x00000010) == 0x10)
 		set_sdram_params(info->fix.id, start, info->fix.line_length);
 	else
 		w->sdram_address = start;
@@ -1246,24 +1351,34 @@ static struct fb_info *init_fb_info(struct dm_win_info *w,
 
 static void davincifb_ntsc_composite_config(int on)
 {
+
+	if (vpbe_soc == DM355) {
+		venc_reg_out(VENC_CLKCTL, 0x01);
+		venc_reg_out(VENC_VIDCTL, 0);
+
+		/* DM355 Configure VDAC_CONFIG  */
+		dispc_reg_out(DM3XX_VDAC_CONFIG, 0x0E21A6B6);
+		osd_reg_out(OSD_MODE, 0x0);
+	}
+
 	if (on) {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 
 		/* Enable Composite output and start video encoder */
-		dispc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
+		venc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
 
 		/* Set REC656 Mode */
-		dispc_reg_out(VENC_YCCCTL, 0x1);
+		venc_reg_out(VENC_YCCCTL, 0x1);
 
 		/* Enable output mode and NTSC  */
-		dispc_reg_out(VENC_VMOD, 0x1003);
+		venc_reg_out(VENC_VMOD, 0x1003);
 
 		/* Enable all DACs  */
-		dispc_reg_out(VENC_DACTST, 0);
+		venc_reg_out(VENC_DACTST, 0);
 	} else {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 	}
 }
 
@@ -1271,25 +1386,25 @@ static void davincifb_ntsc_svideo_config(int on)
 {
 	if (on) {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 
 		/* Enable Composite output and start video encoder */
-		dispc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
+		venc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
 
 		/* Set REC656 Mode */
-		dispc_reg_out(VENC_YCCCTL, 0x1);
+		venc_reg_out(VENC_YCCCTL, 0x1);
 
 		/* Enable output mode and NTSC  */
-		dispc_reg_out(VENC_VMOD, 0x1003);
+		venc_reg_out(VENC_VMOD, 0x1003);
 
 		/* Enable S-Video Output; DAC B: S-Video Y, DAC C: S-Video C  */
-		dispc_reg_out(VENC_DACSEL, 0x210);
+		venc_reg_out(VENC_DACSEL, 0x210);
 
 		/* Enable all DACs  */
-		dispc_reg_out(VENC_DACTST, 0);
+		venc_reg_out(VENC_DACTST, 0);
 	} else {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 	}
 }
 
@@ -1297,48 +1412,58 @@ static void davincifb_ntsc_component_config(int on)
 {
 	if (on) {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 
 		/* Enable Composite output and start video encoder */
-		dispc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
+		venc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
 
 		/* Set REC656 Mode */
-		dispc_reg_out(VENC_YCCCTL, 0x1);
+		venc_reg_out(VENC_YCCCTL, 0x1);
 
 		/* Enable output mode and NTSC  */
-		dispc_reg_out(VENC_VMOD, 0x1003);
+		venc_reg_out(VENC_VMOD, 0x1003);
 
 		/* Enable Component output; DAC A: Y, DAC B: Pb, DAC C: Pr  */
-		dispc_reg_out(VENC_DACSEL, 0x543);
+		venc_reg_out(VENC_DACSEL, 0x543);
 
 		/* Enable all DACs  */
-		dispc_reg_out(VENC_DACTST, 0);
+		venc_reg_out(VENC_DACTST, 0);
 	} else {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 	}
 }
 
 static void davincifb_pal_composite_config(int on)
 {
+
+	if (vpbe_soc == DM355) {
+		venc_reg_out(VENC_CLKCTL, 0x1);
+		venc_reg_out(VENC_VIDCTL, 0);
+
+		/* DM355 Configure VDAC_CONFIG  */
+		dispc_reg_out(DM3XX_VDAC_CONFIG, 0x0E21A6B6);
+		osd_reg_out(OSD_MODE, 0x0);
+	}
+
 	if (on) {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 
 		/* Enable Composite output and start video encoder */
-		dispc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
+		venc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
 
 		/* Set REC656 Mode */
-		dispc_reg_out(VENC_YCCCTL, 0x1);
+		venc_reg_out(VENC_YCCCTL, 0x1);
 
 		/* Enable output mode and PAL  */
-		dispc_reg_out(VENC_VMOD, 0x1043);
+		venc_reg_out(VENC_VMOD, 0x1043);
 
 		/* Enable all DACs  */
-		dispc_reg_out(VENC_DACTST, 0);
+		venc_reg_out(VENC_DACTST, 0);
 	} else {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 	}
 }
 
@@ -1346,25 +1471,25 @@ static void davincifb_pal_svideo_config(int on)
 {
 	if (on) {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 
 		/* Enable Composite output and start video encoder */
-		dispc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
+		venc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
 
 		/* Set REC656 Mode */
-		dispc_reg_out(VENC_YCCCTL, 0x1);
+		venc_reg_out(VENC_YCCCTL, 0x1);
 
 		/* Enable output mode and PAL  */
-		dispc_reg_out(VENC_VMOD, 0x1043);
+		venc_reg_out(VENC_VMOD, 0x1043);
 
 		/* Enable S-Video Output; DAC B: S-Video Y, DAC C: S-Video C  */
-		dispc_reg_out(VENC_DACSEL, 0x210);
+		venc_reg_out(VENC_DACSEL, 0x210);
 
 		/* Enable all DACs  */
-		dispc_reg_out(VENC_DACTST, 0);
+		venc_reg_out(VENC_DACTST, 0);
 	} else {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 	}
 }
 
@@ -1372,25 +1497,25 @@ static void davincifb_pal_component_config(int on)
 {
 	if (on) {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 
 		/* Enable Composite output and start video encoder */
-		dispc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
+		venc_reg_out(VENC_VMOD, (VENC_VMOD_VIE | VENC_VMOD_VENC));
 
 		/* Set REC656 Mode */
-		dispc_reg_out(VENC_YCCCTL, 0x1);
+		venc_reg_out(VENC_YCCCTL, 0x1);
 
 		/* Enable output mode and PAL  */
-		dispc_reg_out(VENC_VMOD, 0x1043);
+		venc_reg_out(VENC_VMOD, 0x1043);
 
 		/* Enable Component output; DAC A: Y, DAC B: Pb, DAC C: Pr  */
-		dispc_reg_out(VENC_DACSEL, 0x543);
+		venc_reg_out(VENC_DACSEL, 0x543);
 
 		/* Enable all DACs  */
-		dispc_reg_out(VENC_DACTST, 0);
+		venc_reg_out(VENC_DACTST, 0);
 	} else {
 		/* Reset video encoder module */
-		dispc_reg_out(VENC_VMOD, 0);
+		venc_reg_out(VENC_VMOD, 0);
 	}
 }
 
@@ -1413,7 +1538,7 @@ static inline void fix_default_var(struct dm_win_info *w,
  */
 static int davincifb_remove(struct platform_device *pdev)
 {
-	free_irq(IRQ_VENCINT, &dm);
+	free_irq(dm->vpbe_irq, &dm);
 
 	/* Cleanup all framebuffers */
 	if (dm->osd0) {
@@ -1440,6 +1565,10 @@ static int davincifb_remove(struct platform_device *pdev)
 		iounmap((void *)dm->mmio_base);
 	release_mem_region(dm->mmio_base_phys, dm->mmio_size);
 
+	if (dm->venc_base)
+		iounmap((void *)dm->venc_base);
+	release_mem_region(dm->venc_base_phys, dm->venc_size);
+
 	return 0;
 }
 
@@ -1449,12 +1578,38 @@ static int davincifb_remove(struct platform_device *pdev)
 static int davincifb_probe(struct platform_device *pdev)
 {
 	struct fb_info *info;
+	struct resource *res;
+	unsigned int val;
+	struct davinci_vpbe_platform_data *vpbe_pdata;
 
 	if (dmparams.windows == 0)
 		return 0;	/* user disabled all windows through bootargs */
 	dm->dev = &pdev->dev;
-	dm->mmio_base_phys = OSD_REG_BASE;
-	dm->mmio_size = OSD_REG_SIZE;
+
+	vpbe_pdata = pdev->dev.platform_data;
+	vpbe_soc = vpbe_pdata->type;
+
+	if (vpbe_soc == DM355)
+		printk(KERN_INFO "DM355 FBDEV DRIVER \n");
+	else if (vpbe_soc == DM6446)
+		printk(KERN_INFO "DM6446 FBDEV DRIVER \n");
+
+	/* Get VPBE irq resource */
+	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+	if (!res) {
+		dev_err(dm->dev, "Unable to get VPBE VENC interrupt");
+		return -ENOENT;
+	}
+	dm->vpbe_irq = res->start;
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	if (!res) {
+		dev_err(dm->dev, "Unable to get register address map\n");
+		goto release_irq;
+	}
+
+	dm->mmio_base_phys = res->start; /*OSD_REG_BASE*/
+	dm->mmio_size = res->end - res->start + 1; /*OSD_REG_SIZE*/
 
 	if (!request_mem_region
 	    (dm->mmio_base_phys, dm->mmio_size, MODULE_NAME)) {
@@ -1464,11 +1619,37 @@ static int davincifb_probe(struct platform_device *pdev)
 
 	/* map the regions */
 	dm->mmio_base =
-	    (unsigned long)ioremap(dm->mmio_base_phys, dm->mmio_size);
+	    (unsigned long)ioremap_nocache(dm->mmio_base_phys, dm->mmio_size);
 	if (!dm->mmio_base) {
 		dev_err(dm->dev, ": cannot map MMIO\n");
 		goto release_mmio;
 	}
+
+	osd_base_addr = (void *__iomem)dm->mmio_base;
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!res) {
+		dev_err(dm->dev, "Unable to get register address map\n");
+		goto release_mmio1;
+	}
+	dm->venc_base_phys = res->start; /*VENC_REG_BASE*/
+	dm->venc_size = res->end - res->start + 1; /*VENC_REG_SIZE*/
+
+	if (!request_mem_region
+	    (dm->venc_base_phys, dm->venc_size, MODULE_NAME)) {
+		dev_err(dm->dev, ": cannot reserve VENC MMIO region\n");
+		return -ENODEV;
+	}
+
+	/* map the regions */
+	dm->venc_base =
+	    (unsigned long)ioremap_nocache(dm->venc_base_phys, dm->venc_size);
+	if (!dm->venc_base) {
+		dev_err(dm->dev, ": cannot map  VENC MMIO\n");
+		goto release_mmio1;
+	}
+
+	venc_base_addr = (void *__iomem)dm->venc_base;
 
 	/* initialize the vsync wait queue */
 	init_waitqueue_head(&dm->vsync_wait);
@@ -1497,19 +1678,26 @@ static int davincifb_probe(struct platform_device *pdev)
 	/* Initialize the VPSS Clock Control register */
 	dispc_reg_out(VPSS_CLKCTL, 0x18);
 
+	if (vpbe_soc == DM355) {
+		val = dispc_reg_in(VPSS_EVTSEL);
+		val &= ~0xf;
+		val |= 0x4;
+		dispc_reg_out(VPSS_EVTSEL, val);
+	}
+
 	/* Set Base Pixel X and Base Pixel Y */
-	dispc_reg_out(OSD_BASEPX, BASEX);
-	dispc_reg_out(OSD_BASEPY, BASEY);
+	osd_reg_out(OSD_BASEPX, BASEX);
+	osd_reg_out(OSD_BASEPY, BASEY);
 
 	/* Reset OSD registers to default. */
-	dispc_reg_out(OSD_MODE, 0);
-	dispc_reg_out(OSD_OSDWIN0MD, 0);
+	osd_reg_out(OSD_MODE, 0);
+	osd_reg_out(OSD_OSDWIN0MD, 0);
 
 	/* Set blue background color */
 	set_bg_color(0, 162);
 
 	/* Field Inversion Workaround */
-	dispc_reg_out(OSD_MODE, 0x200);
+	osd_reg_out(OSD_MODE, 0x200);
 
 	/* Setup VID0 framebuffer */
 	if (!(dmparams.windows & (1 << VID0))) {
@@ -1641,7 +1829,7 @@ static int davincifb_probe(struct platform_device *pdev)
 	}
 
 	/* install our interrupt service routine */
-	if (request_irq(IRQ_VENCINT, davincifb_isr, IRQF_SHARED, MODULE_NAME,
+	if (request_irq(dm->vpbe_irq, davincifb_isr, IRQF_SHARED, MODULE_NAME,
 			dm)) {
 		dev_err(dm->dev, MODULE_NAME
 			": could not install interrupt service routine\n");
@@ -1656,8 +1844,13 @@ static int davincifb_probe(struct platform_device *pdev)
       exit:
 	davincifb_remove(pdev);
 	iounmap((void *)dm->mmio_base);
-      release_mmio:
+	iounmap((void *)dm->venc_base);
+release_mmio:
+	release_mem_region(dm->venc_base_phys, dm->venc_size);
+release_mmio1:
 	release_mem_region(dm->mmio_base_phys, dm->mmio_size);
+release_irq:
+	free_irq(dm->vpbe_irq, &dm);
 	return (-ENODEV);
 }
 
@@ -1685,7 +1878,7 @@ static struct platform_driver davincifb_driver = {
 	.probe		= davincifb_probe,
 	.remove		= davincifb_remove,
 	.driver		= {
-		.name	= MODULE_NAME,
+		.name	= "davinci_framebuffer",
 		.owner	= THIS_MODULE,
 	},
 };
@@ -1714,7 +1907,7 @@ int __init davincifb_init(void)
 
 	/* Register the driver with LDM */
 	if (platform_driver_register(&davincifb_driver)) {
-		pr_debug("failed to register omapfb driver\n");
+		pr_debug("failed to register davinci fb driver\n");
 		return -ENODEV;
 	}
 
