@@ -154,6 +154,15 @@ enum davinci_dm355_index {
 	DM355_EVT8_ASP1_TX,
 	DM355_EVT9_ASP1_RX,
 	DM355_EVT26_MMC0_RX,
+
+	/* Video In Pin Mux */
+	DM355_VIN_PCLK,
+	DM355_VIN_CAM_WEN,
+	DM355_VIN_CAM_VD,
+	DM355_VIN_CAM_HD,
+	DM355_VIN_YIN_EN,
+	DM355_VIN_CINL_EN,
+	DM355_VIN_CINH_EN,
 };
 
 enum davinci_dm365_index {
