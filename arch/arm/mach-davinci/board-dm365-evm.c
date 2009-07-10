@@ -38,7 +38,9 @@
 #include <mach/common.h>
 #include <mach/mmc.h>
 #include <mach/nand.h>
-
+#include <linux/spi/spi.h>
+#include <linux/spi/eeprom.h>
+#include <linux/spi/davinci_spi.h>
 
 static inline int have_imager(void)
 {
@@ -464,6 +466,38 @@ static void __init dm365_evm_map_io(void)
 	dm365_init();
 }
 
+struct davinci_spi_config dm365_spi_eeprom_spi_cfg = {
+	.wdelay		= 0,
+	.odd_parity	= 0,
+	.parity_enable	= 0,
+	.wait_enable	= 0,
+	.timer_disable	= 0,
+	.clk_internal	= 1,
+	.cs_hold	= 1,
+	.intr_level	= 0,
+	.pin_op_modes	= OPMODE_SPISCS_4PIN,
+	.poll_mode	= 1,
+};
+
+static struct spi_eeprom at25640 = {
+	.byte_len	= SZ_64K / 8,
+	.name		= "at25640",
+	.page_size	= 32,
+	.flags		= EE_ADDR2,
+};
+
+static struct spi_board_info dm365_evm_spi_info[] __initconst = {
+	{
+		.modalias	= "at25",
+		.platform_data	= &at25640,
+		.controller_data = &dm365_spi_eeprom_spi_cfg,
+		.max_speed_hz	= 10 * 1000 * 1000,	/* at 3v3 */
+		.bus_num	= 0,
+		.chip_select	= 0,
+		.mode		= SPI_MODE_1,
+	},
+};
+
 static __init void dm365_evm_init(void)
 {
 	evm_init_i2c();
@@ -476,6 +510,9 @@ static __init void dm365_evm_init(void)
 
 	/* maybe setup mmc1/etc ... _after_ mmc0 */
 	evm_init_cpld();
+
+	dm365_init_spi0(BIT(0), dm365_evm_spi_info,
+			ARRAY_SIZE(dm365_evm_spi_info));
 }
 
 static __init void dm365_evm_irq_init(void)
