@@ -28,6 +28,11 @@
 #define DM646X_ASYNC_EMIF_CONTROL_BASE	0x20008000
 #define DM646X_ASYNC_EMIF_CS2_SPACE_BASE 0x42000000
 
+/* System module register offsets */
+#define PINMUX0				0x00
+#define PINMUX1				0x04
+#define BOOTCFG				0x14
+
 void __init dm646x_init(void);
 void __init dm646x_init_mcasp0(struct snd_platform_data *pdata);
 void __init dm646x_init_mcasp1(struct snd_platform_data *pdata);
