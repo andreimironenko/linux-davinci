@@ -267,7 +267,6 @@ static irqreturn_t davinci_interrupt(int irq, void *__hci)
 	irqreturn_t	retval = IRQ_NONE;
 	struct musb	*musb = __hci;
 	void __iomem	*tibase = musb->ctrl_base;
-	struct cppi	*cppi;
 	u32		tmp;
 
 	spin_lock_irqsave(&musb->lock, flags);

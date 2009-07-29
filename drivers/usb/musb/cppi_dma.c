@@ -371,7 +371,7 @@ cppi_rndis_update(struct cppi_channel *c, int is_rx,
 	}
 }
 
-#if MUSB_DEBUG > 0
+#ifdef CONFIG_USB_MUSB_DEBUG
 static void cppi_dump_rxbd(const char *tag, struct cppi_descriptor *bd)
 {
 	pr_debug("RXBD/%s %08x: "
@@ -384,7 +384,7 @@ static void cppi_dump_rxbd(const char *tag, struct cppi_descriptor *bd)
 
 static void cppi_dump_rxq(int level, const char *tag, struct cppi_channel *rx)
 {
-#if MUSB_DEBUG > 0
+#ifdef CONFIG_USB_MUSB_DEBUG
 	struct cppi_descriptor 	*bd;
 
 	if (!_dbg_level(level))
