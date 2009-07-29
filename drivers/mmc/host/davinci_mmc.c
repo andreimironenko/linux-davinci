@@ -31,6 +31,8 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/mmc/mmc.h>
+#include <linux/timer.h>
+#include <linux/mmc/card.h>
 
 #include <mach/mmc.h>
 #include <mach/edma.h>
@@ -65,8 +67,8 @@
 #define DAVINCI_MMCBLNC      0x60
 #define DAVINCI_SDIOCTL      0x64
 #define DAVINCI_SDIOST0      0x68
-#define DAVINCI_SDIOEN       0x6C
-#define DAVINCI_SDIOST       0x70
+#define DAVINCI_SDIOIEN      0x6C
+#define DAVINCI_SDIOIST      0x70
 #define DAVINCI_MMCFIFOCTL   0x74 /* FIFO Control Register             */
 
 /* DAVINCI_MMCCTL definitions */
@@ -133,6 +135,23 @@
 /* MMCSD Init clock in Hz in opendrain mode */
 #define MMCSD_INIT_CLOCK		200000
 
+/* DAVINCI_SDIOCTL definitions */
+#define SDIOCTL_RDWTRQ_SET	  (1 << 0)
+#define SDIOCTL_RDWTCR_SET	  (1 << 0)
+
+/* DAVINCI_SDIOST0 definitions */
+#define SDIOST0_DAT1_HI		  (1 << 0)
+#define SDIOST0_INTPRD		  (1 << 1)
+#define SDIOST0_RDWTST		  (1 << 2)
+
+/* DAVINCI_SDIOIEN definitions */
+#define SDIOIEN_IOINTEN		  (1 << 0)
+#define SDIOIEN_RWSEN		  (1 << 1)
+
+/* DAVINCI_SDIOIST definitions */
+#define SDIOIST_IOINT		  (1 << 0)
+#define SDIOIST_RWS			  (1 << 1)
+
 /*
  * One scatterlist dma "segment" is at most MAX_CCNT rw_threshold units,
  * and we handle up to NR_SG segments.  MMC_BLOCK_BOUNCE kicks in only
@@ -181,6 +200,10 @@ struct mmc_davinci_host {
 	u32 rxdma, txdma;
 	bool use_dma;
 	bool do_dma;
+	struct timer_list sdio_timer;
+	u32 sdioInt;
+	/* For sdio irq enabling and disabling */
+	spinlock_t sdio_lock;
 
 	/* Scatterlist DMA uses one or more parameter RAM entries:
 	 * the main one (associated with rxdma or txdma) plus zero or
@@ -202,6 +225,41 @@ struct mmc_davinci_host {
 	unsigned ns_in_one_cycle;
 };
 
+static void mmc_enable_sdio_irq(struct mmc_host *mmc, int enable);
+
+static inline void davinci_sdio_intr_chck(struct mmc_davinci_host *host)
+{
+	if (host->mmc->caps & MMC_CAP_SDIO_IRQ) {
+		if (!((readl(host->base + DAVINCI_SDIOST0)) & SDIOST0_DAT1_HI)
+				&& host->sdioInt) {
+			writel(SDIOIST_IOINT, host->base + DAVINCI_SDIOIST);
+			mmc_signal_sdio_irq(host->mmc);
+		}
+	}
+}
+
+static inline void davinci_cmd_dat_reset(struct mmc_davinci_host *host)
+{
+	u32 temp = 0;
+
+	if (host->mmc->card) {
+		if (mmc_card_sdio(host->mmc->card)) {
+			temp = readl(host->base + DAVINCI_MMCCTL);
+			writel(temp | MMCCTL_CMDRST | MMCCTL_DATRST,
+					host->base + DAVINCI_MMCCTL);
+
+			temp &= ~(MMCCTL_CMDRST | MMCCTL_DATRST);
+			writel(temp, host->base + DAVINCI_MMCCTL);
+		}
+	}
+}
+
+static void davinci_sdio_timer(unsigned long data)
+{
+	struct mmc_davinci_host *host = (struct mmc_davinci_host *)data;
+
+	davinci_sdio_intr_chck(host);
+}
 
 /* PIO only */
 static void mmc_davinci_sg_to_buf(struct mmc_davinci_host *host)
@@ -386,6 +444,15 @@ static void mmc_davinci_dma_cb(unsigned channel, u16 ch_status, void *data)
 {
 	if (DMA_COMPLETE != ch_status) {
 		struct mmc_davinci_host *host = data;
+
+		if (!(host->data)) {
+			printk(KERN_ERR "DMA Event Miss / NULL Transfr\n");
+			edma_stop(host->txdma);
+			edma_clean_channel(host->txdma);
+			edma_stop(host->rxdma);
+			edma_clean_channel(host->rxdma);
+			return;
+		}
 
 		/* Currently means:  DMA Event Missed, or "null" transfer
 		 * request was seen.  In the future, TC errors (like bad
@@ -664,6 +731,14 @@ mmc_davinci_prepare_data(struct mmc_davinci_host *host, struct mmc_request *req)
 	host->buffer = NULL;
 	host->bytes_left = data->blocks * data->blksz;
 
+	if (host->mmc->card) {
+		if (mmc_card_sdio(host->mmc->card)) {
+			if (data->blksz == 64) {
+				mdelay(5);
+			}
+		}
+	}
+
 	/* For now we try to use DMA whenever we won't need partial FIFO
 	 * reads or writes, either for the whole transfer (as tested here)
 	 * or for any individual scatterlist segment (tested when we call
@@ -705,6 +780,8 @@ static void mmc_davinci_request(struct mmc_host *mmc, struct mmc_request *req)
 		mmc_request_done(mmc, req);
 		return;
 	}
+
+	davinci_cmd_dat_reset(host);
 
 	host->do_dma = 0;
 	mmc_davinci_prepare_data(host, req);
@@ -826,12 +903,9 @@ static void mmc_davinci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 static void
 mmc_davinci_xfer_done(struct mmc_davinci_host *host, struct mmc_data *data)
 {
-	host->data = NULL;
-	host->data_dir = DAVINCI_MMC_DATADIR_NONE;
+	davinci_abort_dma(host);
 
 	if (host->do_dma) {
-		davinci_abort_dma(host);
-
 		dma_unmap_sg(mmc_dev(host->mmc), data->sg, data->sg_len,
 			     (data->flags & MMC_DATA_WRITE)
 			     ? DMA_TO_DEVICE
@@ -839,11 +913,18 @@ mmc_davinci_xfer_done(struct mmc_davinci_host *host, struct mmc_data *data)
 		host->do_dma = false;
 	}
 
+	host->data = NULL;
+	host->data_dir = DAVINCI_MMC_DATADIR_NONE;
+
+	davinci_cmd_dat_reset(host);
+
 	if (!data->stop || (host->cmd && host->cmd->error)) {
 		mmc_request_done(host->mmc, data->mrq);
 		writel(0, host->base + DAVINCI_MMCIM);
 	} else
 		mmc_davinci_start_command(host, data->stop);
+
+	davinci_sdio_intr_chck(host);
 }
 
 static void mmc_davinci_cmd_done(struct mmc_davinci_host *host,
@@ -870,6 +951,7 @@ static void mmc_davinci_cmd_done(struct mmc_davinci_host *host,
 		mmc_request_done(host->mmc, cmd->mrq);
 		writel(0, host->base + DAVINCI_MMCIM);
 	}
+	davinci_sdio_intr_chck(host);
 }
 
 static void
@@ -895,6 +977,17 @@ static irqreturn_t mmc_davinci_irq(int irq, void *dev_id)
 	int end_transfer = 0;
 	struct mmc_data *data = host->data;
 
+	if (host->mmc->caps & MMC_CAP_SDIO_IRQ) {
+		status = readl(host->base + DAVINCI_SDIOIST);
+		if (status & SDIOIST_IOINT) {
+			dev_dbg(mmc_dev(host->mmc),
+					"SDIO interrupt status %x\n", status);
+			writel(status | SDIOIST_IOINT,
+					host->base + DAVINCI_SDIOIST);
+			mmc_signal_sdio_irq(host->mmc);
+		}
+	}
+
 	if (host->cmd == NULL && host->data == NULL) {
 		status = readl(host->base + DAVINCI_MMCST0);
 		dev_dbg(mmc_dev(host->mmc),
@@ -904,6 +997,7 @@ static irqreturn_t mmc_davinci_irq(int irq, void *dev_id)
 		return IRQ_NONE;
 	}
 
+	davinci_sdio_intr_chck(host);
 	status = readl(host->base + DAVINCI_MMCST0);
 	qstatus = status;
 
@@ -1031,11 +1125,41 @@ static int mmc_davinci_get_ro(struct mmc_host *mmc)
 	return config->get_ro(pdev->id);
 }
 
+static void mmc_enable_sdio_irq(struct mmc_host *mmc, int enable)
+{
+	struct mmc_davinci_host *host = mmc_priv(mmc);
+	unsigned long flags;
+
+	spin_lock_irqsave(&host->sdio_lock, flags);
+
+	if (enable) {
+		if (!((readl(host->base + DAVINCI_SDIOST0))
+			    & SDIOST0_DAT1_HI)) {
+			writel(SDIOIST_IOINT,
+					host->base + DAVINCI_SDIOIST);
+			mmc_signal_sdio_irq(host->mmc);
+		}else {
+			host->sdioInt = 1;
+			mod_timer(&host->sdio_timer, jiffies + (HZ/100));
+			writel(readl(host->base + DAVINCI_SDIOIEN) |
+				SDIOIEN_IOINTEN, host->base + DAVINCI_SDIOIEN);
+		}
+	} else {
+		host->sdioInt = 0;
+		del_timer(&host->sdio_timer);
+		writel(readl(host->base + DAVINCI_SDIOIEN) & ~SDIOIEN_IOINTEN,
+				host->base + DAVINCI_SDIOIEN);
+	}
+
+	spin_unlock_irqrestore(&host->sdio_lock, flags);
+}
+
 static struct mmc_host_ops mmc_davinci_ops = {
 	.request	= mmc_davinci_request,
 	.set_ios	= mmc_davinci_set_ios,
 	.get_cd		= mmc_davinci_get_cd,
 	.get_ro		= mmc_davinci_get_ro,
+	.enable_sdio_irq	= mmc_enable_sdio_irq,
 };
 
 /*----------------------------------------------------------------------*/
@@ -1131,6 +1255,12 @@ static int __init davinci_mmcsd_probe(struct platform_device *pdev)
 
 	/* REVISIT:  someday, support IRQ-driven card detection.  */
 	mmc->caps |= MMC_CAP_NEEDS_POLL;
+
+	mmc->caps |= MMC_CAP_SDIO_IRQ;
+	spin_lock_init(&host->sdio_lock);
+	setup_timer(&host->sdio_timer, davinci_sdio_timer,
+		 (unsigned long)host);
+	host->sdioInt = 0;
 
 	if (!pdata || pdata->wires == 4 || pdata->wires == 0)
 		mmc->caps |= MMC_CAP_4_BIT_DATA;
