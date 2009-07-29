@@ -99,10 +99,12 @@ enum {
 
 static struct davinci_pcm_dma_params davinci_i2s_pcm_out = {
 	.name = "I2S PCM Stereo out",
+	.data_type = 2,
 };
 
 static struct davinci_pcm_dma_params davinci_i2s_pcm_in = {
 	.name = "I2S PCM Stereo in",
+	.data_type = 2,
 };
 
 struct davinci_mcbsp_dev {
