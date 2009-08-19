@@ -6,6 +6,8 @@ obj-$(CONFIG_VIDEO_DAVINCI_VPIF) += vpif.o
 
 #DM646x EVM Display driver
 obj-$(CONFIG_DISPLAY_DAVINCI_DM646X_EVM) += vpif_display.o
+#DM646x EVM Capture driver
+obj-$(CONFIG_CAPTURE_DAVINCI_DM646X_EVM) += vpif_capture.o
 
 # Capture: DM6446, DM355, DM365
 obj-$(CONFIG_VIDEO_VPSS_SYSTEM) += vpss.o
