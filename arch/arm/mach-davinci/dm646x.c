@@ -323,6 +323,13 @@ static struct clk vpif1_clk = {
 	.flags = ALWAYS_ENABLED,
 };
 
+static struct clk usb_clk = {
+	.name = "usb",
+	.parent = &pll1_sysclk3,
+	.lpsc = DAVINCI_LPSC_USB,
+	.flags = ALWAYS_ENABLED,
+};
+
 struct davinci_clk dm646x_clks[] = {
 	CLK(NULL, "ref", &ref_clk),
 	CLK(NULL, "aux", &aux_clkin),
@@ -364,6 +371,7 @@ struct davinci_clk dm646x_clks[] = {
 	CLK("palm_bk3710", NULL, &ide_clk),
 	CLK(NULL, "vpif0", &vpif0_clk),
 	CLK(NULL, "vpif1", &vpif1_clk),
+	CLK(NULL, "usb", &usb_clk),
 	CLK(NULL, NULL, NULL),
 };
 
