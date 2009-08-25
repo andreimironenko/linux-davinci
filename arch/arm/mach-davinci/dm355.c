@@ -495,6 +495,12 @@ EVT_CFG(DM355,  EVT8_ASP1_TX,	      0,    1,    0,     false)
 EVT_CFG(DM355,  EVT9_ASP1_RX,	      1,    1,    0,     false)
 EVT_CFG(DM355,  EVT26_MMC0_RX,	      2,    1,    0,     false)
 
+MUX_CFG(DM355,	VOUT_FIELD,	1,   18,    3,	  1,	 false)
+MUX_CFG(DM355,	VOUT_FIELD_G70,	1,   18,    3,	  0,	 false)
+MUX_CFG(DM355,	VOUT_HVSYNC,	1,   16,    1,	  0,	 false)
+MUX_CFG(DM355,	VOUT_COUTL_EN,	1,   0,     0xff, 0x55,  false)
+MUX_CFG(DM355,	VOUT_COUTH_EN,	1,   8,     0xff, 0x55,  false)
+
 MUX_CFG(DM355,	VIN_PCLK,	0,   14,    1,    1,	 false)
 MUX_CFG(DM355,	VIN_CAM_WEN,	0,   13,    1,    1,	 false)
 MUX_CFG(DM355,	VIN_CAM_VD,	0,   12,    1,    1,	 false)
