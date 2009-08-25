@@ -41,7 +41,7 @@
 
 #include "musb_core.h"
 
-#ifdef CONFIG_MACH_DAVINCI_EVM
+#if defined(CONFIG_MACH_DAVINCI_EVM) || defined(CONFIG_MACH_DAVINCI_DM6467_EVM)
 #define GPIO_nVBUS_DRV		144
 #endif
 
