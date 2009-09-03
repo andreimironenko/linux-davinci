@@ -550,7 +550,7 @@ static int set_vpif_clock(int mux_mode, int hd)
 }
 
 static struct vpif_subdev_info dm646x_vpif_subdev[] = {
-#ifdef CONFIG_VIDEO_ADV7343
+#if defined(CONFIG_VIDEO_ADV7343) || defined(CONFIG_VIDEO_ADV7343_MODULE)
 	{
 		.name	= "adv7343",
 		.board_info = {
@@ -564,7 +564,7 @@ static struct vpif_subdev_info dm646x_vpif_subdev[] = {
 			I2C_BOARD_INFO("ths7303", 0x2c),
 		},
 	},
-#ifdef CONFIG_VIDEO_THS8200
+#if defined(CONFIG_VIDEO_THS8200) || defined(CONFIG_VIDEO_THS8200_MODULE)
 	{
 		.name	= "ths8200",
 		.board_info = {
