@@ -17,6 +17,7 @@
 #include <mach/hardware.h>
 #include <media/davinci/vpfe_capture.h>
 #include <mach/emac.h>
+#include <mach/asp.h>
 
 #define DM365_EMAC_BASE			(0x01D07000)
 #define DM365_EMAC_CNTRL_OFFSET		(0x0000)
@@ -31,5 +32,6 @@ void dm365_set_vpfe_config(struct vpfe_config *cfg);
 struct spi_board_info;
 void dm365_init_spi0(unsigned chipselect_mask,
 		struct spi_board_info *info, unsigned len);
+void __init dm365_init_asp(struct snd_platform_data *pdata);
 
 #endif /* __ASM_ARCH_DM365_H */
