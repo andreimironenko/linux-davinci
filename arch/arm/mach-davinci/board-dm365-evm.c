@@ -24,6 +24,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/nand.h>
+#include <linux/input.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/eeprom.h>
 
@@ -41,6 +42,7 @@
 #include <mach/common.h>
 #include <mach/mmc.h>
 #include <mach/nand.h>
+#include <mach/keyscan.h>
 #include <mach/gpio.h>
 #include <linux/videodev2.h>
 #include <media/tvp514x.h>
@@ -231,6 +233,38 @@ static struct davinci_i2c_platform_data i2c_pdata = {
 	.bus_freq	= 400	/* kHz */,
 	.bus_delay	= 0	/* usec */,
 };
+
+#ifdef CONFIG_KEYBOARD_DAVINCI
+static unsigned short dm365evm_keymap[] = {
+	KEY_KP2,
+	KEY_LEFT,
+	KEY_EXIT,
+	KEY_DOWN,
+	KEY_ENTER,
+	KEY_UP,
+	KEY_KP1,
+	KEY_RIGHT,
+	KEY_MENU,
+	KEY_RECORD,
+	KEY_REWIND,
+	KEY_KPMINUS,
+	KEY_STOP,
+	KEY_FASTFORWARD,
+	KEY_KPPLUS,
+	KEY_PLAYPAUSE,
+	0
+};
+
+static struct davinci_ks_platform_data dm365evm_ks_data = {
+	.keymap		= dm365evm_keymap,
+	.keymapsize	= ARRAY_SIZE(dm365evm_keymap),
+	.rep		= 1,
+	/* Scan period = strobe + interval */
+	.strobe		= 0x5,
+	.interval	= 0x2,
+	.matrix_type	= DAVINCI_KEYSCAN_MATRIX_4X4,
+};
+#endif
 
 static int cpld_mmc_get_cd(int module)
 {
@@ -683,6 +717,10 @@ static __init void dm365_evm_init(void)
 	dm365_init_asp(&dm365_evm_snd_data);
 	dm365_init_spi0(BIT(0), dm365_evm_spi_info,
 			ARRAY_SIZE(dm365_evm_spi_info));
+
+#ifdef CONFIG_KEYBOARD_DAVINCI
+	dm365_init_ks(&dm365evm_ks_data);
+#endif
 }
 
 static __init void dm365_evm_irq_init(void)
