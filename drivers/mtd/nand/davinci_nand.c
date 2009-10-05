@@ -32,6 +32,7 @@
 #include <linux/io.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
+#include <linux/delay.h>
 
 #include <mach/nand.h>
 
@@ -360,6 +361,7 @@ compare:
 	 */
 	davinci_nand_writel(info, NANDFCR_OFFSET,
 			davinci_nand_readl(info, NANDFCR_OFFSET) | BIT(13));
+	udelay(info->chip.chip_delay);
 	for (;;) {
 		u32	fsr = davinci_nand_readl(info, NANDFSR_OFFSET);
 
@@ -611,7 +613,7 @@ static int __init nand_davinci_probe(struct platform_device *pdev)
 
 	info->chip.IO_ADDR_R	= vaddr;
 	info->chip.IO_ADDR_W	= vaddr;
-	info->chip.chip_delay	= 0;
+	info->chip.chip_delay	= 20;
 	info->chip.select_chip	= nand_davinci_select_chip;
 
 	/* options such as NAND_USE_FLASH_BBT or 16-bit widths */
