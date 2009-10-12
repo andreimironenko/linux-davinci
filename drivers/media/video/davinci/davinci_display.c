@@ -143,9 +143,7 @@ static int davinci_buffer_prepare(struct videobuf_queue *q,
 				  struct videobuf_buffer *vb,
 				  enum v4l2_field field)
 {
-	/* Get the file handle object and layer object */
-	struct davinci_fh *fh = q->priv_data;
-	struct display_obj *layer = fh->layer;
+	unsigned long addr;
 	int ret = 0;
 
 	dev_dbg(davinci_display_dev, "<davinci_buffer_prepare>\n");
@@ -156,31 +154,28 @@ static int davinci_buffer_prepare(struct videobuf_queue *q,
 		vb->height = davinci_dm.mode_info.yres;
 		vb->size = vb->width * vb->height;
 		vb->field = field;
-	}
 
-	/* if user pointer memory mechanism is used, get the physical
-	 * address of the buffer
-	 */
-	ret = videobuf_iolock(q, vb, NULL);
-	if (ret < 0)
-		return ret;
-	
-	if (V4L2_MEMORY_MMAP == layer->memory)
-		vb->boff = videobuf_to_dma_contig(vb);
+		ret = videobuf_iolock(q, vb, NULL);
+		if (ret < 0)
+			goto buf_align_exit;
 
-	if (V4L2_MEMORY_USERPTR == layer->memory) {
-		vb->boff = davinci_uservirt_to_phys(vb->baddr);
-		if (!ISALIGNED(vb->boff)) {
-			dev_err(davinci_display_dev, "buffer_prepare:offset is \
-				not aligned to 8 bytes\n");
-			return -EINVAL;
+		addr = videobuf_to_dma_contig(vb);
+
+		if (q->streaming) {
+			if (!ISALIGNED(addr)) {
+				dev_err(davinci_display_dev, "buffer_prepare:offset is \
+					not aligned to 32 bytes\n");
+				goto buf_align_exit;
+			}
 		}
+		vb->state = VIDEOBUF_PREPARED;
 	}
 
-	vb->state = VIDEOBUF_PREPARED;
-
-	dev_dbg(davinci_display_dev, "</davinci_buffer_prepare>\n");
 	return 0;
+
+buf_align_exit:
+	return -EINVAL;
+
 }
 /*
  * davinci_buffer_setup()
@@ -313,10 +308,7 @@ static void davinci_display_isr(unsigned int event, void *dispObj)
 			/* Mark status of the buffer as active */
 			layer->nextFrm->state = VIDEOBUF_ACTIVE;
 			
-			if (V4L2_MEMORY_USERPTR == layer->memory)
-				addr = layer->curFrm->boff;
-			else
-				addr = videobuf_to_dma_contig(layer->curFrm);
+			addr = videobuf_to_dma_contig(layer->curFrm);
 			davinci_disp_start_layer(layer->layer_info.id,
 						 addr,
 						 davinci_dm.cbcr_ofst);
@@ -398,10 +390,7 @@ static void davinci_display_isr(unsigned int event, void *dispObj)
 				 */
 				layer->nextFrm->state = VIDEOBUF_ACTIVE;
 
-				if (V4L2_MEMORY_USERPTR == layer->memory)
-					addr = layer->curFrm->boff;
-				else
-					addr = videobuf_to_dma_contig(layer->curFrm);
+				addr = videobuf_to_dma_contig(layer->curFrm);
 				davinci_disp_start_layer(layer->layer_info.id,
 							addr,
 							davinci_dm.cbcr_ofst);
@@ -426,11 +415,8 @@ static int davinci_config_layer(enum davinci_display_device_id id);
 static int davinci_set_video_display_params(struct display_obj *layer)
 {
 	unsigned long addr;
-	/* change from LSP 2.10 */
-	if (V4L2_MEMORY_USERPTR == layer->memory)
-		addr = layer->curFrm->boff;
-	else
-		addr = videobuf_to_dma_contig(layer->curFrm);
+
+	addr = videobuf_to_dma_contig(layer->curFrm);
 	/* Set address in the display registers */
 	davinci_disp_start_layer(layer->layer_info.id,
 				 addr,
@@ -1068,14 +1054,7 @@ static int vpbe_qbuf(struct file *file, void *priv,
 		return -EACCES;
 	}
 
-	if (!(list_empty(&layer->dma_queue)) ||
-		(layer->curFrm != layer->nextFrm) ||
-		!(layer->started) ||
-		(layer->started && (0 == layer->field_id))) {
-		
-		ret = videobuf_qbuf(&layer->buffer_queue, p);
-		return ret;
-	}
+	ret = videobuf_qbuf(&layer->buffer_queue, p);
 
 	return ret;
 }
@@ -1406,15 +1385,6 @@ static unsigned int davinci_poll(struct file *filep, poll_table *wait)
 
 	if (layer->started)
 		err = videobuf_poll_stream(filep, &layer->buffer_queue, wait);
-
-	if (err & POLLIN) {
-		err &= (~POLLIN);
-		err |= POLLOUT;
-	}
-	if (err & POLLRDNORM) {
-		err &= (~POLLRDNORM);
-		err |= POLLWRNORM;
-	}
 	
 	dev_dbg(davinci_display_dev, "</davinci_poll>");
 	return err;
