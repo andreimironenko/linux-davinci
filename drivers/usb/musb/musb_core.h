@@ -655,6 +655,7 @@ extern int musb_platform_get_vbus_status(struct musb *musb);
 
 extern int __init musb_platform_init(struct musb *musb);
 extern int musb_platform_exit(struct musb *musb);
+extern irqreturn_t davinci_interrupt(int irq, void *__hci);
 #ifdef CONFIG_USB_MUSB_HDRC_HCD
 extern void musb_gb_work(struct work_struct *data);
 #endif
