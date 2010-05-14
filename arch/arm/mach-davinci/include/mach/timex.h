@@ -17,6 +17,6 @@
  * linux/jiffies.h) are not used directly in code. Currently none of the
  * code relevant to DaVinci platform depends on these values directly.
  */
-#define CLOCK_TICK_RATE 27000000
+#define CLOCK_TICK_RATE 33000000
 
 #endif /* __ASM_ARCH_TIMEX_H__ */
