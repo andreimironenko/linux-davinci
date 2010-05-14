@@ -24,6 +24,8 @@
 #include <linux/i2c.h>
 #include <linux/i2c/at24.h>
 #include <linux/i2c/pcf857x.h>
+#include <linux/spi/spi.h>
+#include <linux/spi/eeprom.h>
 
 #include <media/tvp514x.h>
 
@@ -717,6 +719,24 @@ static void __init davinci_map_io(void)
 	cdce_clk_init();
 }
 
+static struct spi_eeprom at25640a = {
+	.byte_len	= SZ_64K / 2,
+	.name		= "at25640a",
+	.page_size	= 64,
+	.flags		= EE_ADDR2,
+};
+
+static struct spi_board_info dm646x_evm_spi_info[] __initconst = {
+	{
+		.modalias	= "at25",
+		.platform_data	= &at25640a,
+		.max_speed_hz	= 10 * 1000 * 1000,	/* at 3v3 */
+		.bus_num	= 0,
+		.chip_select	= 0,
+		.mode		= SPI_MODE_0,
+	},
+};
+
 static struct davinci_uart_config uart_config __initdata = {
 	.enabled_uarts = (1 << 0),
 };
@@ -740,6 +760,8 @@ static __init void evm_init(void)
 
 	soc_info->emac_pdata->phy_mask = DM646X_EVM_PHY_MASK;
 	soc_info->emac_pdata->mdio_max_freq = DM646X_EVM_MDIO_FREQUENCY;
+
+	dm646x_init_spi0(dm646x_evm_spi_info, ARRAY_SIZE(dm646x_evm_spi_info));
 }
 
 #define DM646X_EVM_REF_FREQ		27000000
