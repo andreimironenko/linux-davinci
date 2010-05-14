@@ -17,6 +17,8 @@
  * linux/jiffies.h) are not used directly in code. Currently none of the
  * code relevant to DaVinci platform depends on these values directly.
  */
-#define CLOCK_TICK_RATE 33000000
+/* The deafult source frequency for the timers is the 27MHz clock */
+#define CLOCK_TICK_RATE CONFIG_OSC_CLK_FREQ
+
 
 #endif /* __ASM_ARCH_TIMEX_H__ */
