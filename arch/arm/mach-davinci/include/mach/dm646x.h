@@ -37,6 +37,8 @@ void __init dm646x_init(void);
 void __init dm646x_init_mcasp0(struct snd_platform_data *pdata);
 void __init dm646x_init_mcasp1(struct snd_platform_data *pdata);
 void __init dm646x_board_setup_refclk(struct clk *clk);
+struct spi_board_info;
+void dm646x_init_spi0(struct spi_board_info *info, unsigned len);
 
 void dm646x_video_init(void);
 
