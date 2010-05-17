@@ -295,12 +295,6 @@ static int validate_ccdc_param(struct ccdc_config_params_raw *ccdcparam)
 		return -EINVAL;
 	}
 
-	if (ccdcparam->data_sz < CCDC_DATA_16BITS ||
-	    ccdcparam->data_sz > CCDC_DATA_8BITS) {
-		dev_dbg(ccdc_cfg.dev, "Invalid value of data size\n");
-		return -EINVAL;
-	}
-
 	if (ccdcparam->alaw.enable) {
 		if (ccdcparam->alaw.gama_wd < CCDC_GAMMA_BITS_13_4 ||
 		    ccdcparam->alaw.gama_wd > CCDC_GAMMA_BITS_09_0) {
@@ -309,7 +303,7 @@ static int validate_ccdc_param(struct ccdc_config_params_raw *ccdcparam)
 		}
 	}
 
-	if (ccdcparam->blk_clamp.b_clamp_enable) {
+	if (ccdcparam->blk_clamp.enable) {
 		if (ccdcparam->blk_clamp.sample_pixel < CCDC_SAMPLE_1PIXELS ||
 		    ccdcparam->blk_clamp.sample_pixel > CCDC_SAMPLE_16PIXELS) {
 			dev_dbg(ccdc_cfg.dev,
@@ -422,7 +416,7 @@ static void ccdc_config_black_clamp(struct ccdc_black_clamp *bclamp)
 {
 	u32 val;
 
-	if (!bclamp->b_clamp_enable) {
+	if (!bclamp->enable) {
 		/* configure DCSub */
 		regw(bclamp->dc_sub & CCDC_BLK_DC_SUB_MASK, DCSUB);
 		regw(0x0000, CLAMP);
@@ -654,8 +648,7 @@ static int ccdc_config_raw(void)
 		((params->pix_fmt & CCDC_PIX_FMT_MASK) << CCDC_PIX_FMT_SHIFT));
 
 	/* set pack for alaw compression */
-	if ((config_params->data_sz == CCDC_DATA_8BITS) ||
-	     config_params->alaw.enable)
+	if (config_params->alaw.enable)
 		val |= CCDC_DATA_PACK_ENABLE;
 
 	/* Configure for LPF */
@@ -728,8 +721,7 @@ static int ccdc_config_raw(void)
 		CCDC_HSIZE_FLIP_SHIFT;
 
 	/* If pack 8 is enable then 1 pixel will take 1 byte */
-	if ((config_params->data_sz == CCDC_DATA_8BITS) ||
-	     config_params->alaw.enable) {
+	if (config_params->alaw.enable) {
 		val |= (((params->win.width) + 31) >> 5) &
 			CCDC_HSIZE_VAL_MASK;
 
@@ -881,8 +873,7 @@ static unsigned int ccdc_get_line_length(void)
 	unsigned int len;
 
 	if (ccdc_cfg.if_type == VPFE_RAW_BAYER) {
-		if ((config_params->alaw.enable) ||
-		    (config_params->data_sz == CCDC_DATA_8BITS))
+		if (config_params->alaw.enable) ||
 			len = ccdc_cfg.bayer.win.width;
 		else
 			len = ccdc_cfg.bayer.win.width * 2;
