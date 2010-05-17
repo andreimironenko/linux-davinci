@@ -81,7 +81,7 @@ static struct ccdc_oper_config {
 	.ycbcr = {
 		.pix_fmt = CCDC_PIXFMT_YCBCR_8BIT,
 		.frm_fmt = CCDC_FRMFMT_INTERLACED,
-		.win = CCDC_WIN_PAL,
+		.win = CCDC_WIN_NTSC,
 		.fid_pol = VPFE_PINPOL_POSITIVE,
 		.vd_pol = VPFE_PINPOL_POSITIVE,
 		.hd_pol = VPFE_PINPOL_POSITIVE,
@@ -830,8 +830,11 @@ static int ccdc_set_hw_if_params(struct vpfe_hw_if_param *params)
 		ccdc_cfg.ycbcr.vd_pol = params->vdpol;
 		ccdc_cfg.ycbcr.hd_pol = params->hdpol;
 		break;
+	case VPFE_RAW_BAYER:
+		ccdc_cfg.bayer.vd_pol = params->vdpol;
+		ccdc_cfg.bayer.hd_pol = params->hdpol;
+		break;
 	default:
-		/* TODO add support for raw bayer here */
 		return -EINVAL;
 	}
 	return 0;
