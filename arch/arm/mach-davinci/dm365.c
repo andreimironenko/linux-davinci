@@ -1211,7 +1211,7 @@ static struct resource isif_resource[] = {
 	},
 };
 static struct platform_device dm365_isif_dev = {
-	.name           = "isif",
+	.name           = "dm365_isif",
 	.id             = -1,
 	.num_resources  = ARRAY_SIZE(isif_resource),
 	.resource       = isif_resource,

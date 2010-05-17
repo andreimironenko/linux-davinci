@@ -383,7 +383,7 @@ static struct vpfe_config vpfe_cfg = {
 	.sub_devs = vpfe_sub_devs,
 	.i2c_adapter_id = 1,
 	.card_name = "DM365 EVM",
-	.ccdc = "ISIF",
+	.ccdc = "DM365 ISIF",
 };
 
 static void __init evm_init_i2c(void)
