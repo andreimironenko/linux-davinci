@@ -623,10 +623,7 @@ static void vpfe_schedule_next_buffer(struct vpfe_device *vpfe_dev)
 					struct videobuf_buffer, queue);
 	list_del(&vpfe_dev->next_frm->queue);
 	vpfe_dev->next_frm->state = VIDEOBUF_ACTIVE;
-	if (V4L2_MEMORY_USERPTR == vpfe_dev->memory)
-		addr = vpfe_dev->cur_frm->boff;
-	else
-		addr = videobuf_to_dma_contig(vpfe_dev->next_frm);
+	addr = videobuf_to_dma_contig(vpfe_dev->next_frm);
 	ccdc_dev->hw_ops.setfbaddr(addr);
 }
 
@@ -634,10 +631,7 @@ static void vpfe_schedule_bottom_field(struct vpfe_device *vpfe_dev)
 {
 	unsigned long addr;
 
-	if (V4L2_MEMORY_USERPTR == vpfe_dev->memory)
-		addr = vpfe_dev->cur_frm->boff;
-	else
-		addr = videobuf_to_dma_contig(vpfe_dev->cur_frm);
+	addr = videobuf_to_dma_contig(vpfe_dev->cur_frm);
 	addr += vpfe_dev->field_off;
 	ccdc_dev->hw_ops.setfbaddr(addr);
 }
@@ -661,7 +655,6 @@ static irqreturn_t vpfe_isr(int irq, void *dev_id)
 	enum v4l2_field field;
 	int fid;
 
-	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "\nStarting vpfe_isr...\n");
 	field = vpfe_dev->fmt.fmt.pix.field;
 
 	/* if streaming not started, don't do anything */
@@ -674,8 +667,6 @@ static irqreturn_t vpfe_isr(int irq, void *dev_id)
 
 	if (field == V4L2_FIELD_NONE) {
 		/* handle progressive frame capture */
-		v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev,
-			"frame format is progressive...\n");
 		if (vpfe_dev->cur_frm != vpfe_dev->next_frm)
 			vpfe_process_buffer_complete(vpfe_dev);
 		return IRQ_HANDLED;
@@ -686,8 +677,6 @@ static irqreturn_t vpfe_isr(int irq, void *dev_id)
 
 	/* switch the software maintained field id */
 	vpfe_dev->field_id ^= 1;
-	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "field id = %x:%x.\n",
-		fid, vpfe_dev->field_id);
 	if (fid == vpfe_dev->field_id) {
 		/* we are in-sync here,continue */
 		if (fid == 0) {
@@ -732,8 +721,6 @@ static irqreturn_t vpfe_isr(int irq, void *dev_id)
 static irqreturn_t vdint1_isr(int irq, void *dev_id)
 {
 	struct vpfe_device *vpfe_dev = dev_id;
-
-	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "\nInside vdint1_isr...\n");
 
 	/* if streaming not started, don't do anything */
 	if (!vpfe_dev->started)
@@ -864,7 +851,7 @@ static const struct v4l2_file_operations vpfe_fops = {
 	.owner = THIS_MODULE,
 	.open = vpfe_open,
 	.release = vpfe_release,
-	.unlocked_ioctl = video_ioctl2,
+	.ioctl = video_ioctl2,
 	.mmap = vpfe_mmap,
 	.poll = vpfe_poll
 };
@@ -1457,8 +1444,10 @@ static int vpfe_videobuf_prepare(struct videobuf_queue *vq,
 {
 	struct vpfe_fh *fh = vq->priv_data;
 	struct vpfe_device *vpfe_dev = fh->vpfe_dev;
+	unsigned long addr;
+	int ret;
 
-	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "vpfe_buffer_prepare\n");
+	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "vpfe_videobuf_prepare\n");
 
 	/* If buffer is not initialized, initialize it */
 	if (VIDEOBUF_NEEDS_INIT == vb->state) {
@@ -1466,20 +1455,19 @@ static int vpfe_videobuf_prepare(struct videobuf_queue *vq,
 		vb->height = vpfe_dev->fmt.fmt.pix.height;
 		vb->size = vpfe_dev->fmt.fmt.pix.sizeimage;
 		vb->field = field;
+
+		ret = videobuf_iolock(vq, vb, NULL);
+		if (ret < 0)
+			return ret;
+
+		addr = videobuf_to_dma_contig(vb);
+		/* Make sure user addresses are aligned to 32 bytes */
+		if (!ALIGN(addr, 32))
+			return -EINVAL;
+
+		vb->state = VIDEOBUF_PREPARED;
 	}
 
-	if (V4L2_MEMORY_USERPTR == vpfe_dev->memory) {
-		if (!vb->baddr) {
-			v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev,
-				"buffer address is 0\n");
-			return -EINVAL;
-		}
-		vb->boff = vpfe_uservirt_to_phys(vpfe_dev, vb->baddr);
-		/* Make sure user addresses are aligned to 32 bytes */
-		if (!ALIGN(vb->boff, 32))
-			return -EINVAL;
-	}
-	vb->state = VIDEOBUF_PREPARED;
 	return 0;
 }
 
@@ -1491,15 +1479,13 @@ static void vpfe_videobuf_queue(struct videobuf_queue *vq,
 	struct vpfe_device *vpfe_dev = fh->vpfe_dev;
 	unsigned long flags;
 
-	v4l2_dbg(1, debug, &vpfe_dev->v4l2_dev, "vpfe_buffer_queue\n");
-
 	/* add the buffer to the DMA queue */
 	spin_lock_irqsave(&vpfe_dev->dma_queue_lock, flags);
 	list_add_tail(&vb->queue, &vpfe_dev->dma_queue);
-	spin_unlock_irqrestore(&vpfe_dev->dma_queue_lock, flags);
 
 	/* Change state of the buffer */
 	vb->state = VIDEOBUF_QUEUED;
+	spin_unlock_irqrestore(&vpfe_dev->dma_queue_lock, flags);
 }
 
 static void vpfe_videobuf_release(struct videobuf_queue *vq,
@@ -1515,10 +1501,8 @@ static void vpfe_videobuf_release(struct videobuf_queue *vq,
 	 * We need to flush the buffer from the dma queue since
 	 * they are de-allocated
 	 */
-	spin_lock_irqsave(&vpfe_dev->dma_queue_lock, flags);
-	INIT_LIST_HEAD(&vpfe_dev->dma_queue);
-	spin_unlock_irqrestore(&vpfe_dev->dma_queue_lock, flags);
-	videobuf_dma_contig_free(vq, vb);
+	if (vpfe_dev->memory == V4L2_MEMORY_MMAP)
+		videobuf_dma_contig_free(vq, vb);
 	vb->state = VIDEOBUF_NEEDS_INIT;
 }
 
@@ -1617,6 +1601,7 @@ static int vpfe_qbuf(struct file *file, void *priv,
 		v4l2_err(&vpfe_dev->v4l2_dev, "fh->io_allowed\n");
 		return -EACCES;
 	}
+
 	return videobuf_qbuf(&vpfe_dev->buffer_queue, p);
 }
 
@@ -1754,10 +1739,7 @@ static int vpfe_streamon(struct file *file, void *priv,
 	vpfe_dev->cur_frm->state = VIDEOBUF_ACTIVE;
 	/* Initialize field_id and started member */
 	vpfe_dev->field_id = 0;
-	if (V4L2_MEMORY_USERPTR == vpfe_dev->memory)
-		addr = vpfe_dev->cur_frm->boff;
-	else
-		addr = videobuf_to_dma_contig(vpfe_dev->cur_frm);
+	addr = videobuf_to_dma_contig(vpfe_dev->cur_frm);
 
 	/* Calculate field offset */
 	vpfe_calculate_offsets(vpfe_dev);
