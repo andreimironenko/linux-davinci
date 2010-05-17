@@ -88,9 +88,9 @@ int vpss_select_ccdc_source(enum vpss_ccdc_source_sel src_sel);
 /* enable/disable a vpss clock, 0 - success, -1 - failure */
 int vpss_enable_clock(enum vpss_clock_sel clock_sel, int en);
 /* set sync polarity, only for DM365*/
-void dm365_vpss_set_sync_pol(struct vpss_sync_pol);
+void vpss_set_sync_pol(struct vpss_sync_pol);
 /* set the PG_FRAME_SIZE register, only for DM365 */
-void dm365_vpss_set_pg_frame_size(struct vpss_pg_frame_size);
+void vpss_set_pg_frame_size(struct vpss_pg_frame_size);
 
 /* wbl reset for dm644x */
 enum vpss_wbl_sel {
@@ -105,4 +105,41 @@ enum vpss_wbl_sel {
 };
 /* clear wbl overflow flag for DM6446 */
 int vpss_clear_wbl_overflow(enum vpss_wbl_sel wbl_sel);
+
+enum dm355_int_mem_sel {
+	DM355_INT_MEM_IPIPE,
+	DM355_INT_MEM_CFALD,
+};
+void vpss_dm355_assign_int_memory_master(enum dm355_int_mem_sel master);
+
+enum dm355_dfc_mem_sel {
+	DM355_DFC_MEM_IPIPE,
+	DM355_DFC_MEM_CCDC,
+};
+void vpss_dm355_assign_dfc_memory_master(enum dm355_dfc_mem_sel master);
+
+enum dm355_rblctrl {
+	DM355_RBLCTRL_IPIPEIF,
+	DM355_RBLCTRL_CFALD,
+	DM355_RBLCTRL_H3A,
+};
+void vpss_dm355_assign_rblctrl_master(enum dm355_rblctrl master);
+
+enum dm355_wblctrl {
+	DM355_WBLCTRL_IPIPE,
+	DM355_WBLCTRL_CFALD,
+};
+void vpss_dm355_assign_wblctrl_master(enum dm355_wblctrl master);
+void vpss_dm355_ipipe_enable_any_address(int en);
+/**
+ * vpss_check_and_clear_interrupt - check and clear interrupt
+ * @irq - common enumerator for IRQ
+ *
+ * Following return values used:-
+ * 0 - interrupt occured and cleared
+ * 1 - interrupt not occured 
+ * 2 - interrupt status not available
+ */
+int vpss_dma_complete_interrupt(void);
+
 #endif
