@@ -129,9 +129,16 @@ static struct platform_device davinci_nand_device = {
 #define HAS_ATA 0
 #endif
 
+#if defined(CONFIG_CIR)
+#define HAS_CIR 1
+#else
+#define HAS_CIR 0
+#endif
+
 /* CPLD Register 0 bits to control ATA */
 #define DM646X_EVM_ATA_RST		BIT(0)
 #define DM646X_EVM_ATA_PWD		BIT(1)
+#define DM646X_EVM_CIR_UART             BIT(5)
 
 /* Setup DM6467 for PCI mode. In case of default EVM, the CPLD along with FET
  * switches takes care of switching to PCI Boot mode when the EVM is put in
@@ -209,6 +216,29 @@ static int cpld_reg0_probe(struct i2c_client *client,
 		/* Clear ATA_RSTn and ATA_PWD bits to enable ATA operation. */
 		i2c_transfer(client->adapter, msg, 1);
 		data &= ~(DM646X_EVM_ATA_RST | DM646X_EVM_ATA_PWD);
+		i2c_transfer(client->adapter, msg + 1, 1);
+	}
+
+	if (HAS_CIR) {
+		u8 data;
+		struct i2c_msg msg[2] = {
+			{
+				.addr = client->addr,
+				.flags = I2C_M_RD,
+				.len = 1,
+				.buf = &data,
+			},
+			{
+				.addr = client->addr,
+				.flags = 0,
+				.len = 1,
+				.buf = &data,
+			},
+		};
+
+		/* Clear UART CIR to enable cir operation. */
+		i2c_transfer(client->adapter, msg, 1);
+		data &= ~(DM646X_EVM_CIR_UART);
 		i2c_transfer(client->adapter, msg + 1, 1);
 	}
 
@@ -893,6 +923,8 @@ static __init void evm_init(void)
 			pr_warning("WARNING: both PCI and IDE are "
 					"enabled, but they share some pins.\n"
 					"\tDisable PCI for IDE support.\n");
+		if (HAS_CIR)
+			dm646x_init_cir_device();
 		if (HAS_NAND)
 			pr_warning("WARNING: both PCI and NAND are "
 					"enabled, but they share AEMIF pins.\n"
