@@ -419,6 +419,7 @@ static struct davinci_spi_platform_data dm355_spi0_pdata = {
 	.cs_hold	= 1,
 	.intr_level	= 0,
 	.poll_mode	= 1,	/* 0 -> interrupt mode 1-> polling mode */
+	.use_dma	= 1,	/* when 1, value in poll_mode is ignored */
 	.c2tdelay	= 0,
 	.t2cdelay	= 0,
 };
