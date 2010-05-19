@@ -477,7 +477,8 @@ static int davinci_pcm_dma_request(struct snd_pcm_substream *substream)
 
 	/* Request asp master DMA channel */
 	link = prtd->asp_channel = edma_alloc_channel(params->channel,
-			davinci_pcm_dma_irq, substream, EVENTQ_0);
+			davinci_pcm_dma_irq, substream,
+			prtd->params->eventq_no);
 	if (link < 0)
 		goto exit1;
 

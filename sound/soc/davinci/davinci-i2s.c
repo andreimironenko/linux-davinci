@@ -524,6 +524,7 @@ EXPORT_SYMBOL_GPL(davinci_i2s_dai);
 static int davinci_i2s_probe(struct platform_device *pdev)
 {
 	struct davinci_mcbsp_dev *dev;
+	struct snd_platform_data *pdata;
 	struct resource *mem, *ioarea, *res;
 	int ret;
 
@@ -545,6 +546,8 @@ static int davinci_i2s_probe(struct platform_device *pdev)
 		ret = -ENOMEM;
 		goto err_release_region;
 	}
+
+	pdata = pdev->dev.platform_data;
 	if (pdata) {
 		dev->enable_channel_combine = pdata->enable_channel_combine;
 		dev->dma_params[SNDRV_PCM_STREAM_PLAYBACK].sram_size =
@@ -575,6 +578,8 @@ static int davinci_i2s_probe(struct platform_device *pdev)
 		goto err_free_mem;
 	}
 	dev->dma_params[SNDRV_PCM_STREAM_PLAYBACK].channel = res->start;
+	dev->dma_params[SNDRV_PCM_STREAM_PLAYBACK].eventq_no =
+					pdata ? pdata->eventq_no : EVENTQ_0;
 
 	res = platform_get_resource(pdev, IORESOURCE_DMA, 1);
 	if (!res) {
