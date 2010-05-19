@@ -25,6 +25,7 @@
 #include <linux/cdev.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
+#include <linux/slab.h>
 #include <asm/uaccess.h>
 #include <linux/device.h>
 #include <linux/platform_device.h>
