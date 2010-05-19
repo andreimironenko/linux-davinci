@@ -60,6 +60,7 @@ struct davinci_venc_state {
 	dma_addr_t venc_base_phys;
 	unsigned long venc_base;
 	unsigned long venc_size;
+	bool invert_field;
 };
 
 static struct davinci_venc_state venc_state;
@@ -1150,17 +1151,14 @@ void davinci_enc_priv_setmode(struct vid_enc_device_mgr *mgr)
 			davinci_enc_set_1080i(&mgr->current_mode);
 	}
 
-/* TODO */
-#if 0
 	/* turn off ping-pong buffer and field inversion to fix
 	 * the image shaking problem in 1080I mode. The problem i.d. by the
 	 * DM6446 Advisory 1.3.8 is not seen in 1080I mode, but the ping-pong
 	 * buffer workaround created a shaking problem.
 	 */
-	if ((cpu_is_davinci_dm644x_pg1x() || cpu_is_davinci_dm357()) &&
-		strcmp(mgr->current_mode.name, VID_ENC_STD_1080I_30) == 0)
+	if ((venc->invert_field) &&
+		(strcmp(mgr->current_mode.name, VID_ENC_STD_1080I_30) == 0))
 		davinci_disp_set_field_inversion(0);
-#endif
 
 	return;
 }
@@ -1186,6 +1184,7 @@ EXPORT_SYMBOL(davinci_disp_is_second_field);
 
 static int davinci_venc_probe(struct platform_device *pdev)
 {
+	struct davinci_venc_platform_data *pdata = pdev->dev.platform_data;
 	struct resource *res;
 
 	venc->vdev = &pdev->dev;
@@ -1208,6 +1207,8 @@ static int davinci_venc_probe(struct platform_device *pdev)
 		dev_err(venc->vdev, "Unable to map VENC MMIO\n");
 		goto release_venc;
 	}
+
+	venc->invert_field = pdata->invert_field;
 
 	return 0;
 
