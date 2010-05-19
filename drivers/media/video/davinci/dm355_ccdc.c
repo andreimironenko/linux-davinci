@@ -873,7 +873,7 @@ static unsigned int ccdc_get_line_length(void)
 	unsigned int len;
 
 	if (ccdc_cfg.if_type == VPFE_RAW_BAYER) {
-		if (config_params->alaw.enable) ||
+		if (config_params->alaw.enable)
 			len = ccdc_cfg.bayer.win.width;
 		else
 			len = ccdc_cfg.bayer.win.width * 2;
