@@ -19,6 +19,7 @@
 #include <linux/i2c/pca953x.h>
 #include <linux/mfd/tps6507x.h>
 #include <linux/gpio.h>
+#include <linux/delay.h>
 #include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
@@ -447,11 +448,13 @@ static struct davinci_mmc_config da850_mmc_config = {
 
 static void da850_panel_power_ctrl(int val)
 {
-	/* lcd backlight */
-	gpio_set_value(DA850_LCD_BL_PIN, val);
-
 	/* lcd power */
 	gpio_set_value(DA850_LCD_PWR_PIN, val);
+
+	mdelay(200);
+
+	/* lcd backlight */
+	gpio_set_value(DA850_LCD_BL_PIN, val);
 }
 
 static int da850_lcd_hw_init(void)
@@ -470,12 +473,6 @@ static int da850_lcd_hw_init(void)
 
 	gpio_direction_output(DA850_LCD_BL_PIN, 0);
 	gpio_direction_output(DA850_LCD_PWR_PIN, 0);
-
-	/* Switch off panel power and backlight */
-	da850_panel_power_ctrl(0);
-
-	/* Switch on panel power and backlight */
-	da850_panel_power_ctrl(1);
 
 	return 0;
 }
