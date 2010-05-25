@@ -515,6 +515,7 @@ struct regulator_init_data tps65070_regulator_data[] = {
 		},
 		.num_consumer_supplies = ARRAY_SIZE(tps65070_dcdc2_consumers),
 		.consumer_supplies = tps65070_dcdc2_consumers,
+		.driver_data = (void *) 1,
 	},
 
 	/* dcdc3 */
@@ -528,6 +529,7 @@ struct regulator_init_data tps65070_regulator_data[] = {
 		},
 		.num_consumer_supplies = ARRAY_SIZE(tps65070_dcdc3_consumers),
 		.consumer_supplies = tps65070_dcdc3_consumers,
+		.driver_data = (void *) 1,
 	},
 
 	/* ldo1 */
