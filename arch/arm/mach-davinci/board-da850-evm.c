@@ -160,7 +160,7 @@ struct mtd_partition da850_evm_nandflash_partition[] = {
 	{
 		.name		= "kernel",
 		.offset		= 0x200000,
-		.size		= SZ_2M,
+		.size		= SZ_4M,
 		.mask_flags	= 0,
 	},
 	{
