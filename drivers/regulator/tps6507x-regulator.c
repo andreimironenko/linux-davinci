@@ -105,7 +105,7 @@ struct tps_info {
 	unsigned reg_high:1;	
 };
 
-static const struct tps_info tps6507x_pmic_regs[] = {
+static struct tps_info tps6507x_pmic_regs[] = {
 	{
 		.name = "VDCDC1",
 		.min_uV = 725000,
@@ -151,39 +151,47 @@ struct tps6507x_pmic {
 	struct mutex io_lock;
 };
 
-static int tps6507x_pmic_modify_bits(struct tps_pmic *tps, u8 reg, u8 mask, u8 val)
+static int tps6507x_pmic_modify_bits(struct tps6507x_pmic *tps, u8 reg, u8 mask, u8 val)
 {
-	int err, data;
+	int err;
+	u8 data;
 
 	mutex_lock(&tps->io_lock);
 
-	data =  i2c_smbus_read_byte_data(tps->client, reg);
-	if (data < 0) {
+	err = tps->mfd->read_dev(tps->mfd, reg, 1, &data);
+
+	if (err < 0) {
 		dev_err(tps->mfd->dev, "Read from reg 0x%x failed\n", reg);
-		err = data;
 		goto out;
 	}
 
 	data &= ~mask;
 	data |= val;
-	err =  i2c_smbus_write_byte_data(tps->client, reg, data);
+
+	err = tps->mfd->write_dev(tps->mfd, reg, 1, &data);
+
 	if (err)
 		dev_err(tps->mfd->dev, "Write for reg 0x%x failed\n", reg);
 
 out:
 	mutex_unlock(&tps->io_lock);
-	return err;
+	return err;	
 }
 
 static int tps6507x_pmic_reg_read(struct tps6507x_pmic *tps, u8 reg)
 {
-	int data;
+	int err, data;
+	u8 val;
 
 	mutex_lock(&tps->io_lock);
 
-	data = i2c_smbus_read_byte_data(tps->client, reg);
-	if (data < 0)
+	err = tps->mfd->read_dev(tps->mfd, reg, 1, &val);
+
+	if (err < 0) {
 		dev_err(tps->mfd->dev, "Read from reg 0x%x failed\n", reg);
+		data = err;
+	} else
+		data = val;
 
 	mutex_unlock(&tps->io_lock);
 	return data;

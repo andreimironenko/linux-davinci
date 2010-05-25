@@ -18,6 +18,7 @@
 #include <linux/moduleparam.h>
 #include <linux/init.h>
 #include <linux/i2c.h>
+#include <linux/slab.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/tps6507x.h>
 
