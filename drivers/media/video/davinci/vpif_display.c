@@ -41,15 +41,12 @@
 #include <media/v4l2-ioctl.h>
 #include <media/davinci/videohd.h>
 
-#include <mach/dm646x.h>
-
 #include "vpif_display.h"
-#include "vpif.h"
 
 MODULE_DESCRIPTION("TI DaVinci VPIF Display driver");
 MODULE_LICENSE("GPL");
 
-#define DM646X_V4L2_STD (V4L2_STD_525_60 | V4L2_STD_625_50 |\
+#define VPIF_V4L2_STD	(V4L2_STD_525_60 | V4L2_STD_625_50 |\
 			 V4L2_STD_1080P_60 | V4L2_STD_720P_60|\
 			 V4L2_STD_720P_50 | V4L2_STD_1080I_60 |\
 			 V4L2_STD_1080I_50 | V4L2_STD_525P_60 |\
@@ -912,7 +909,7 @@ static int vpif_s_std(struct file *file, void *priv, v4l2_std_id *std_id)
 	int ret = 0;
 	struct v4l2_subdev *sd = NULL;
 
-	if (!(*std_id & DM646X_V4L2_STD))
+	if (!(*std_id & VPIF_V4L2_STD))
 		return -EINVAL;
 
 	if (common->started) {
@@ -1216,7 +1213,7 @@ static int vpif_enum_output(struct file *file, void *fh,
 
 	strcpy(output->name, config->output[output->index]);
 	output->type = V4L2_OUTPUT_TYPE_ANALOG;
-	output->std = DM646X_V4L2_STD;
+	output->std = VPIF_V4L2_STD;
 
 	return 0;
 }
@@ -1322,7 +1319,7 @@ static struct video_device vpif_video_template = {
 	.name		= "vpif",
 	.fops		= &vpif_fops,
 	.ioctl_ops	= &vpif_ioctl_ops,
-	.tvnorms	= DM646X_V4L2_STD,
+	.tvnorms	= VPIF_V4L2_STD,
 	.current_norm	= V4L2_STD_625_50,
 
 };
@@ -1425,7 +1422,7 @@ static __init int vpif_probe(struct platform_device *pdev)
 		/* Since the irq is single there is no need to
 		   run a for loop */
 		if (request_irq(res->start, vpif_channel_isr, IRQF_DISABLED,
-					"DM646x_Display",
+					"VPIF_Display",
 				(void *)(&vpif_obj.dev[k]->channel_id))) {
 			err = -EBUSY;
 			res_end = k;
@@ -1457,7 +1454,7 @@ static __init int vpif_probe(struct platform_device *pdev)
 		vfd->v4l2_dev = &vpif_obj.v4l2_dev;
 		vfd->release = video_device_release;
 		snprintf(vfd->name, sizeof(vfd->name),
-			 "DM646x_VPIFDisplay_DRIVER_V%d.%d.%d",
+			 "VPIF_Display_DRIVER_V%d.%d.%d",
 			 (VPIF_DISPLAY_VERSION_CODE >> 16) & 0xff,
 			 (VPIF_DISPLAY_VERSION_CODE >> 8) & 0xff,
 			 (VPIF_DISPLAY_VERSION_CODE) & 0xff);
