@@ -29,6 +29,7 @@
 #include <linux/input/tps6507x-ts.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/flash.h>
+#include <linux/i2c-gpio.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -410,11 +411,6 @@ static struct i2c_board_info __initdata da850_evm_i2c_devices[] = {
 	{
 		I2C_BOARD_INFO("cdce913", 0x65),
 	},
-};
-
-static struct davinci_i2c_platform_data da850_evm_i2c_0_pdata = {
-	.bus_freq	= 100,	/* kHz */
-	.bus_delay	= 0,	/* usec */
 };
 
 static struct davinci_uart_config da850_evm_uart_config __initdata = {
@@ -929,6 +925,20 @@ static struct vpif_display_config da850_vpif_display_config = {
 #define HAS_VPIF_CAPTURE 0
 #endif
 
+static struct i2c_gpio_platform_data da850_gpio_i2c_pdata = {
+	.sda_pin	= GPIO_TO_PIN(1, 4),
+	.scl_pin	= GPIO_TO_PIN(1, 5),
+	.udelay		= 2,			/* 250 KHz */
+};
+
+static struct platform_device da850_gpio_i2c = {
+	.name		= "i2c-gpio",
+	.id		= 1,
+	.dev		= {
+		.platform_data	= &da850_gpio_i2c_pdata,
+	},
+};
+
 static __init void da850_evm_init(void)
 {
 	int ret;
@@ -948,11 +958,7 @@ static __init void da850_evm_init(void)
 		pr_warning("da850_evm_init: i2c0 mux setup failed: %d\n",
 				ret);
 
-	ret = da8xx_register_i2c(0, &da850_evm_i2c_0_pdata);
-	if (ret)
-		pr_warning("da850_evm_init: i2c0 registration failed: %d\n",
-				ret);
-
+	platform_device_register(&da850_gpio_i2c);
 
 	ret = da8xx_register_watchdog();
 	if (ret)
