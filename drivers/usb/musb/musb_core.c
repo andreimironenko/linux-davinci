@@ -710,6 +710,10 @@ b_host:
 #ifdef CONFIG_USB_GADGET_MUSB_HDRC
 		case OTG_STATE_B_PERIPHERAL:
 		case OTG_STATE_B_IDLE:
+			printk(KERN_INFO "musb %s gadget disconnected.\n",
+				musb->gadget_driver
+				? musb->gadget_driver->driver.name
+				: "");
 			musb_g_disconnect(musb);
 			break;
 #endif	/* GADGET */
