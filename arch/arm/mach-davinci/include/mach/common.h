@@ -50,6 +50,7 @@ struct davinci_soc_info {
 	struct map_desc			*io_desc;
 	unsigned long			io_desc_num;
 	u32				cpu_id;
+	u8				variant;
 	u32				jtag_id;
 	u32				jtag_id_reg;
 	struct davinci_id		*ids;
