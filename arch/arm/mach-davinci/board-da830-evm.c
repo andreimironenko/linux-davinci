@@ -514,7 +514,7 @@ static inline void da830_evm_init_lcdc(int mux_mode,
 				ret);
 
 #if !defined(CONFIG_FB_DA8XX) && !defined(CONFIG_FB_DA8XX_MODULE)
-	ret = da8xx_pinmux_setup(da830_evm_lcdc_pins);
+	ret = davinci_cfg_reg_list(da830_evm_lcdc_pins);
 	if (ret)
 		pr_warning("da830_evm_init: evm lcd mux setup failed: %d\n",
 				ret);
@@ -752,7 +752,7 @@ static __init void da830_evm_init(void)
 	if (ret)
 		pr_warning("da830_evm_init: rtc setup failed: %d\n", ret);
 
-	ret = da8xx_pinmux_setup(da830_spi0_pins);
+	ret = davinci_cfg_reg_list(da830_spi0_pins);
 	if (ret)
 		pr_warning("da830_evm_init: spi0 mux setup failed: %d\n",
 				ret);

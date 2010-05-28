@@ -995,7 +995,7 @@ static __init void da850_evm_init(void)
 				"enabled, but they share pins.\n"
 				"\tDisable one of them.\n");
 
-		ret = da8xx_pinmux_setup(da850_mcbsp0_pins);
+		ret = davinci_cfg_reg_list(da850_mcbsp0_pins);
 		if (ret)
 			pr_warning("da850_evm_init: mcbsp0 mux setup failed:"
 					" %d\n", ret);
@@ -1007,7 +1007,7 @@ static __init void da850_evm_init(void)
 	}
 
 	if (HAS_MCBSP1) {
-		ret = da8xx_pinmux_setup(da850_mcbsp1_pins);
+		ret = davinci_cfg_reg_list(da850_mcbsp1_pins);
 		if (ret)
 			pr_warning("da850_evm_init: mcbsp1 mux setup failed:"
 					" %d\n", ret);
@@ -1024,7 +1024,7 @@ static __init void da850_evm_init(void)
 					"but they share pins.\n"
 					"\tDisable one of them.\n");
 
-		ret = da8xx_pinmux_setup(da850_mcasp_pins);
+		ret = davinci_cfg_reg_list(da850_mcasp_pins);
 		if (ret)
 			pr_warning("da850_evm_init: mcasp mux setup failed:"
 					"%d\n", ret);
@@ -1073,7 +1073,7 @@ static __init void da850_evm_init(void)
 		pr_warning("da850_evm_init: suspend registration failed: %d\n",
 				ret);
 
-	ret = da8xx_pinmux_setup(da850_spi1_pins);
+	ret = davinci_cfg_reg_list(da850_spi1_pins);
 	if (ret)
 		pr_warning("da850_evm_init: spi1 mux setup failed: %d\n",
 				ret);
@@ -1089,7 +1089,7 @@ static __init void da850_evm_init(void)
 	}
 
 	if (!HAS_RMII && HAS_VPIF_CAPTURE) {
-		ret = da8xx_pinmux_setup(da850_vpif_capture_pins);
+		ret = davinci_cfg_reg_list(da850_vpif_capture_pins);
 		if (ret)
 			pr_warning("da850_evm_init: vpif capture mux failed: "
 					"%d\n",	ret);
@@ -1102,7 +1102,7 @@ static __init void da850_evm_init(void)
 	}
 
 	if (!HAS_GLCD && HAS_VPIF_DISPLAY) {
-		ret = da8xx_pinmux_setup(da850_vpif_display_pins);
+		ret = davinci_cfg_reg_list(da850_vpif_display_pins);
 		if (ret)
 			pr_warning("da850_evm_init: vpif capture mux failed: "
 					"%d\n",	ret);
