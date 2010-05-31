@@ -36,6 +36,7 @@
 
 #include "musb_core.h"
 
+struct musb *g_musb;
 /*
  * AM3517 specific definitions
  */
@@ -443,6 +444,8 @@ int __init musb_platform_init(struct musb *musb, void *board_data)
 	rev = musb_readl(reg_base, USB_REVISION_REG);
 	if (!rev)
 		return -ENODEV;
+
+	g_musb = musb;
 
 	usb_nop_xceiv_register();
 	musb->xceiv = otg_get_transceiver();
