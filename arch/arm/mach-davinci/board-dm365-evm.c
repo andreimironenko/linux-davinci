@@ -27,6 +27,7 @@
 #include <linux/input.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/eeprom.h>
+#include <linux/gpio.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -42,6 +43,7 @@
 #include <mach/keyscan.h>
 #include <mach/gpio.h>
 #include <mach/spi.h>
+#include <mach/usb.h>
 
 #include <media/tvp514x.h>
 #include <media/tvp7002.h>
@@ -832,6 +834,14 @@ static struct spi_board_info dm365_evm_spi_info[] __initconst = {
 	},
 };
 
+static void dm365evm_usb_configure(void)
+{
+	davinci_cfg_reg(DM365_GPIO33);
+	gpio_request(33, "usb");
+	gpio_direction_output(33, 1);
+	davinci_setup_usb(500, 8);
+}
+
 static __init void dm365_evm_init(void)
 {
 	evm_init_i2c();
@@ -851,6 +861,7 @@ static __init void dm365_evm_init(void)
 
 	dm365_init_spi0(BIT(0), dm365_evm_spi_info,
 			ARRAY_SIZE(dm365_evm_spi_info));
+	dm365evm_usb_configure();
 }
 
 MACHINE_START(DAVINCI_DM365_EVM, "DaVinci DM365 EVM")
