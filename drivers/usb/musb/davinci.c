@@ -71,6 +71,9 @@ static inline void phy_on(void)
 		phy_ctrl &= ~USBPHY_VBDTCTEN;
 	}
 
+	if (cpu_is_davinci_dm365())
+		phy_ctrl |= USBPHY_CLKFREQ_24MHZ;
+
 	__raw_writel(phy_ctrl, USB_PHY_CTRL);
 
 	/* wait for PLL to lock before proceeding */
@@ -209,6 +212,8 @@ static void davinci_source_power(struct musb *musb, int is_on, int immediate)
 	if (immediate)
 		vbus_state = is_on;
 #endif
+	if (cpu_is_davinci_dm365())
+		gpio_set_value(33, is_on);
 }
 
 static void davinci_set_vbus(struct musb *musb, int is_on)
