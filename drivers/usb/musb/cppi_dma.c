@@ -405,7 +405,8 @@ static inline int cppi_autoreq_update(struct cppi_channel *rx,
 					u8 rndis, signed n_bds, u8 startreq,
 					u8 endreq)
 {
-	u32 	tmp, val;
+	u32	tmp, val, en_auto = 0, n;
+	u8	db = rx->hw_ep->rx_double_buffered;
 
 	/* assert(is_host_active(musb)) */
 
@@ -421,16 +422,28 @@ static inline int cppi_autoreq_update(struct cppi_channel *rx,
 		rx->autoreq = 0x01;
 	} else if (shortpkt && !rndis) {
 		rx->autoreq = 0x00;
-	} else if (!shortpkt && (n_bds > 2)) {
-	/* there might be shortpacket not request we might convert
-	* in to RNDIS mode
-	*/
-		val = (val | ((0x03) << (rx->index * 2)));
-		rx->autoreq = 0x03;
+	} else if (!shortpkt) {
+		/* there might be shortpacket not request we might convert
+		 * in to RNDIS mode
+		 */
+		if (db) {
+			n = n_bds > 2 ? 2 : n_bds == 2 ? 1 : 0 ;
+			if (n_bds > 2)
+				en_auto = 1;
+		} else {
+			n = n_bds > 1 ? 1 : 0;
+			if (n_bds > 1)
+				en_auto = 1;
+		}
+
+		if (en_auto) {
+			rx->autoreq = 0x03;
+			val = (val | ((0x03) << (rx->index * 2)));
+		} else
+			rx->autoreq = 0;
+
 		if (endreq)
-			n_bds -= 2;
-	} else {
-		rx->autoreq = 0;
+			n_bds -= n;
 	}
 
 	if (val != tmp) {
@@ -659,6 +672,9 @@ cppi_next_rx_segment(struct musb *musb, struct cppi_channel *rx, int shortpkt)
 	u8 				rndis = 0;
 	int 				max_bd = 0;
 	struct cppi_rx_stateram __iomem *rx_ram = rx->state_ram;
+	u8				db = rx->hw_ep->rx_double_buffered;
+	u16				csr;
+
 
 	if (((rx->rxmode == 1) && ((maxpacket & 0x3f) == 0)
 		/*REVISIT MAXPACKET CHECK!!!!*/
@@ -773,6 +789,13 @@ cppi_next_rx_segment(struct musb *musb, struct cppi_channel *rx, int shortpkt)
 			    n_bds - i + 2);
 	}
 
+	if (is_host_active(musb) && !rx->actuallen && db && (rx->autoreq == 3)
+		&& !shortpkt) {
+		csr = musb_readw(rx->hw_ep->regs, MUSB_RXCSR) |
+				MUSB_RXCSR_H_REQPKT | MUSB_RXCSR_DMAENAB;
+		musb_writew(rx->hw_ep->regs, MUSB_RXCSR, csr);
+	}
+
 	cppi_dump_rx(4, rx, "/S");
 }
 
@@ -847,7 +870,7 @@ static int cppi_rx_scan(struct cppi *cppi, unsigned ch, u8 abort)
 	struct cppi_descriptor 		*last = rx->last_processed;
 	int 				completed = 0;
 	dma_addr_t 			safe2ack;
-	u32 				csr;
+	u32				csr, count;
 
 	cppi_dump_rx(6, rx, "/K");
 
@@ -908,8 +931,10 @@ static int cppi_rx_scan(struct cppi *cppi, unsigned ch, u8 abort)
 		(rx->actuallen != rx->buf_len)))) {
 
 		csr = musb_readw(rx->hw_ep->regs, MUSB_RXCSR);
-		csr |= MUSB_RXCSR_H_REQPKT;
-		musb_writew(rx->hw_ep->regs, MUSB_RXCSR, csr);
+		count = musb_readw(rx->hw_ep->regs, MUSB_RXCOUNT);
+		if (!(csr & MUSB_RXCSR_H_REQPKT) && !count)
+			musb_writew(rx->hw_ep->regs, MUSB_RXCSR, csr |
+					MUSB_RXCSR_H_REQPKT);
 	}
 
 	rx->last_processed = last;
