@@ -590,6 +590,14 @@ cppi_next_tx_segment(struct musb *musb, struct cppi_channel *tx, int rndis)
 		bd = bd->next;
 	}
 
+	/* Some DaVinci platforms (DM365) DMA needs the EP Size to be aligned on
+	 * a 64 byte boundary.
+	 */
+	if (tx->maxpacket % 64) {
+		maxpacket = ((tx->maxpacket / 64) + 1 ) * 64;
+		musb_writew(tx->hw_ep->regs, MUSB_TXMAXP, maxpacket);
+	}
+
 	/* BDs live in DMA-coherent memory, but writes might be pending */
 	/*cpu_drain_writebuffer();*/
 
@@ -726,6 +734,13 @@ cppi_next_rx_segment(struct musb *musb, struct cppi_channel *rx, int shortpkt)
 	 */
 	bd = cppi_bd_alloc(rx);
 	rx->head = bd;
+	/* Some DaVinci platforms (DM365) DMA needs the EP Size to be aligned on
+	 * a 64 byte boundary.
+	 */
+	if (rx->maxpacket % 64) {
+		maxpacket = ((rx->maxpacket / 64) + 1 ) * 64;
+		musb_writew(rx->hw_ep->regs, MUSB_RXMAXP, maxpacket);
+        }
 
 	/* Build BDs for all packets in this segment */
 	for (i = 0, tail = NULL; bd && i < n_bds; i++, tail = bd) {
