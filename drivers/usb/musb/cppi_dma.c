@@ -988,6 +988,15 @@ void cppi_completion(struct musb *musb, u32 rx, u32 tx)
 			cppi_dump_tx(5, txchannel, "/E");
 
 			bdptr = txchannel->head;
+			if (!bdptr) {
+				/* No more bd's to process.  Probably we are in
+				 * abort interrupt context.  Just set the
+				 * complete mode to compare and proceed.
+				 */
+				txstate->tx_complete = 0;
+				continue;
+			}
+
 			i = 0;
 			reqcomplete = 0;
 
@@ -1221,14 +1230,6 @@ static int cppi_channel_abort(struct dma_channel *channel)
 
 	if (cppi_ch->transmit) {
 		struct cppi_tx_stateram __iomem *txstate;
-		int 				enabled;
-
-		/* mask interrupts raised to signal teardown complete.  */
-		enabled = musb_readl(tibase, DAVINCI_TXCPPI_INTENAB_REG)
-				& (1 << cppi_ch->index);
-		if (enabled)
-			musb_writel(tibase, DAVINCI_TXCPPI_INTCLR_REG,
-					(1 << cppi_ch->index));
 
 		/* REVISIT put timeouts on these controller handshakes */
 
@@ -1243,10 +1244,10 @@ static int cppi_channel_abort(struct dma_channel *channel)
 		txstate = cppi_ch->state_ram;
 		do {
 			regval = txstate->tx_complete;
+			cpu_relax();
 		} while (0xFFFFFFFC != regval);
-		txstate->tx_complete = 0xFFFFFFFC;
 
-		musb_writel(tibase, DAVINCI_CPPI_EOI_REG, 0);
+		txstate = cppi_ch->state_ram;
 
 		/* FIXME clean up the transfer state ... here?
 		 * the completion routine should get called with
@@ -1274,17 +1275,8 @@ static int cppi_channel_abort(struct dma_channel *channel)
 		 * equal interrupt deasserted?
 		 */
 
-		/* write back mode, bit 0 set, hence completion Ptr
-		 * must be updated
-		 */
 		txstate->tx_complete = 0x1;
-		/* compare mode, write back zero now */
-		txstate->tx_complete = 0;
-
-		/* re-enable interrupt */
-		if (enabled)
-			musb_writel(tibase, DAVINCI_TXCPPI_INTENAB_REG,
-				    (1 << cppi_ch->index));
+		cppi_ch->head = NULL;
 
 		cppi_dump_tx(5, cppi_ch, " (done teardown)");
 
