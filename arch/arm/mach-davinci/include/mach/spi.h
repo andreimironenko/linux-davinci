@@ -19,26 +19,39 @@
 #ifndef __ARCH_ARM_DAVINCI_SPI_H
 #define __ARCH_ARM_DAVINCI_SPI_H
 
+#define SPI_INTERN_CS	0xFF
+
+/* resource flags for IORESOURCE_DMA resources */
+#define IORESOURCE_DMA_RX_CHAN		0x01
+#define IORESOURCE_DMA_TX_CHAN		0x02
+#define IORESOURCE_DMA_EVENT_Q		0x04
+
 enum {
-	SPI_VERSION_1, /* For DM355/DM365/DM6467 */
+	SPI_VERSION_1, /* For DM355/DM365/DM6467*/
 	SPI_VERSION_2, /* For DA8xx */
 };
 
 struct davinci_spi_platform_data {
 	u8	version;
-	u8	num_chipselect;
-	u8	wdelay;
-	u8	odd_parity;
-	u8	parity_enable;
-	u8	wait_enable;
-	u8	timer_disable;
-	u8	clk_internal;
-	u8	cs_hold;
-	u8	intr_level;
-	u8	poll_mode;
-	u8	use_dma;
-	u8	c2tdelay;
-	u8	t2cdelay;
+	u16	num_chipselect;
+	u8	*chip_sel;
+};
+
+struct davinci_spi_config {
+	u32     odd_parity:1;
+	u32     parity_enable:1;
+	u32     intr_level:1;
+	u32     io_type:2;
+#define SPI_IO_TYPE_INTR    0
+#define SPI_IO_TYPE_POLL    1
+#define SPI_IO_TYPE_DMA     2
+	u32     bytes_per_word:2;
+	u32     wdelay:6;
+	u32     timer_disable:1;
+	u8      c2t_delay;
+	u8      t2c_delay;
+	u8      t2e_delay;
+	u8      c2e_delay;
 };
 
 #endif	/* __ARCH_ARM_DAVINCI_SPI_H */
