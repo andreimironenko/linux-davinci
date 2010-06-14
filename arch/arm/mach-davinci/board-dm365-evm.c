@@ -41,6 +41,7 @@
 #include <mach/nand.h>
 #include <mach/keyscan.h>
 #include <mach/gpio.h>
+#include <mach/spi.h>
 
 #include <media/tvp514x.h>
 #include <media/tvp7002.h>
@@ -811,10 +812,19 @@ static struct spi_eeprom at25640 = {
 	.flags		= EE_ADDR2,
 };
 
+static struct davinci_spi_config at25640_spi_cfg = {
+	.parity_enable	= 0,
+	.intr_level	= 0,
+	.io_type	= SPI_IO_TYPE_DMA,
+	.wdelay		= 0,
+	.timer_disable	= 1,
+};
+
 static struct spi_board_info dm365_evm_spi_info[] __initconst = {
 	{
 		.modalias	= "at25",
 		.platform_data	= &at25640,
+		.controller_data = &at25640_spi_cfg,
 		.max_speed_hz	= 10 * 1000 * 1000,
 		.bus_num	= 0,
 		.chip_select	= 0,
