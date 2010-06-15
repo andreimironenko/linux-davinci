@@ -28,6 +28,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/spi_bitbang.h>
+#include <linux/cpufreq.h>
 
 #include <mach/spi.h>
 #include <mach/edma.h>
@@ -198,6 +199,8 @@ static int davinci_spi_setup_transfer(struct spi_device *spi,
 	if (!hz)
 		hz = spi->max_speed_hz;
 
+	davinci_spi->speed = hz;
+
 	prescale = davinci_spi_get_prescale(davinci_spi, hz);
 	spifmt |= (prescale << SPIFMT_PRESCALE_SHIFT);
 
@@ -293,6 +296,8 @@ static void davinci_spi_dma_tx_callback(unsigned lch, u16 ch_status, void *data)
 
 	if (ch_status == DMA_COMPLETE)
 		davinci_spi->wcount = 0;
+
+	complete(&davinci_spi->done);
 }
 
 static int davinci_spi_request_dma(struct spi_device *spi)
@@ -553,10 +558,10 @@ static int davinci_spi_txrx_bufs(struct spi_device *spi, struct spi_transfer *t)
 
 	spidat1 = ioread32(davinci_spi->base + SPIDAT1);
 
-	clear_io_bits(davinci_spi->base + SPIGCR1, SPIGCR1_POWERDOWN_MASK);
-	set_io_bits(davinci_spi->base + SPIGCR1, SPIGCR1_SPIENA_MASK);
-
 	INIT_COMPLETION(davinci_spi->done);
+	davinci_spi->in_use = true;
+
+	set_io_bits(davinci_spi->base + SPIGCR1, SPIGCR1_SPIENA_MASK);
 
 	if ((spi_cfg->io_type == SPI_IO_TYPE_INTR) ||
 	    (spi_cfg->io_type == SPI_IO_TYPE_POLL)) {
@@ -645,12 +650,11 @@ static int davinci_spi_txrx_bufs(struct spi_device *spi, struct spi_transfer *t)
 	}
 
 	clear_io_bits(davinci_spi->base + SPIGCR1, SPIGCR1_SPIENA_MASK);
-	set_io_bits(davinci_spi->base + SPIGCR1, SPIGCR1_POWERDOWN_MASK);
 
 	if (davinci_spi->errors) {
 		ret = davinci_spi_check_error(davinci_spi, davinci_spi->errors);
 		if (ret != 0)
-			return ret;
+			goto out;
 	}
 	if ((davinci_spi->rcount != 0) || (davinci_spi->wcount != 0)) {
 		sdev = davinci_spi->bitbang.master->dev.parent;
@@ -658,7 +662,11 @@ static int davinci_spi_txrx_bufs(struct spi_device *spi, struct spi_transfer *t)
 		return -EIO;
 	}
 
-	return t->len;
+out:
+	davinci_spi->in_use = false;
+	complete(&davinci_spi->done);
+
+	return (ret != 0) ? ret : t->len;
 }
 
 /*
@@ -686,6 +694,49 @@ static irqreturn_t davinci_spi_irq(s32 irq, void *context_data)
 
 	return IRQ_HANDLED;
 }
+
+#ifdef CONFIG_CPU_FREQ
+static int davinci_spi_cpufreq_transition(struct notifier_block *nb,
+				     unsigned long val, void *data)
+{
+	struct davinci_spi_platform_data *pdata;
+	struct davinci_spi *davinci_spi;
+
+	davinci_spi = container_of(nb, struct davinci_spi, freq_transition);
+	pdata = davinci_spi->pdata;
+
+	if (val == CPUFREQ_PRECHANGE) {
+		if (davinci_spi->in_use)
+			wait_for_completion(&davinci_spi->done);
+	} else if (val == CPUFREQ_POSTCHANGE) {
+		davinci_spi_get_prescale(davinci_spi, davinci_spi->speed);
+	}
+	return 0;
+}
+
+static inline int davinci_spi_cpufreq_register(struct davinci_spi *spi)
+{
+	spi->freq_transition.notifier_call = davinci_spi_cpufreq_transition;
+
+	return cpufreq_register_notifier(&spi->freq_transition,
+					 CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+static inline void davinci_spi_cpufreq_deregister(struct davinci_spi *spi)
+{
+	cpufreq_unregister_notifier(&spi->freq_transition,
+				    CPUFREQ_TRANSITION_NOTIFIER);
+}
+#else
+static inline int davinci_spi_cpufreq_register(struct davinci_spi *spi)
+{
+	return 0;
+}
+
+static inline void davinci_spi_cpufreq_deregister(struct davinci_spi *spi)
+{
+}
+#endif
 
 resource_size_t davinci_spi_get_dma_by_flag(struct platform_device *dev,
 		unsigned long flag)
@@ -835,6 +886,13 @@ static int davinci_spi_probe(struct platform_device *pdev)
 
 	init_completion(&davinci_spi->done);
 
+	ret = davinci_spi_cpufreq_register(davinci_spi);
+	if (ret) {
+		pr_info("davinci SPI contorller driver failed to register "
+							"cpufreq\n");
+		goto free_clk;
+	}
+
 	/* Reset In/OUT SPI module */
 	iowrite32(0, davinci_spi->base + SPIGCR0);
 	udelay(100);
@@ -855,16 +913,17 @@ static int davinci_spi_probe(struct platform_device *pdev)
 
 	set_io_bits(davinci_spi->base + SPIGCR1, SPIGCR1_CLKMOD_MASK);
 	set_io_bits(davinci_spi->base + SPIGCR1, SPIGCR1_MASTER_MASK);
-	set_io_bits(davinci_spi->base + SPIGCR1, SPIGCR1_POWERDOWN_MASK);
 
 	ret = spi_bitbang_start(&davinci_spi->bitbang);
 	if (ret != 0)
-		goto free_clk;
+		goto unregister_cpufreq;
 
 	dev_info(&pdev->dev, "Controller at 0x%p \n", davinci_spi->base);
 
 	return ret;
 
+unregister_cpufreq:
+	davinci_spi_cpufreq_deregister(davinci_spi);
 free_clk:
 	clk_disable(davinci_spi->clk);
 	clk_put(davinci_spi->clk);
@@ -902,6 +961,8 @@ static int __exit davinci_spi_remove(struct platform_device *pdev)
 	davinci_spi = spi_master_get_devdata(master);
 
 	spi_bitbang_stop(&davinci_spi->bitbang);
+
+	davinci_spi_cpufreq_deregister(davinci_spi);
 
 	clk_disable(davinci_spi->clk);
 	clk_put(davinci_spi->clk);

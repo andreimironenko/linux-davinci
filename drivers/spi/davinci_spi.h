@@ -181,6 +181,13 @@ struct davinci_spi {
 
 	void			(*get_rx)(u32 rx_data, struct davinci_spi *);
 	u32			(*get_tx)(struct davinci_spi *);
+
+	u32			speed;
+	bool			in_use;
+
+#ifdef CONFIG_CPU_FREQ
+	struct notifier_block	freq_transition;
+#endif
 };
 
 #endif /* __DAVINCI_SPI_H */
