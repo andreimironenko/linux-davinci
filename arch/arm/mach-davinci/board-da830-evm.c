@@ -32,6 +32,7 @@
 #include <mach/nand.h>
 #include <mach/da8xx.h>
 #include <mach/usb.h>
+#include <mach/spi.h>
 
 #define DA830_EVM_PHY_MASK		0x0
 #define DA830_EVM_MDIO_FREQUENCY	2200000	/* PHY bus frequency */
@@ -468,10 +469,19 @@ static struct flash_platform_data spi_flash_data = {
 	.type = "w25x32",
 };
 
+static struct davinci_spi_config w25x32_spi_cfg = {
+	.parity_enable	= 0,
+	.intr_level	= 0,
+	.io_type	= SPI_IO_TYPE_DMA,
+	.wdelay		= 0,
+	.timer_disable	= 1,
+};
+
 static struct spi_board_info da830_spi_board_info[] = {
 	[0] = {
 		.modalias = "m25p80",
 		.platform_data = &spi_flash_data,
+		.controller_data = &w25x32_spi_cfg,
 		.mode = SPI_MODE_0,
 		.max_speed_hz = 30000000,       /* max sample rate at 3V */
 		.bus_num = 0,

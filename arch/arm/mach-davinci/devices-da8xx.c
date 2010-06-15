@@ -724,18 +724,6 @@ int __init da8xx_register_cpuidle(void)
 static struct davinci_spi_platform_data da850_spi1_pdata = {
 	.version 	= SPI_VERSION_2,
 	.num_chipselect = 1,
-	.wdelay		= 0,
-	.odd_parity	= 0,
-	.parity_enable	= 0,
-	.wait_enable	= 0,
-	.timer_disable  = 0,
-	.clk_internal	= 1,
-	.cs_hold	= 1,
-	.intr_level	= 0,
-	.poll_mode	= 1,
-	.use_dma	= 1,
-	.c2tdelay	= 8,
-	.t2cdelay	= 8,
 };
 
 static struct resource da850_spi1_resources[] = {
@@ -752,17 +740,17 @@ static struct resource da850_spi1_resources[] = {
 	[2] = {
 		.start = EDMA_CTLR_CHAN(0, 18),
 		.end = EDMA_CTLR_CHAN(0, 18),
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_RX_CHAN,
 	},
 	[3] = {
 		.start = EDMA_CTLR_CHAN(0, 19),
 		.end = EDMA_CTLR_CHAN(0, 19),
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_TX_CHAN,
 	},
 	[4] = {
 		.start = 1,
 		.end = 1,
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_EVENT_Q,
 	},
 };
 
@@ -787,18 +775,6 @@ void __init da850_init_spi1(unsigned chipselect_mask,
 static struct davinci_spi_platform_data da830_spi0_pdata = {
 	.version 	= SPI_VERSION_2,
 	.num_chipselect = 1,
-	.wdelay		= 0,
-	.odd_parity	= 0,
-	.parity_enable	= 0,
-	.wait_enable	= 0,
-	.timer_disable  = 0,
-	.clk_internal	= 1,
-	.cs_hold	= 1,
-	.intr_level	= 0,
-	.poll_mode	= 1,
-	.use_dma	= 1,
-	.c2tdelay	= 8,
-	.t2cdelay	= 8,
 };
 
 static struct resource da830_spi0_resources[] = {
@@ -815,17 +791,17 @@ static struct resource da830_spi0_resources[] = {
 	[2] = {
 		.start = EDMA_CTLR_CHAN(0, 14),
 		.end = EDMA_CTLR_CHAN(0, 14),
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_RX_CHAN,
 	},
 	[3] = {
 		.start = EDMA_CTLR_CHAN(0, 15),
 		.end = EDMA_CTLR_CHAN(0, 15),
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_TX_CHAN,
 	},
 	[4] = {
 		.start = 1,
 		.end = 1,
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_EVENT_Q,
 	},
 };
 

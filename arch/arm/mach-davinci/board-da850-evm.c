@@ -40,6 +40,7 @@
 #include <mach/mux.h>
 #include <mach/flash.h>
 #include <mach/vpif.h>
+#include <mach/spi.h>
 
 #include <media/tvp514x.h>
 
@@ -254,10 +255,19 @@ static struct flash_platform_data spi_flash_data = {
 	.type = "m25p64",
 };
 
+static struct davinci_spi_config m25p64_spi_cfg = {
+	.parity_enable	= 0,
+	.intr_level	= 0,
+	.io_type	= SPI_IO_TYPE_DMA,
+	.wdelay		= 0,
+	.timer_disable	= 1,
+};
+
 static struct spi_board_info da850_spi_board_info[] = {
 	[0] = {
 		.modalias = "m25p80",
 		.platform_data = &spi_flash_data,
+		.controller_data = &m25p64_spi_cfg,
 		.mode = SPI_MODE_0,
 		.max_speed_hz = 30000000,       /* max sample rate at 3V */
 		.bus_num = 1,
