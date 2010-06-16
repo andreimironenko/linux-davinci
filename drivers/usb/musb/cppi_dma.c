@@ -1071,8 +1071,15 @@ void cppi_completion(struct musb *musb, u32 rx, u32 tx)
 						txchannel->channel.
 							actual_len =
 						    txchannel->actuallen;
-						musb_dma_completion(musb,
-							channum + 1, 1);
+						/* Wait for at least 1 SOF
+						 * interval to ensure
+						 * all data has been moved to
+						 * mentor FIFO. Raise completion
+						 * at the end of this period.
+						 */
+						txchannel->tx_comp_guard = 1;
+						musb_writeb(musb->mregs,
+							MUSB_INTRUSBE, 0xff);
 					}
 
 				} else {
@@ -1369,6 +1376,29 @@ static int cppi_channel_abort(struct dma_channel *channel)
 	cppi_ch->maxpacket = 0;
 
 	return 0;
+}
+
+void cppi_tx_completion_backoff(struct musb *musb)
+{
+	int 			i = 0, channum;
+	struct cppi 		*cppi;
+	struct cppi_channel 	*txchannel;
+
+	cppi = container_of(musb->dma_controller, struct cppi, controller);
+
+	/* process TX channels */
+	for (channum = 0; channum < 4; channum++) {
+        	txchannel = cppi->tx + channum;
+		if (txchannel->tx_comp_guard) {
+			if (--txchannel->tx_comp_guard)
+				i = 1;
+			else
+				musb_dma_completion(musb, channum + 1, 1);
+		}
+	}
+
+	if (!i)
+		musb_writeb(musb->mregs, MUSB_INTRUSBE, 0xf7);
 }
 
 /* TBD Queries:

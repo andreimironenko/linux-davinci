@@ -134,6 +134,7 @@ struct cppi_channel {
 	 * FIFONOTEMPTY to clear.
 	 */
 	struct list_head 	tx_complete;
+	u8			tx_comp_guard;
 };
 
 /**

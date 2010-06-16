@@ -113,4 +113,6 @@ extern void usb_vbus_control(u8 on);
 #elif defined(CONFIG_MACH_DAVINCI_EVM)
 #define usb_vbus_control(x)	do {} while (0)
 #endif
+
+void cppi_tx_completion_backoff(struct musb *musb);
 #endif	/* __MUSB_HDRDF_H__ */

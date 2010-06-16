@@ -107,11 +107,8 @@ void musb_platform_enable(struct musb *musb)
 	musb_writel(musb->ctrl_base, DAVINCI_USB_INT_MASK_SET_REG, tmp);
 	tmp |= old;
 
-	val = ~MUSB_INTR_SOF;
-#ifdef CONFIG_MUSB_SCHEDULE_INTR_EP
-	if (is_intr_sched())
-		val = ~0x0;
-#endif
+	/* Enable SOF interrupt mask as this would be used by Tx DMA code */
+	val = ~0x0;
 
 	tmp |= ((val & 0x01ff) << DAVINCI_USB_USBINT_SHIFT);
 	musb_writel(musb->ctrl_base, DAVINCI_USB_INT_MASK_SET_REG, tmp);
@@ -329,6 +326,10 @@ irqreturn_t davinci_interrupt(int irq, void *__hci)
 			>> DAVINCI_USB_TXINT_SHIFT;
 	musb->int_usb = (tmp & DAVINCI_USB_USBINT_MASK)
 			>> DAVINCI_USB_USBINT_SHIFT;
+	if (is_cppi_enabled() && (musb->int_usb & MUSB_INTR_SOF)) {
+		cppi_tx_completion_backoff(musb);
+		retval = IRQ_HANDLED;
+	}
 
 	/* DRVVBUS irqs are the only proxy we have (a very poor one!) for
 	 * DaVinci's missing ID change IRQ.  We need an ID change IRQ to
