@@ -2006,10 +2006,17 @@ static int musb_schedule(
 				toggle && (txtype == USB_ENDPOINT_XFER_ISOC))
 				continue;
 
+			if (hw_ep->rx_double_buffered &&
+				( 
+				(is_in && hw_ep->out_qh && hw_ep->out_qh->type != qh->type) ||
+				(!is_in && hw_ep->in_qh && hw_ep->in_qh->type != qh->type)))
+				continue;
+
 			best_diff = diff;
 			best_end = epnum;
 		}
 	}
+
 	/* use bulk reserved ep1 if no other ep is free */
 	if (best_end < 0 && qh->type == USB_ENDPOINT_XFER_BULK) {
 		hw_ep = musb->bulk_ep;
@@ -2308,7 +2315,7 @@ static int musb_cleanup_urb(struct urb *urb, struct musb_qh *qh)
 		struct dma_channel	*dma;
 
 		dma = is_in ? ep->rx_channel : ep->tx_channel;
-		if (dma) {
+		if (dma && (dma_channel_status(dma) == MUSB_DMA_STATUS_BUSY)) {
 			status = ep->musb->dma_controller->channel_abort(dma);
 			DBG(status ? 1 : 3,
 				"abort %cX%d DMA for urb %p --> %d\n",
