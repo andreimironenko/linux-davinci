@@ -238,7 +238,11 @@ dump_end_info(struct musb *musb, u8 epnum, char *aBuffer, unsigned max)
 					dump_rx = 1;
 				else
 					dump_rx = 0;
-				dump_tx = !dump_rx;
+
+				if (hw_ep->out_qh)
+					dump_tx = 1;
+				else
+					dump_tx = 0;
 			} else
 				break;
 			/* END TEMPORARY */
