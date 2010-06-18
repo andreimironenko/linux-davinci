@@ -1123,6 +1123,8 @@ static __init void da850_evm_init(void)
 					"%d\n",	ret);
 
 	}
+
+	da8xx_register_usb20(500, 8);
 }
 
 #ifdef CONFIG_SERIAL_8250_CONSOLE

@@ -769,6 +769,8 @@ static __init void da830_evm_init(void)
 
 	da830_init_spi0(BIT(0), da830_spi_board_info,
 			ARRAY_SIZE(da830_spi_board_info));
+	
+	da8xx_register_usb20(500, 8);
 }
 
 #ifdef CONFIG_SERIAL_8250_CONSOLE
