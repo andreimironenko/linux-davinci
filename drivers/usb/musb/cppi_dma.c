@@ -1397,7 +1397,7 @@ void cppi_tx_completion_backoff(struct musb *musb)
 		}
 	}
 
-	if (!i)
+	if (!i && !is_intr_sched())
 		musb_writeb(musb->mregs, MUSB_INTRUSBE, 0xf7);
 }
 
