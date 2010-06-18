@@ -21,6 +21,7 @@
 
 #include <linux/errno.h>
 #include <linux/dma-mapping.h>
+#include <mach/cputype.h>
 
 #include "cppi41.h"
 
@@ -278,8 +279,12 @@ static int __init cppi41_controller_start(struct dma_controller *controller)
 	musb_writel(reg_base, USB_AUTOREQ_REG, 0);
 
 	/* Disable the CDC/RNDIS modes */
-	musb_writel(reg_base, USB_TX_MODE_REG, 0);
-	musb_writel(reg_base, USB_RX_MODE_REG, 0);
+	if (cpu_is_davinci_da8xx())
+		musb_writel(reg_base, USB_MODE_REG, 0);
+	else {
+		musb_writel(reg_base, USB_TX_MODE_REG, 0);
+		musb_writel(reg_base, USB_RX_MODE_REG, 0);
+	}
 
 	return 1;
 
@@ -338,8 +343,12 @@ static int cppi41_controller_stop(struct dma_controller *controller)
 	musb_writel(reg_base, USB_AUTOREQ_REG, 0);
 
 	/* Disable the CDC/RNDIS modes */
-	musb_writel(reg_base, USB_TX_MODE_REG, 0);
-	musb_writel(reg_base, USB_RX_MODE_REG, 0);
+	if (cpu_is_davinci_da8xx())
+		musb_writel(reg_base, USB_MODE_REG, 0);
+	else {
+		musb_writel(reg_base, USB_TX_MODE_REG, 0);
+		musb_writel(reg_base, USB_RX_MODE_REG, 0);
+	}
 
 	return 1;
 }
@@ -489,15 +498,28 @@ static void cppi41_mode_update(struct cppi41_channel *cppi_ch, u8 mode)
 		u8 ep_num = cppi_ch->ch_num + 1;
 
 		if (cppi_ch->transmit) {
-			reg_val = musb_readl(reg_base, USB_TX_MODE_REG);
+			if (cpu_is_davinci_da8xx())
+				reg_val = musb_readl(reg_base, USB_MODE_REG);
+			else 
+				reg_val = musb_readl(reg_base, USB_TX_MODE_REG);
+			printk("Reg_val %x\n", reg_val);
 			reg_val &= ~USB_TX_MODE_MASK(ep_num);
 			reg_val |= mode << USB_TX_MODE_SHIFT(ep_num);
-			musb_writel(reg_base, USB_TX_MODE_REG, reg_val);
+			if (cpu_is_davinci_da8xx())
+				musb_writel(reg_base, USB_MODE_REG, reg_val);
+			else 
+				musb_writel(reg_base, USB_TX_MODE_REG, reg_val);
 		} else {
-			reg_val = musb_readl(reg_base, USB_RX_MODE_REG);
+			if (cpu_is_davinci_da8xx())
+				reg_val = musb_readl(reg_base, USB_MODE_REG);
+			else 
+				reg_val = musb_readl(reg_base, USB_RX_MODE_REG);
 			reg_val &= ~USB_RX_MODE_MASK(ep_num);
 			reg_val |= mode << USB_RX_MODE_SHIFT(ep_num);
-			musb_writel(reg_base, USB_RX_MODE_REG, reg_val);
+			if (cpu_is_davinci_da8xx())
+				musb_writel(reg_base, USB_MODE_REG, reg_val);
+			else 
+				musb_writel(reg_base, USB_RX_MODE_REG, reg_val);
 		}
 		cppi_ch->dma_mode = mode;
 	}
@@ -712,14 +734,14 @@ static unsigned cppi41_next_rx_segment(struct cppi41_channel *rx_ch)
 #endif
 		if (!strcmp(gadget_driver->driver.name, "g_ether")) {
 			cppi41_mode_update(rx_ch, USB_GENERIC_RNDIS_MODE);
+			pkt_len = 0;
+			if (rx_ch->length < max_rx_transfer_size)
+				pkt_len = rx_ch->length;
+			cppi41_set_ep_size(rx_ch, pkt_len);
 		} else {
-			max_rx_transfer_size = 512;
+			max_rx_transfer_size = rx_ch->pkt_size;
 			cppi41_mode_update(rx_ch, USB_TRANSPARENT_MODE);
 		}
-		pkt_len = 0;
-		if (rx_ch->length < max_rx_transfer_size)
-			pkt_len = rx_ch->length;
-		cppi41_set_ep_size(rx_ch, pkt_len);
 	} else {
 		/*
 		 * Rx can use the generic RNDIS mode where we can
@@ -794,7 +816,8 @@ sched:
 
 	/* enable schedular if not enabled */
 	if (is_peripheral_active(cppi->musb) && (n_bd > 0))
-		cppi41_enable_sched_rx();
+		cppi41_schedtbl_add_dma_ch(0, 0, rx_ch->ch_num,
+			CPPI41_DMACH_RX_DIR);
 	return 1;
 }
 
@@ -1269,11 +1292,12 @@ static void usb_process_rx_queue(struct cppi41 *cppi, unsigned index)
 		rx_ch = &cppi->rx_cppi_ch[ch_num];
 		rx_ch->channel.actual_len += length;
 
-		if (curr_pd->eop) {
+		if ((curr_pd->eop) || (length < rx_ch->pkt_size)) {
 			curr_pd->eop = 0;
 			/* disable the rx dma schedular */
 			if (is_peripheral_active(cppi->musb)) {
-				cppi41_disable_sched_rx();
+				cppi41_schedtbl_remove_dma_ch(0, 0, ch_num,
+						CPPI41_DMACH_RX_DIR);
 				musb_dma_completion(cppi->musb, ep_num, 0);
 			}
 		}

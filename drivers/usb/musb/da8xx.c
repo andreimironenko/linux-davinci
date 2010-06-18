@@ -34,6 +34,8 @@
 #include <mach/usb.h>
 
 #include "musb_core.h"
+#include "cppi41.h"
+#include "cppi41_dma.h"
 
 /*
  * DA8XX specific definitions
@@ -77,6 +79,11 @@
 #define DA8XX_MENTOR_CORE_OFFSET 0x400
 
 #define CFGCHIP2	IO_ADDRESS(DA8XX_SYSCFG0_BASE + DA8XX_CFGCHIP2_REG)
+#define DA8XX_USB0_BASE		0x01e00000
+
+#ifdef CONFIG_USB_TI_CPPI41_DMA
+static int __init cppi41_init(struct musb *);
+#endif
 
 /*
  * REVISIT (PM): we should be able to keep the PHY in low power mode most
@@ -92,8 +99,10 @@ static inline void phy_on(void)
 	/*
 	 * Start the on-chip PHY and its PLL.
 	 */
-	cfgchip2 &= ~(CFGCHIP2_RESET | CFGCHIP2_PHYPWRDN | CFGCHIP2_OTGPWRDN);
-	cfgchip2 |= CFGCHIP2_PHY_PLLON;
+	cfgchip2 &= ~(CFGCHIP2_RESET | CFGCHIP2_PHYPWRDN | CFGCHIP2_OTGPWRDN
+			| CFGCHIP2_OTGMODE | CFGCHIP2_REFFREQ );
+	cfgchip2 |= CFGCHIP2_PHY_PLLON | CFGCHIP2_SESENDEN | CFGCHIP2_VBDTCTEN
+			| CFGCHIP2_REFFREQ_24MHZ | CFGCHIP2_FORCE_HOST;
 	__raw_writel(cfgchip2, CFGCHIP2);
 
 	pr_info("Waiting for USB PHY clock good...\n");
@@ -288,7 +297,7 @@ static irqreturn_t da8xx_interrupt(int irq, void *hci)
 	void __iomem		*reg_base = musb->ctrl_base;
 	unsigned long		flags;
 	irqreturn_t		ret = IRQ_NONE;
-	u32			status;
+	u32			status, pend0;
 
 	spin_lock_irqsave(&musb->lock, flags);
 
@@ -296,6 +305,35 @@ static irqreturn_t da8xx_interrupt(int irq, void *hci)
 	 * NOTE: DA8XX shadows the Mentor IRQs.  Don't manage them through
 	 * the Mentor registers (except for setup), use the TI ones and EOI.
 	 */
+
+	/*
+	 * CPPI 4.1 interrupts share the same IRQ and the EOI register but
+	 * don't get reflected in the interrupt source/mask registers.
+	 */
+	if (is_cppi41_enabled()) {
+		/*
+		 * Check for the interrupts from Tx/Rx completion queues; they
+		 * are level-triggered and will stay asserted until the queues
+		 * are emptied.  We're using the queue pending register 0 as a
+		 * substitute for the interrupt status register and reading it
+		 * directly for speed.
+		 */
+		pend0 = musb_readl(reg_base, 0x4000 +
+				   QMGR_QUEUE_PENDING_REG(0));
+		if (pend0 & (0xf << 24)) {		/* queues 24 to 27 */
+			u32 tx = (pend0 >> 24) & 0x3;
+			u32 rx = (pend0 >> 26) & 0x3;
+
+			DBG(4, "CPPI 4.1 IRQ: Tx %x, Rx %x\n", tx, rx);
+			cppi41_completion(musb, rx, tx);
+			ret = IRQ_HANDLED;
+		}
+
+		/* handle the starvation interrupt bit:28 */
+		if (pend0 & 0x10000000)
+			ret = IRQ_HANDLED;
+
+	}
 
 	/* Acknowledge and handle non-CPPI interrupts */
 	status = musb_readl(reg_base, DA8XX_USB_INTR_SRC_MASKED_REG);
@@ -429,6 +467,9 @@ int __init musb_platform_init(struct musb *musb)
 	musb->xceiv = otg_get_transceiver();
 	if (!musb->xceiv)
 		return -ENODEV;
+#ifdef CONFIG_USB_TI_CPPI41_DMA
+	cppi41_init(musb);
+#endif
 
 	if (is_host_enabled(musb))
 		setup_timer(&otg_workaround, otg_timer, (unsigned long)musb);
@@ -485,8 +526,153 @@ done:
 	phy_off();
 
 	usb_nop_xceiv_unregister();
+#ifdef CONFIG_USB_TI_CPPI41_DMA
+	cppi41_exit();
+#endif
 
 	clk_disable(musb->clock);
 
 	return 0;
 }
+
+#ifdef CONFIG_USB_TI_CPPI41_DMA
+/*
+ * CPPI 4.1 resources used for USB OTG controller module:
+ *
+ * USB   DMA  DMA  QMgr  Tx     Src
+ *       Tx   Rx         QNum   Port
+ * ---------------------------------
+ * EP0   0    0    0     16,17  1
+ * ---------------------------------
+ * EP1   1    1    0     18,19  2
+ * ---------------------------------
+ * EP2   2    2    0     20,21  3
+ * ---------------------------------
+ * EP3   3    3    0     22,23  4
+ * ---------------------------------
+ */
+
+static const u16 tx_comp_q[] = { 24, 25 };
+static const u16 rx_comp_q[] = { 26, 27 };
+
+const struct usb_cppi41_info usb_cppi41_info = {
+	.dma_block	= 0,
+	.ep_dma_ch	= { 0, 1, 2, 3 },
+	.q_mgr		= 0,
+	.num_tx_comp_q	= 2,
+	.num_rx_comp_q	= 2,
+	.tx_comp_q	= tx_comp_q,
+	.rx_comp_q	= rx_comp_q
+};
+
+/* DMA block configuration */
+static const struct cppi41_tx_ch tx_ch_info[] = {
+	[0] = {
+		.port_num	= 1,
+		.num_tx_queue	= 2,
+		.tx_queue	= { { 0, 16 }, { 0, 17 } }
+	},
+	[1] = {
+		.port_num	= 2,
+		.num_tx_queue	= 2,
+		.tx_queue	= { { 0, 18 }, { 0, 19 } }
+	},
+	[2] = {
+		.port_num	= 3,
+		.num_tx_queue	= 2,
+		.tx_queue	= { { 0, 20 }, { 0, 21 } }
+	},
+	[3] = {
+		.port_num	= 4,
+		.num_tx_queue	= 2,
+		.tx_queue	= { { 0, 22 }, { 0, 23 } }
+	}
+};
+
+struct cppi41_dma_block cppi41_dma_block[CPPI41_NUM_DMA_BLOCK] = {
+	[0] = {
+		.num_tx_ch        = 4,
+		.num_rx_ch        = 4,
+		.tx_ch_info       = tx_ch_info
+	}
+};
+
+/* Queues 0 to 27 are pre-assigned, others are spare */
+static const u32 assigned_queues[] = { 0x0fffffff, 0 };
+
+
+/* Queue manager information */
+struct cppi41_queue_mgr cppi41_queue_mgr[CPPI41_NUM_QUEUE_MGR] = {
+	[0] = {
+		.num_queue       = 64,
+		.queue_types     = CPPI41_FREE_DESC_BUF_QUEUE |
+					CPPI41_UNASSIGNED_QUEUE,
+		.base_fdbq_num    = 0,
+		.assigned       = assigned_queues
+	}
+};
+
+/* Fair scheduling */
+u32 dma_sched_table[] = {
+	0x81018000, 0x83038202
+//	0x0, 0x80, 0x01, 0x81, 0x02, 0x82, 0x03, 0x83
+};
+
+#define USB_CPPI41_NUM_CH 4
+
+static int __init cppi41_init(struct musb *musb)
+{
+	u16 numch, order;
+	u8 q_mgr, dma_num = 0;
+
+	/* init mappings */
+	cppi41_queue_mgr[0].q_mgr_rgn_base = musb->ctrl_base + 0x4000;
+	cppi41_queue_mgr[0].desc_mem_rgn_base = musb->ctrl_base + 0x5000;
+	cppi41_queue_mgr[0].q_mgmt_rgn_base = musb->ctrl_base + 0x6000;
+	cppi41_queue_mgr[0].q_stat_rgn_base = musb->ctrl_base + 0x6800;
+
+	cppi41_dma_block[0].global_ctrl_base = musb->ctrl_base + 0x1000;
+	cppi41_dma_block[0].ch_ctrl_stat_base = musb->ctrl_base + 0x1800;
+	cppi41_dma_block[0].sched_ctrl_base = musb->ctrl_base + 0x2000;
+	cppi41_dma_block[0].sched_table_base = musb->ctrl_base + 0x2800;
+
+
+	for (q_mgr = 0; q_mgr < CPPI41_NUM_QUEUE_MGR; ++q_mgr) {
+		/* Initialize Queue Manager 0, alloc for region 0 */
+		cppi41_queue_mgr_init(q_mgr, 0,
+			USB_CPPI41_QMGR_REG0_ALLOC_SIZE);
+
+		numch =  USB_CPPI41_NUM_CH * 2;
+		order = get_count_order(numch);
+
+		if (order < 5)
+			order = 5;
+
+		cppi41_dma_block_init(dma_num, q_mgr, order,
+			dma_sched_table, numch);
+	}
+	return 0;
+}
+#if 0
+static void cppi41_exit(void)
+{
+	u8 q_mgr = 0, dma_block = 0;
+
+	for (q_mgr = 0; q_mgr < CPPI41_NUM_QUEUE_MGR; ++q_mgr) {
+		/* deinit dma block */
+		cppi41_dma_block_deinit(dma_block, q_mgr);
+
+		/* deinit queue manager */
+		cppi41_queue_mgr_deinit(q_mgr);
+
+		/* free the allocated region0 memory */
+		dma_free_coherent(NULL, USB_CPPI41_QMGR_REG0_MAX_SIZE,
+			cppi41_queue_mgr[q_mgr].ptr_rgn0,
+			cppi41_queue_mgr[q_mgr].phys_ptr_rgn0);
+
+		cppi41_queue_mgr[q_mgr].phys_ptr_rgn0 = 0;
+		cppi41_queue_mgr[q_mgr].ptr_rgn0 = 0;
+	}
+}
+#endif
+#endif

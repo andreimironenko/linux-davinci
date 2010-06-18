@@ -19,6 +19,7 @@
  */
 
 #include <linux/types.h>
+#define USB_CPPI41_QMGR_REG0_ALLOC_SIZE		0x3fff
 
 /*
  * Queue Manager - Control Registers Region
@@ -181,6 +182,7 @@
 #define DMA_SCHED_ENABLE_MASK		(1 << DMA_SCHED_ENABLE_SHIFT)
 #define DMA_SCHED_LAST_ENTRY_SHIFT	0
 #define DMA_SCHED_LAST_ENTRY_MASK	(0xff << DMA_SCHED_LAST_ENTRY_SHIFT)
+#define	CPPI41_DMACH_RX_DIR		0
 
 /*
  * DMA Scheduler - Table Region
@@ -460,8 +462,8 @@ struct cppi41_dma_block {
 	const struct cppi41_tx_ch *tx_ch_info;
 };
 
-extern const struct cppi41_queue_mgr cppi41_queue_mgr[];
-extern const struct cppi41_dma_block cppi41_dma_block[];
+extern struct cppi41_queue_mgr cppi41_queue_mgr[];
+extern struct cppi41_dma_block cppi41_dma_block[];
 
 /**
  * struct cppi41_dma_ch_obj - CPPI 4.1 DMA Channel object
@@ -724,3 +726,13 @@ int cppi41_dma_sched_tbl_init(u8 dma_num, u8 q_mgr,
  * cppi41_free_teardown_queue
  */
 void cppi41_free_teardown_queue(int dma_num);
+
+/**
+ * cppi41_schedtbl_add_dma_ch
+ */
+int cppi41_schedtbl_add_dma_ch(u8 dmanum, u8 qmgr, u8 dma_ch, u8 is_tx);
+
+/**
+ * cppi41_schedtbl_remove_dma_ch 
+ */
+int cppi41_schedtbl_remove_dma_ch(u8 dmanum, u8 qmgr, u8 dma_ch, u8 is_tx);

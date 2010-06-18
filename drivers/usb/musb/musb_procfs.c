@@ -37,10 +37,14 @@
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>	/* FIXME remove procfs writes */
 #include <mach/hardware.h>
+#include <mach/da8xx.h>
+#include <mach/cputype.h>
 
 #include "musb_core.h"
 
 #include "davinci.h"
+
+#define CFGCHIP2        IO_ADDRESS(DA8XX_SYSCFG0_BASE + DA8XX_CFGCHIP2_REG)
 
 #ifdef CONFIG_USB_MUSB_HDRC_HCD
 
@@ -315,11 +319,17 @@ dump_end_info(struct musb *musb, u8 epnum, char *aBuffer, unsigned max)
 					max -= code;
 				}
 
-				if (hw_ep == musb->bulk_ep
-						&& !list_empty(
-							&musb->in_bulk)) {
+				if ((hw_ep == musb->bulk_ep
+						&& !list_empty(&musb->in_bulk))
+					|| (hw_ep == musb->intr_ep &&
+						!list_empty(&musb->in_intr))) {
+					if (!list_empty(&musb->in_bulk))
 					code = dump_queue(&musb->in_bulk,
 							buf, max);
+					else
+					code = dump_queue(&musb->in_intr,
+							buf, max);
+					
 					if (code <= 0)
 						break;
 					code = min(code, (int) max);
@@ -464,6 +474,7 @@ static int dump_header_stats(struct musb *musb, char *buffer)
 {
 	int code, count = 0;
 	const void __iomem *mbase = musb->mregs;
+	u32	phy;
 
 	*buffer = 0;
 	count = sprintf(buffer, "Status: %sHDRC, Mode=%s "
@@ -531,6 +542,13 @@ static int dump_header_stats(struct musb *musb, char *buffer)
 #endif
 
 #ifdef	CONFIG_ARCH_DAVINCI
+#if 0
+	if (cpu_is_davinci_da8xx())
+		phy = __raw_readl(CFGCHIP2);
+	else
+		phy = __raw_readl((void __force __iomem *)
+					IO_ADDRESS(USBPHY_CTL_PADDR)),
+#endif
 	code = sprintf(buffer,
 			"DaVinci: ctrl=%02x stat=%1x phy=%03x\n"
 			"\trndis=%05x auto=%04x intsrc=%08x intmsk=%08x"
