@@ -47,6 +47,7 @@
 #include <mach/nand.h>
 #include <mach/clock.h>
 #include <mach/cdce949.h>
+#include <mach/spi.h>
 
 #include "clock.h"
 
@@ -901,10 +902,19 @@ static struct spi_eeprom at25640a = {
 	.flags		= EE_ADDR2,
 };
 
+static struct davinci_spi_config at25640a_spi_cfg = {
+	.parity_enable	= 0,
+	.intr_level	= 0,
+	.io_type	= SPI_IO_TYPE_DMA,
+	.wdelay		= 0,
+	.timer_disable	= 1,
+};
+
 static struct spi_board_info dm646x_evm_spi_info[] __initconst = {
 	{
 		.modalias	= "at25",
 		.platform_data	= &at25640a,
+		.controller_data = &at25640a_spi_cfg,
 		.max_speed_hz	= 10 * 1000 * 1000,	/* at 3v3 */
 		.bus_num	= 0,
 		.chip_select	= 0,
