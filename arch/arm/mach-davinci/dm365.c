@@ -641,15 +641,15 @@ static struct resource dm365_spi0_resources[] = {
 	},
 	{
 		.start = 17,
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_RX_CHAN,
 	},
 	{
 		.start = 16,
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_TX_CHAN,
 	},
 	{
 		.start = EVENTQ_3,
-		.flags = IORESOURCE_DMA,
+		.flags = IORESOURCE_DMA | IORESOURCE_DMA_EVENT_Q,
 	},
 };
 
