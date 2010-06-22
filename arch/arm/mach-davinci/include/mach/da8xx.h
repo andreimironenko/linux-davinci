@@ -70,6 +70,8 @@ extern void __iomem *da8xx_syscfg1_base;
 #define DA8XX_DDR2_CTL_BASE	0xb0000000
 #define DA8XX_ARM_RAM_BASE	0xffff0000
 #define DA8XX_VPIF_BASE		0x01e17000
+#define DA850_SATA_BASE		0x01E18000
+#define	DA850_SATA_CLK_PWRDN	0x01E2C018
 
 #define PINMUX0			0x00
 #define PINMUX1			0x04
@@ -154,7 +156,7 @@ int __init da850_register_vpif_display(struct vpif_display_config
 							*display_config);
 int __init da850_register_vpif_capture(struct vpif_capture_config
 							*capture_config);
-
+int __init da850_ahci_register(void);
 
 extern struct platform_device da8xx_serial_device;
 extern struct emac_platform_data da8xx_emac_pdata;

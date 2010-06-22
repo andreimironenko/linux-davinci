@@ -381,7 +381,14 @@ static struct clk usb0_clk = {
 static struct clk usb1_clk = {
 	.name		= "USB11CLK",
 	.parent		= &pll0_sysclk2,
-	.lpsc		= DA8XX_LPSC1_SPI1,
+	.lpsc		= DA8XX_LPSC1_USB11,
+	.gpsc		= 1,
+};
+
+static struct clk sata_clk = {
+	.name		= "ahci",
+	.parent		= &pll0_sysclk2,
+	.lpsc		= DA850_LPSC1_SATA,
 	.gpsc		= 1,
 };
 
@@ -433,6 +440,7 @@ static struct clk_lookup da850_clks[] = {
 	CLK(NULL, 		"vpif",		&vpif_clk),
 	CLK(NULL, 		"usb20",	&usb0_clk),
 	CLK(NULL, 		"USB11CLK",	&usb1_clk),
+	CLK(NULL,		"ahci",		&sata_clk)
 	CLK(NULL,		NULL,		NULL),
 };
 

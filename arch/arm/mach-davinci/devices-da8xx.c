@@ -14,6 +14,8 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/serial_8250.h>
+#include <linux/ahci_platform.h>
+#include <linux/clk.h>
 
 #include <mach/cputype.h>
 #include <mach/common.h>
@@ -919,5 +921,115 @@ __init da850_init_mcbsp(struct davinci_mcbsp_platform_data *pdata)
 
 	pdev->dev.platform_data = pdata;
 	return platform_device_register(pdev);
+}
+
+#define P0PHYCR		0x178  /* SATA PHY0 Control Register offset
+				* from AHCI base)
+				*/
+#define P0PHYSR		0x17c
+
+#define	PHY_MPY		8 /* bits3:0     4 Clock Sources at 100MHz */
+#define	PHY_LB		0 /* bits5:4     2 */
+#define	PHY_LOS		1 /* bit6        1 */
+#define	PHY_RXINVPAIR	0 /* bit7        1 */
+#define	PHY_RXTERM	0 /* bits9:8     2 */
+#define	PHY_RXCDR	4 /* bits12:10   3 */
+#define	PHY_RXEQ	1 /* bits16:13   4 */
+#define	PHY_TXINVPAIR	0 /* bit17       1 */
+#define	PHY_TXCM	0 /* bit18       1 */
+#define	PHY_TXSWING	3 /* bits21:19   3 */
+#define	PHY_TXDE	0 /* bits25:22   4 */
+#define	PHY_OVERRIDE	0 /* bit30       1 */
+#define	PHY_ENPLL	1 /* bit31       1 */
+
+struct clk *sata_clk;
+static void ahci_phy_init(struct device *dev);
+
+static int ahci_plat_init(struct device *dev)
+{
+	sata_clk = clk_get(NULL, "ahci");
+	if (IS_ERR(sata_clk)) {
+		pr_err("ahci : Failed to get AHCI clock\n");
+		return -1;
+	}
+
+	if (clk_enable(sata_clk)) {
+		pr_err("ahci : Clock Enable Failed\n");
+		return -1;
+	}
+
+	/* Power up the PHY clock source */
+	__raw_writel(0, IO_ADDRESS(DA850_SATA_CLK_PWRDN));
+
+	ahci_phy_init(dev);
+	return 0;
+}
+
+static void ahci_phy_init(struct device *dev)
+{
+	u32		phy_val = 0;
+	void __iomem	*base;
+
+	phy_val = PHY_MPY << 0 | PHY_LB << 4 | PHY_LOS << 6 |
+			PHY_RXINVPAIR << 7 | PHY_RXTERM << 8 |
+			PHY_RXCDR  << 10 | PHY_RXEQ << 13 |
+			PHY_RXINVPAIR << 17 | PHY_TXCM << 18 |
+			PHY_TXSWING << 19 | PHY_TXDE << 22 |
+			PHY_OVERRIDE << 30 | PHY_ENPLL  << 31;
+
+	base = ioremap(DA850_SATA_BASE, 0x10ffff);
+	if (!base) {
+		printk(KERN_WARNING
+				"%s: Unable to map SATA, "
+				"cannot turn on PHY.\n",  __func__);
+		return -1;
+	}
+
+	/* Initialize the SATA PHY */
+	__raw_writel(phy_val,	base + P0PHYCR);
+	while (__raw_readl(base+P0PHYSR) & 1)
+		cpu_relax();
+
+	iounmap(base);
+}
+
+static void ahci_plat_exit(struct device *dev)
+{
+	__raw_writel(1, IO_ADDRESS(DA850_SATA_CLK_PWRDN));
+}
+
+static struct resource ahci_resources[] = {
+	{
+		.start	=	DA850_SATA_BASE,
+		.end	=	DA850_SATA_BASE + 0x10fff,
+		.flags	=	IORESOURCE_MEM,
+	},
+	{
+		.start	=	IRQ_DA850_SATAINT,
+		.flags	=	IORESOURCE_IRQ,
+	}
+};
+
+struct ahci_platform_data ahci_pdata = {
+		.init	=	ahci_plat_init,
+		.exit	=	ahci_plat_exit,
+	};
+
+static struct platform_device ti_ahci_device = {
+	.name	=	"ahci",
+	.id	=	-1,
+	.dev	=	{
+				.platform_data = &ahci_pdata,
+				.coherent_dma_mask = 0xffffffff,
+			},
+	.num_resources = ARRAY_SIZE(ahci_resources),
+	.resource	= ahci_resources,
+};
+
+int __init da850_ahci_register()
+{
+	ahci_pdata.force_port_map = 1;
+	ahci_pdata.mask_port_map = 0;
+	return platform_device_register(&ti_ahci_device);
 }
 
