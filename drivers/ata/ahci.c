@@ -68,7 +68,6 @@ static ssize_t ahci_transmit_led_message(struct ata_port *ap, u32 state,
 
 static int ahci_scr_read(struct ata_link *link, unsigned int sc_reg, u32 *val);
 static int ahci_scr_write(struct ata_link *link, unsigned int sc_reg, u32 val);
-static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent);
 static unsigned int ahci_qc_issue(struct ata_queued_cmd *qc);
 static bool ahci_qc_fill_rtf(struct ata_queued_cmd *qc);
 static int ahci_port_start(struct ata_port *ap);
@@ -179,7 +178,7 @@ struct ata_port_operations ahci_ops = {
 };
 EXPORT_SYMBOL_GPL(ahci_ops);
 
-static int ahci_em_messages = 1;
+int ahci_em_messages = 1;
 EXPORT_SYMBOL_GPL(ahci_em_messages);
 module_param(ahci_em_messages, int, 0444);
 /* add other LED protocol types when they become supported */
@@ -372,7 +371,7 @@ void ahci_save_initial_config(struct device *dev,
 	/* record values to use during operation */
 	hpriv->cap = cap;
 	hpriv->cap2 = cap2;
-	hpriv->port_map = port_map;
+	hpriv->port_map = hpriv->saved_port_map = port_map;
 }
 EXPORT_SYMBOL_GPL(ahci_save_initial_config);
 
@@ -2063,7 +2062,7 @@ void ahci_print_info(struct ata_host *host, const char *scc_s)
 EXPORT_SYMBOL_GPL(ahci_print_info);
 
 void ahci_set_em_messages(struct ahci_host_priv *hpriv,
-			struct ata_port_info *)
+			struct ata_port_info *pi)
 {
 	u8 messages;
 	void __iomem *mmio = hpriv->mmio;
