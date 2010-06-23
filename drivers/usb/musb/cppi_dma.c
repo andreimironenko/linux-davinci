@@ -1396,8 +1396,11 @@ void cppi_tx_completion_backoff(struct musb *musb)
 				musb_dma_completion(musb, channum + 1, 1);
 		}
 	}
-
-	if (!i && !is_intr_sched())
+#ifdef CONFIG_USB_MUSB_HDRC_HCD
+	if (!i && !(is_host_active(musb) && is_intr_sched()))
+#else
+	if (!i)
+#endif
 		musb_writeb(musb->mregs, MUSB_INTRUSBE, 0xf7);
 }
 
