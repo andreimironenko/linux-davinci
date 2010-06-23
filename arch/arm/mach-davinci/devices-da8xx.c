@@ -982,7 +982,7 @@ static void ahci_phy_init(struct device *dev)
 		printk(KERN_WARNING
 				"%s: Unable to map SATA, "
 				"cannot turn on PHY.\n",  __func__);
-		return -1;
+		return;
 	}
 
 	/* Initialize the SATA PHY */
