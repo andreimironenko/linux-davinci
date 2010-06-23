@@ -61,6 +61,9 @@
 #define VPIF_STATUS	(0x002C)
 #define VPIF_STATUS_CLR	(0x0030)
 
+#define DA850_USB1_VBUS_PIN	GPIO_TO_PIN(2, 4)
+#define DA850_USB1_OC_PIN	GPIO_TO_PIN(6, 13)
+
 static struct mtd_partition da850_evm_norflash_partition[] = {
 	{
 		.name           = "bootloaders + env",
@@ -927,6 +930,94 @@ static struct vpif_display_config da850_vpif_display_config = {
 #define HAS_VPIF_CAPTURE 0
 #endif
 
+static da8xx_ocic_handler_t da850_evm_usb_ocic_handler;
+
+static int da850_evm_usb_set_power(unsigned port, int on)
+{
+	gpio_set_value(DA850_USB1_VBUS_PIN, on);
+	return 0;
+}
+
+static int da850_evm_usb_get_power(unsigned port)
+{
+	return gpio_get_value(DA850_USB1_VBUS_PIN);
+}
+
+static int da850_evm_usb_get_oci(unsigned port)
+{
+	return !gpio_get_value(DA850_USB1_OC_PIN);
+}
+
+static irqreturn_t da850_evm_usb_ocic_irq(int, void *);
+
+static int da850_evm_usb_ocic_notify(da8xx_ocic_handler_t handler)
+{
+	int irq		= gpio_to_irq(DA850_USB1_OC_PIN);
+	int error	= 0;
+
+	if (handler != NULL) {
+		da850_evm_usb_ocic_handler = handler;
+
+		error = request_irq(irq, da850_evm_usb_ocic_irq, IRQF_DISABLED |
+				    IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+				    "OHCI over-current indicator", NULL);
+		if (error)
+			printk(KERN_ERR "%s: could not request IRQ to watch "
+			       "over-current indicator changes\n", __func__);
+	} else
+		free_irq(irq, NULL);
+
+	return error;
+}
+
+static struct da8xx_ohci_root_hub da850_evm_usb11_pdata = {
+	.set_power	= da850_evm_usb_set_power,
+	.get_power	= da850_evm_usb_get_power,
+	.get_oci	= da850_evm_usb_get_oci,
+	.ocic_notify	= da850_evm_usb_ocic_notify,
+
+	/* TPS2065 switch @ 5V */
+	.potpgt		= (3 + 1) / 2,	/* 3 ms max */
+};
+
+static irqreturn_t da850_evm_usb_ocic_irq(int irq, void *dev_id)
+{
+	da850_evm_usb_ocic_handler(&da850_evm_usb11_pdata, 1);
+	return IRQ_HANDLED;
+}
+
+static __init void da850_evm_usb11_init(void)
+{
+	int ret;
+	ret = davinci_cfg_reg_list(da850_evm_usb11_pins);
+	if (ret) {
+		pr_warning("%s: USB 1.1 PinMux setup failed: %d\n",
+			   __func__, ret);
+		return;
+	}
+
+	ret = gpio_request(DA850_USB1_VBUS_PIN, "USB1 VBUS\n");
+	if (ret) {
+		printk(KERN_ERR "%s: failed to request GPIO for USB 1.1 port "
+		       "power control: %d\n", __func__, ret);
+		return;
+	}
+	gpio_direction_output(DA850_USB1_VBUS_PIN, 0);
+
+	ret = gpio_request(DA850_USB1_OC_PIN, "USB1 OC");
+	if (ret) {
+		printk(KERN_ERR "%s: failed to request GPIO for USB 1.1 port "
+		       "over-current indicator: %d\n", __func__, ret);
+		return;
+	}
+	gpio_direction_input(DA850_USB1_OC_PIN);
+
+	ret = da8xx_register_usb11(&da850_evm_usb11_pdata);
+	if (ret)
+		pr_warning("%s: USB 1.1 registration failed: %d\n",
+			   __func__, ret);
+}
+
 static struct i2c_gpio_platform_data da850_gpio_i2c_pdata = {
 	.sda_pin	= GPIO_TO_PIN(1, 4),
 	.scl_pin	= GPIO_TO_PIN(1, 5),
@@ -1124,6 +1215,7 @@ static __init void da850_evm_init(void)
 
 	}
 
+	da850_evm_usb11_init();
 	da8xx_register_usb20(500, 8);
 	da850_ahci_register();
 }

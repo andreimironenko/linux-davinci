@@ -207,5 +207,6 @@ extern const short da850_mcbsp0_pins[];
 extern const short da850_mcbsp1_pins[];
 extern const short da850_vpif_capture_pins[];
 extern const short da850_vpif_display_pins[];
+extern const short da850_evm_usb11_pins[];
 
 #endif /* __ASM_ARCH_DAVINCI_DA8XX_H */
