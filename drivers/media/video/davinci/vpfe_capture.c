@@ -2485,6 +2485,80 @@ static struct vpfe_device *vpfe_initialize(void)
 	return vpfe_dev;
 }
 
+static void vpfe_disable_clock(struct vpfe_device *vpfe_dev)
+{
+	struct vpfe_config *vpfe_cfg = vpfe_dev->cfg;
+	int i;
+
+	for (i = 0; i < vpfe_cfg->num_clocks; i++) {
+		clk_disable(vpfe_dev->clks[i]);
+		clk_put(vpfe_dev->clks[i]);
+	}
+	kfree(vpfe_dev->clks);
+	v4l2_info(vpfe_dev->pdev->driver, "vpfe capture clocks disabled\n");
+}
+
+/**
+ * vpfe_enable_clock() - Enable clocks for vpfe capture driver
+ * @vpfe_dev - ptr to vpfe capture device
+ *
+ * Enables clocks defined in vpfe configuration. The function
+ * assumes that at least one clock is to be defined which is
+ * true as of now. re-visit this if this assumption is not true
+ */
+static int vpfe_enable_clock(struct vpfe_device *vpfe_dev)
+{
+	struct vpfe_config *vpfe_cfg = vpfe_dev->cfg;
+	int ret = -EFAULT, i;
+
+	if (!vpfe_cfg->num_clocks)
+		return 0;
+
+	vpfe_dev->clks = kzalloc(vpfe_cfg->num_clocks *
+				sizeof(struct clock *), GFP_KERNEL);
+
+	if (NULL == vpfe_dev->clks) {
+		v4l2_err(vpfe_dev->pdev->driver, "Memory allocation failed\n");
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < vpfe_cfg->num_clocks; i++) {
+		if (NULL == vpfe_cfg->clocks[i]) {
+			v4l2_err(vpfe_dev->pdev->driver,
+				"clock %s is not defined in vpfe config\n",
+				vpfe_cfg->clocks[i]);
+			goto out;
+		}
+
+		vpfe_dev->clks[i] = clk_get(vpfe_dev->pdev,
+					vpfe_cfg->clocks[i]);
+		if (NULL == vpfe_dev->clks[i]) {
+			v4l2_err(vpfe_dev->pdev->driver,
+				"Failed to get clock %s\n",
+				vpfe_cfg->clocks[i]);
+			goto out;
+		}
+
+		if (clk_enable(vpfe_dev->clks[i])) {
+			v4l2_err(vpfe_dev->pdev->driver,
+				"vpfe clock %s not enabled\n",
+				vpfe_cfg->clocks[i]);
+			goto out;
+		}
+
+		v4l2_info(vpfe_dev->pdev->driver, "vpss clock %s enabled",
+		vpfe_cfg->clocks[i]);
+	}
+	return 0;
+out:
+	for (i = 0; i < vpfe_cfg->num_clocks; i++) {
+		if (vpfe_dev->clks[i])
+			clk_put(vpfe_dev->clks[i]);
+	}
+	kfree(vpfe_dev->clks);
+	return ret;
+}
+
 /*
  * vpfe_probe : This function creates device entries by register
  * itself to the V4L2 driver and initializes fields of each
@@ -2528,6 +2602,11 @@ static __init int vpfe_probe(struct platform_device *pdev)
 		goto probe_free_dev_mem;
 	}
 
+	/* enable vpss clocks */
+	ret = vpfe_enable_clock(vpfe_dev);
+	if (ret)
+		goto probe_free_dev_mem;
+
 	/* Initialise the ipipe hw module if exists */
 	if (!cpu_is_davinci_dm644x()) {
 		imp_hw_if = imp_get_hw_if();
@@ -2541,7 +2620,7 @@ static __init int vpfe_probe(struct platform_device *pdev)
 	if (NULL == ccdc_cfg) {
 		v4l2_err(pdev->dev.driver,
 			 "Memory allocation failed for ccdc_cfg\n");
-		goto probe_free_lock;
+		goto probe_free_ccdc_cfg_mem;
 	}
 
 	strncpy(ccdc_cfg->name, vpfe_cfg->ccdc, 32);
@@ -2551,7 +2630,7 @@ static __init int vpfe_probe(struct platform_device *pdev)
 		v4l2_err(pdev->dev.driver,
 			 "Unable to get interrupt for VINT0\n");
 		ret = -ENODEV;
-		goto probe_free_ccdc_cfg_mem;
+		goto probe_disable_clock;
 	}
 	vpfe_dev->ccdc_irq0 = res1->start;
 
@@ -2561,7 +2640,7 @@ static __init int vpfe_probe(struct platform_device *pdev)
 		v4l2_err(pdev->dev.driver,
 			 "Unable to get interrupt for VINT1\n");
 		ret = -ENODEV;
-		goto probe_free_ccdc_cfg_mem;
+		goto probe_disable_clock;
 	}
 	vpfe_dev->ccdc_irq1 = res1->start;
 
@@ -2570,7 +2649,7 @@ static __init int vpfe_probe(struct platform_device *pdev)
 	if (NULL == vfd) {
 		ret = -ENOMEM;
 		v4l2_err(pdev->dev.driver, "Unable to alloc video device\n");
-		goto probe_free_ccdc_cfg_mem;
+		goto probe_disable_clock;
 	}
 
 	/* Initialize field of video device */
@@ -2713,10 +2792,11 @@ probe_out_v4l2_unregister:
 probe_out_video_release:
 	if (!video_is_registered(vpfe_dev->video_dev))
 		video_device_release(vpfe_dev->video_dev);
+probe_disable_clock:
+	vpfe_disable_clock(vpfe_dev);
+	mutex_unlock(&ccdc_lock);
 probe_free_ccdc_cfg_mem:
 	kfree(ccdc_cfg);
-probe_free_lock:
-	mutex_unlock(&ccdc_lock);
 probe_free_dev_mem:
 	kfree(vpfe_dev);
 	return ret;
@@ -2734,6 +2814,7 @@ static int __devexit vpfe_remove(struct platform_device *pdev)
 	kfree(vpfe_dev->sd);
 	v4l2_device_unregister(&vpfe_dev->v4l2_dev);
 	video_unregister_device(vpfe_dev->video_dev);
+	vpfe_disable_clock(vpfe_dev);
 	kfree(vpfe_dev);
 	kfree(ccdc_cfg);
 	return 0;
