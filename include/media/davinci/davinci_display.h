@@ -84,6 +84,7 @@ enum davinci_display_device_id {
 #define DAVINCI_DISPLAY_WIN_640_400  {0, 0, 640, 400}
 #define DAVINCI_DISPLAY_WIN_640_350  {0, 0, 640, 350}
 #define DAVINCI_DISPLAY_WIN_720P  {0, 0, 1280, 720}
+#define DAVINCI_DISPLAY_WIN_720P1610  {0, 0, 1152, 720}  // DJS
 #define DAVINCI_DISPLAY_WIN_1080I  {0, 0, 1920, 1080}
 
 /* Structures */

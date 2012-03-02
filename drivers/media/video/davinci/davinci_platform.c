@@ -127,6 +127,7 @@ char *davinci_modes[] = {
 	VID_ENC_STD_640x350,
 	VID_ENC_STD_480x272,
 	VID_ENC_STD_800x480,
+	VID_ENC_STD_720P_60_1610,
 	""
 };
 
@@ -583,10 +584,10 @@ static void enableDigitalOutput(int bEnable)
 		}
 
 		/* disable VCLK output pin enable */
-		dispc_reg_out(VENC_VIDCTL, 0x141);
+//		dispc_reg_out(VENC_VIDCTL, 0x141);
 
 		/* Disable output sync pins */
-		dispc_reg_out(VENC_SYNCCTL, 0);
+//		dispc_reg_out(VENC_SYNCCTL, 0);
 
 		/* Disable DCLOCK */
 		dispc_reg_out(VENC_DCLKCTL, 0);
@@ -594,8 +595,8 @@ static void enableDigitalOutput(int bEnable)
 
 		/* Disable LCD output control (accepting default polarity) */
 		dispc_reg_out(VENC_LCDOUT, 0);
-		if (!cpu_is_davinci_dm355())
-			dispc_reg_out(VENC_CMPNT, 0x100);
+//		if (!cpu_is_davinci_dm355())
+//			dispc_reg_out(VENC_CMPNT, 0x100);
 		dispc_reg_out(VENC_HSPLS, 0);
 		dispc_reg_out(VENC_HINT, 0);
 		dispc_reg_out(VENC_HSTART, 0);
@@ -615,6 +616,14 @@ static void enableDigitalOutput(int bEnable)
 		/* Set OSD clock and OSD Sync Adavance registers */
 		dispc_reg_out(VENC_OSDCLK0, 1);
 		dispc_reg_out(VENC_OSDCLK1, 2);
+
+		//if(venc->output == 1) {
+			pr_info("HTC: Setting VGA parameters\n");
+			////dispc_reg_out(VENC_VMOD, 0x1c3);
+			//dispc_reg_out(VENC_CMPNT, 0x8000);
+			//dispc_reg_out(VENC_VIDCTL, 0);
+			//dispc_reg_out(VENC_SYNCCTL, 3);
+		//}
 	}
 }
 
@@ -1127,12 +1136,16 @@ static void davinci_enc_set_internal_hd(struct vid_enc_mode_info *mode_info)
 	ths7303_setval(THS7303_FILTER_MODE_720P_1080I);
 	msleep(50);
 	__raw_writel(0x081141EF, IO_ADDRESS(DM3XX_VDAC_CONFIG));
+
+	osd_write_left_margin(mode_info->left_margin);
+	osd_write_upper_margin(mode_info->upper_margin);
+
 	return;
 }
 
 void davinci_enc_priv_setmode(struct vid_enc_device_mgr *mgr)
 {
-
+	pr_info("davinci_enc_priv_setmode: %s\n", mgr->current_mode.name);
 	switch (mgr->current_mode.if_type) {
 	case VID_ENC_IF_BT656:
 		dispc_reg_merge(VENC_VMOD,
@@ -1184,7 +1197,8 @@ void davinci_enc_priv_setmode(struct vid_enc_device_mgr *mgr)
 		strcmp(mgr->current_mode.name, VID_ENC_STD_480x272) == 0 ||
 		strcmp(mgr->current_mode.name, VID_ENC_STD_800x480) == 0) {
 		davinci_enc_set_prgb(&mgr->current_mode);
-	} else if (strcmp(mgr->current_mode.name, VID_ENC_STD_720P_60) == 0) {
+	} else if ((strcmp(mgr->current_mode.name, VID_ENC_STD_720P_60) == 0) ||
+		(strcmp(mgr->current_mode.name, VID_ENC_STD_720P_60_1610) == 0)) {
 		/* DM365 has built-in HD DAC; otherwise, they depend on
 		 * THS8200
 		 */
@@ -1201,7 +1215,24 @@ void davinci_enc_priv_setmode(struct vid_enc_device_mgr *mgr)
 					VENC_VMOD_VENC);
 			davinci_enc_set_internal_hd(&mgr->current_mode);
 			/* changed for 720P demo */
-			davinci_enc_set_basep(0, 0xf0, 10);
+			//davinci_enc_set_basep(0, 0xf0, 10);
+
+//			osd_write_left_margin(mgr->current_mode.left_margin);
+//			osd_write_upper_margin(mgr->current_mode.upper_margin);
+
+			/* DJS - VGA stuff */
+			dispc_reg_out(VENC_CLKCTL, 0x1);		// DJS - enable clock here
+			davinci_enc_set_basep(0, 0x0101, 0x0019);
+
+			dispc_reg_out(VENC_VMOD, 0x1c3);
+			dispc_reg_out(VENC_CMPNT, 0x8000);		// DJS - we could remove it
+													//       being set from enableDigitalOutput()
+													//       but we'll just set it again here
+			//dispc_reg_out(VENC_VIDCTL, 0);
+			//dispc_reg_out(VENC_SYNCCTL, 3);
+
+			dispc_reg_out(VENC_OSDCLK0, 0);			// DJS - set clock gen to pattern of '1'
+			dispc_reg_out(VENC_OSDCLK1, 1);
 		} else
 			davinci_enc_set_720p(&mgr->current_mode);
 	} else if (strcmp(mgr->current_mode.name, VID_ENC_STD_1080I_30) == 0) {

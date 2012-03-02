@@ -96,6 +96,31 @@ config MACH_DAVINCI_DM365_EVM
 	  Configure this option to specify whether the board used
 	  for development is a DM365 EVM
 
+config MACH_DAVINCI_DM365_HTC
+	bool "DM365 based Hanover Displays HTC"
+	depends on ARCH_DAVINCI_DM365
+	help
+	  Say Y here if you are developing for the DM365 based
+	  Hanover Displays HTC
+
+config HTC_FPGA_IO
+	bool "Support the I/O board FPGA"
+	depends on MACH_DAVINCI_DM365_HTC
+	help
+	  Say Y here to add support for peripherals contained
+	  in the I/O board FPGA.
+	  If you are not using an HTC I/O board then you can
+	  say N here.
+
+config HTC_AUDIOBOARD
+	bool "Support the HTC Audio board"
+	depends on MACH_DAVINCI_DM365_HTC
+	help
+	  Say Y here to add support for peripherals on the
+	  HTC Audio board.
+	  If you are not using an HTC Audio board then can
+	  say N here.
+
 config MACH_DAVINCI_DA830_EVM
 	bool "TI DA830/OMAP-L137 Reference Platform"
 	default ARCH_DAVINCI_DA830

@@ -874,11 +874,23 @@ int imp_set_preview_config(struct device *dev,
 }
 EXPORT_SYMBOL(imp_set_preview_config);
 
+int imp_common_resizer_busy(void) {
+	//if(imp_hw_if->get_busy != NULL)
+		if(imp_hw_if->get_busy())		// DJS
+			return -EBUSY;
+	return 0;
+}
+EXPORT_SYMBOL(imp_common_resizer_busy);
+
 int imp_set_resizer_config(struct device *dev,
 			   struct imp_logical_channel *channel,
 			   struct rsz_channel_config *chan_config)
 {
 	int ret = 0, len;
+
+//	if(imp_hw_if->get_busy != NULL)
+//		if(imp_hw_if->get_busy())		// DJS
+//			return -EBUSY;
 
 	dev_dbg(dev, "imp_set_resizer_config. len = %d\n", chan_config->len);
 	if (channel->mode == IMP_MODE_INVALID) {
@@ -1496,6 +1508,9 @@ int imp_common_start_resize(struct device *dev,
 			    struct imp_logical_channel *chan,
 			    struct imp_convert *convert)
 {
+//	if(imp_hw_if->get_busy != NULL)		// DJS
+//		if(imp_hw_if->get_busy())		// DJS
+//			return -EBUSY;
 	return (imp_common_start(dev, chan, convert));
 }
 EXPORT_SYMBOL(imp_common_start_resize);

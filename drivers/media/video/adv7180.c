@@ -27,6 +27,7 @@
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-chip-ident.h>
+#include <linux/delay.h>
 
 #define DRIVER_NAME "adv7180"
 
@@ -35,6 +36,8 @@
 #define ADV7180_AUTODETECT_ENABLE_REG	0x07
 #define ADV7180_AUTODETECT_DEFAULT	0x7f
 
+#define ADV7180_POWER_MANAGE_RET		0x0f
+#define ADV7180_POWER_RESET				0x80
 
 #define ADV7180_STATUS1_REG 0x10
 #define ADV7180_STATUS1_AUTOD_MASK 0x70
@@ -50,6 +53,12 @@
 #define ADV7180_IDENT_REG 0x11
 #define ADV7180_ID_7180 0x18
 
+#define ADV7180_PIXDELAY		0x27
+//#define ADV7180_SWPC			(1 << 7)
+#define ADV7180_PIXDELAY_SWPC	(0x58 | 0x80)		// default is 0x58
+
+#define ADV7180_ADC_CTRL	0x58
+#define ADV7180_VSYNC		0x1
 
 struct adv7180_state {
 	struct v4l2_subdev sd;
@@ -61,22 +70,33 @@ static v4l2_std_id determine_norm(struct i2c_client *client)
 
 	switch (status1 & ADV7180_STATUS1_AUTOD_MASK) {
 	case ADV7180_STATUS1_AUTOD_NTSM_M_J:
+		pr_info("ADV7180: V4L2_STD_NTSC_M_JP\n");
 		return V4L2_STD_NTSC_M_JP;
 	case ADV7180_STATUS1_AUTOD_NTSC_4_43:
+		pr_info("ADV7180: V4L2_STD_NTSC_443\n");
 		return V4L2_STD_NTSC_443;
 	case ADV7180_STATUS1_AUTOD_PAL_M:
+		pr_info("ADV7180: V4L2_STD_PAL_M\n");
 		return V4L2_STD_PAL_M;
 	case ADV7180_STATUS1_AUTOD_PAL_60:
+		pr_info("ADV7180: V4L2_STD_PAL_60\n");
 		return V4L2_STD_PAL_60;
 	case ADV7180_STATUS1_AUTOD_PAL_B_G:
-		return V4L2_STD_PAL;
+		pr_info("ADV7180: V4L2_STD_PAL\n");
+		//return V4L2_STD_PAL;
+		return V4L2_STD_PAL_B;
 	case ADV7180_STATUS1_AUTOD_SECAM:
+		pr_info("ADV7180: V4L2_STD_SECAM\n");
 		return V4L2_STD_SECAM;
 	case ADV7180_STATUS1_AUTOD_PAL_COMB:
-		return V4L2_STD_PAL_Nc | V4L2_STD_PAL_N;
+		pr_info("ADV7180: V4L2_STD_PAL_Nc | V4L2_STD_PAL_N\n");
+		//return V4L2_STD_PAL_Nc | V4L2_STD_PAL_N;
+		return V4L2_STD_PAL_Nc;
 	case ADV7180_STATUS1_AUTOD_SECAM_525:
+		pr_info("ADV7180: V4L2_STD_SECAM\n");
 		return V4L2_STD_SECAM;
 	default:
+		pr_info("ADV7180: V4L2_STD_UNKNOWN\n");
 		return V4L2_STD_UNKNOWN;
 	}
 }
@@ -89,8 +109,8 @@ static inline struct adv7180_state *to_state(struct v4l2_subdev *sd)
 static int adv7180_querystd(struct v4l2_subdev *sd, v4l2_std_id *std)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
-
 	*std = determine_norm(client);
+	pr_info("adv7180_querystd: std=0x%llx\n", *std);
 	return 0;
 }
 
@@ -140,7 +160,14 @@ static int adv7180_probe(struct i2c_client *client,
 	sd = &state->sd;
 	v4l2_i2c_subdev_init(sd, client, &adv7180_ops);
 
+#if 0
 	/* Initialize adv7180 */
+	i2c_smbus_write_byte_data(client, ADV7180_POWER_MANAGE_RET,
+		ADV7180_POWER_RESET);
+	mdelay(5);
+	/* not needed anymore as we're now using power pins */
+#endif
+
 	/* enable autodetection */
 	ret = i2c_smbus_write_byte_data(client, ADV7180_INPUT_CONTROL_REG,
 		ADV7180_INPUT_CONTROL_PAL_BG_NTSC_J_SECAM);
@@ -153,6 +180,15 @@ static int adv7180_probe(struct i2c_client *client,
 			": Failed to communicate to chip: %d\n", ret);
 		return ret;
 	}
+
+	/* DJS - output VSYNC, not FRAME */
+	i2c_smbus_write_byte_data(client, ADV7180_ADC_CTRL,
+		ADV7180_VSYNC);
+
+#if 0
+	i2c_smbus_write_byte_data(client, ADV7180_PIXDELAY,
+		ADV7180_PIXDELAY_SWPC);
+#endif
 
 	return 0;
 }

@@ -383,6 +383,10 @@ static struct machine_desc * __init setup_machine(unsigned int nr)
 	return list;
 }
 
+// DJS
+unsigned long real_mem_size = 0;
+EXPORT_SYMBOL(real_mem_size);
+
 static int __init arm_add_memory(unsigned long start, unsigned long size)
 {
 	struct membank *bank = &meminfo.bank[meminfo.nr_banks];
@@ -401,6 +405,9 @@ static int __init arm_add_memory(unsigned long start, unsigned long size)
 	bank->start = PAGE_ALIGN(start);
 	bank->size  = size & PAGE_MASK;
 	bank->node  = PHYS_TO_NID(start);
+
+	// DJS
+	real_mem_size += bank->size;
 
 	/*
 	 * Check whether this memory region has non-zero size or
@@ -421,6 +428,7 @@ static void __init early_mem(char **p)
 {
 	static int usermem __initdata = 0;
 	unsigned long size, start;
+	unsigned long orig_real_mem_size = real_mem_size;
 
 	/*
 	 * If the user specifies memory size, we
@@ -438,6 +446,7 @@ static void __init early_mem(char **p)
 		start = memparse(*p + 1, p);
 
 	arm_add_memory(start, size);
+	real_mem_size = orig_real_mem_size;
 }
 __early_param("mem=", early_mem);
 

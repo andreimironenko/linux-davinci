@@ -105,6 +105,7 @@ static struct v4l2_rect ntsc_bounds = DAVINCI_DISPLAY_WIN_NTSC;
 static struct v4l2_rect pal_bounds = DAVINCI_DISPLAY_WIN_PAL;
 static struct v4l2_rect vga_bounds = DAVINCI_DISPLAY_WIN_640_480;
 static struct v4l2_rect hd_720p_bounds = DAVINCI_DISPLAY_WIN_720P;
+static struct v4l2_rect hd_720p_1610_bounds = DAVINCI_DISPLAY_WIN_720P1610;
 static struct v4l2_rect hd_1080i_bounds = DAVINCI_DISPLAY_WIN_1080I;
 
 /*
@@ -638,6 +639,9 @@ static int vpbe_get_mode_timeperframe(unsigned char *mode_info_name,
 		frVal->numerator   = 50;
 		frVal->denominator = 1;
 	} else if (!strcmp(davinci_dm.mode_info.name, VID_ENC_STD_720P_60)) {
+		frVal->numerator   = 60;
+		frVal->denominator = 1;
+	} else if (!strcmp(davinci_dm.mode_info.name, VID_ENC_STD_720P_60_1610)) {	// DJS
 		frVal->numerator   = 60;
 		frVal->denominator = 1;
 	} else if (!strcmp(davinci_dm.mode_info.name, VID_ENC_STD_1080I_25)) {
@@ -1175,6 +1179,9 @@ static int vpbe_cropcap(struct file *file, void *priv,
 		cropcap->pixelaspect = sp_aspect;
 	} else if (!strcmp(davinci_dm.mode_info.name, VID_ENC_STD_720P_60)) {
 		cropcap->bounds = cropcap->defrect = hd_720p_bounds;
+		cropcap->pixelaspect = sp_aspect;
+	} else if (!strcmp(davinci_dm.mode_info.name, VID_ENC_STD_720P_60_1610)) {
+		cropcap->bounds = cropcap->defrect = hd_720p_1610_bounds;
 		cropcap->pixelaspect = sp_aspect;
 	} else if (!strcmp(davinci_dm.mode_info.name, VID_ENC_STD_1080I_30)) {
 		cropcap->bounds = cropcap->defrect = hd_1080i_bounds;

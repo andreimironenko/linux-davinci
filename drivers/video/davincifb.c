@@ -328,6 +328,46 @@ static int get_video_mode(struct fb_videomode *mode)
 	if (mode_info.interlaced)
 		mode->vmode |= FB_VMODE_INTERLACED;
 
+	/* tempoarary hacky fix to make fbset behave */
+	if(!strcmp(mode_info.name, "720P-60")) {
+		pr_debug("HTC: Hardcoding FB timing info for 720P-60\n");
+		mode->pixclock = 13468;
+		mode->left_margin = 220;
+		mode->right_margin = 70;
+		mode->upper_margin = 20;
+		mode->lower_margin = 5;
+		mode->hsync_len = 80;
+		mode->vsync_len = 5;
+	} else if(!strcmp(mode_info.name, "720P-60-16:10")) {
+		pr_debug("HTC: Hardcoding FB timing info for 720P-60-16:10\n");
+		mode->pixclock = 13468;
+		mode->left_margin = 220;
+		mode->right_margin = 198;
+		mode->upper_margin = 20;
+		mode->lower_margin = 5;
+		mode->hsync_len = 80;
+		mode->vsync_len = 5;
+	} else if(!strcmp(mode_info.name, "480P-60")) {
+		pr_debug("HTC: Hardcoding FB timing info for 480P-60\n");
+		mode->pixclock = 30852;
+		mode->left_margin = 128;
+		mode->right_margin = 203;
+		mode->upper_margin = 32;
+		mode->lower_margin = 2;
+		mode->hsync_len = 0;
+		mode->vsync_len = 0;
+	} else if(!strcmp(mode_info.name, "576P-50")) {
+		pr_debug("HTC: Hardcoding FB timing info for 576P-50\n");
+		mode->pixclock = 31250;
+		mode->left_margin = 126;
+		mode->right_margin = 178;
+		mode->upper_margin = 48;
+		mode->lower_margin = 1;
+		mode->hsync_len = 0;
+		mode->vsync_len = 0;
+	} else
+		pr_info("HTC: No hardcoded FB timing info for mode %s\n", mode_info.name);
+
 	return ret;
 }
 
@@ -467,8 +507,49 @@ static void construct_fb_var(struct fb_var_screeninfo *var,
 			     struct fb_videomode *mode,
 			     struct davinci_layer_config *lconfig)
 {
+	/* tempoarary hacky fix to make fbset behave */
+	if(!strcmp(mode->name, "720P-60")) {
+		pr_debug("HTC: 2 Hardcoding FB timing info for 720P-60\n");
+		mode->pixclock = 13468;
+		mode->left_margin = 220;
+		mode->right_margin = 70;
+		mode->upper_margin = 20;
+		mode->lower_margin = 5;
+		mode->hsync_len = 80;
+		mode->vsync_len = 5;
+	} else if(!strcmp(mode->name, "720P-60-16:10")) {
+		pr_debug("HTC: 2 Hardcoding FB timing info for 720P-60-16:10\n");
+		mode->pixclock = 13468;
+		mode->left_margin = 220;
+		mode->right_margin = 198;
+		mode->upper_margin = 20;
+		mode->lower_margin = 5;
+		mode->hsync_len = 80;
+		mode->vsync_len = 5;
+	} else if(!strcmp(mode->name, "480P-60")) {
+		pr_debug("HTC: 2 Hardcoding FB timing info for 480P-60\n");
+		mode->pixclock = 30852;
+		mode->left_margin = 128;
+		mode->right_margin = 203;
+		mode->upper_margin = 32;
+		mode->lower_margin = 2;
+		mode->hsync_len = 0;
+		mode->vsync_len = 0;
+	} else if(!strcmp(mode->name, "576P-50")) {
+		pr_debug("HTC: 2 Hardcoding FB timing info for 576P-50\n");
+		mode->pixclock = 31250;
+		mode->left_margin = 126;
+		mode->right_margin = 178;
+		mode->upper_margin = 48;
+		mode->lower_margin = 1;
+		mode->hsync_len = 0;
+		mode->vsync_len = 0;
+	} else
+		pr_info("HTC: 2 No hardcoded FB timing info for mode %s\n", mode->name);
+
 	fb_videomode_to_var(var, mode);
 	convert_osd_to_fb_var(lconfig, var);
+
 	if (lconfig->xsize != mode->xres || lconfig->ysize != mode->yres)
 		var->pixclock = 0;
 }
@@ -1494,7 +1575,8 @@ davincifb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	struct fb_videomode *mode = &win->dm->mode;
 	struct davinci_layer_config lconfig;
 	struct fb_fix_screeninfo fix;
-		
+	u32 activate = var->activate;	// DJS - we lose original var->activate
+
 	/*
 	 * Get an updated copy of the video mode from the encoder manager, just
 	 * in case the display has been switched.
@@ -1534,18 +1616,32 @@ davincifb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 		return -EINVAL;
 	}
 
-	if (var->xres_virtual < var->xres || var->yres_virtual < var->yres)
+	if (var->xres_virtual < var->xres || var->yres_virtual < var->yres) {
+		pr_info("davincifb_check_var fail 1\n");
 		return -EINVAL;
-	if (var->xoffset > var->xres_virtual - var->xres)
+	}
+	if (var->xoffset > var->xres_virtual - var->xres) {
+		pr_info("davincifb_check_var fail 2\n");
 		return -EINVAL;
-	if (var->yoffset > var->yres_virtual - var->yres)
+	}
+	if (var->yoffset > var->yres_virtual - var->yres) {
+		pr_info("davincifb_check_var fail 3\n");
 		return -EINVAL;
-	if (mode->xres < var->xres || mode->yres < var->yres)
+	}
+#if 0
+	if (mode->xres < var->xres || mode->yres < var->yres) {
+		pr_info("davincifb_check_var fail 4\n");
 		return -EINVAL;
-	if (win->xpos > mode->xres - var->xres)
+	}
+#endif
+	if (win->xpos > mode->xres - var->xres) {
+		pr_info("davincifb_check_var fail 5\n");
 		return -EINVAL;
-	if (win->ypos > mode->yres - var->yres)
+	}
+	if (win->ypos > mode->yres - var->yres) {
+		pr_info("davincifb_check_var fail 6\n");
 		return -EINVAL;
+	}
 	convert_fb_var_to_osd(var, &lconfig, win->dm->yc_pixfmt);
 
 	update_fix_info(var, &fix);
@@ -1553,24 +1649,34 @@ davincifb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	lconfig.xpos = win->xpos;
 	lconfig.ypos = win->ypos;
 	/* xoffset must be a multiple of xpanstep */
-	if (var->xoffset & ~(fix.xpanstep - 1))
+	if (var->xoffset & ~(fix.xpanstep - 1)) {
+		pr_info("davincifb_check_var fail 7\n");
 		return -EINVAL;
+	}
 
 	/* check if we have enough video memory to support this mode */
-	if (!window_will_fit_framebuffer(var, info->fix.smem_len))
+	if (!window_will_fit_framebuffer(var, info->fix.smem_len)) {
+		pr_info("davincifb_check_var fail 8\n");
 		return -EINVAL;
+	}
 
 	/* see if the OSD manager approves of this configuration */
-	if (davinci_disp_try_layer_config(win->layer, &lconfig))
+	if (davinci_disp_try_layer_config(win->layer, &lconfig)) {
+		pr_info("davincifb_check_var fail 9\n");
 		return -EINVAL;
+	}
 	/*
 	 * Reject this var if the OSD manager would have to modify the window
 	 * geometry to make it work.
 	 */
-	if (lconfig.xsize != var->xres || lconfig.ysize != var->yres)
+	if (lconfig.xsize != var->xres || lconfig.ysize != var->yres) {
+		pr_info("davincifb_check_var fail 10\n");
 		return -EINVAL;
-	if (lconfig.xpos != win->xpos || lconfig.ypos != win->ypos)
+	}
+	if (lconfig.xpos != win->xpos || lconfig.ypos != win->ypos) {
+		pr_info("davincifb_check_var fail 11\n");
 		return -EINVAL;
+	}
 	
 	/*
 	 * At this point we have accepted the var, so now we convert our layer
@@ -1579,6 +1685,7 @@ davincifb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 	 * will be unmodified, as we have no way to verify them.
 	 */
 	convert_osd_to_fb_var(&lconfig, var);
+	var->activate = activate;		// DJS - copy back original var->activate
 
 	return 0;
 }
@@ -1602,16 +1709,17 @@ static int davincifb_set_par(struct fb_info *info)
 	memcpy(&mode, &win->dm->mode, sizeof(mode));
 	fb_var_to_videomode(&mode, var);
 	mode.name = win->dm->mode.name;
-	if (mode.xres == win->dm->mode.xres && mode.yres == win->dm->mode.yres
-	    && mode.pixclock != 0) {
+	pr_debug("davincifb_set_par: %s - %u x %u , %u x %u\n", mode.name, mode.xres, mode.yres, win->dm->mode.xres, win->dm->mode.yres);
+	//if (mode.xres == win->dm->mode.xres && mode.yres == win->dm->mode.yres
+	//    && mode.pixclock != 0) {
 		/*
 		 * If the timing parameters from the var are different than the
 		 * timing parameters from the encoder, try to update the
 		 * timing parameters with the encoder manager.
 		 */
-		if (!fb_mode_is_equal(&mode, &win->dm->mode))
+		//if (!fb_mode_is_equal(&mode, &win->dm->mode))
 			set_video_mode(&mode);
-	}
+	//}
 	/* update our copy of the encoder video mode */
 	get_video_mode(&win->dm->mode);
 

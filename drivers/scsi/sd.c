@@ -1654,7 +1654,20 @@ sd_read_write_protect_flag(struct scsi_disk *sdkp, unsigned char *buffer)
 	}
 
 	if (sdp->use_192_bytes_for_3f) {
+#ifndef CONFIG_SCSI_USB_DRIVE_WP_HTC_FIX
 		res = sd_do_mode_sense(sdp, 0, 0x3F, buffer, 192, &data, NULL);
+#else
+		// DJS for Hanover Displays
+		// Hardcode the writeprotect as disabled.
+		// Otherwise the sd_do_mode_sense() will take ages for some reason.
+		sdkp->write_prot = 0;
+		set_disk_ro(sdkp->disk, sdkp->write_prot);
+		if (sdkp->first_scan || old_wp != sdkp->write_prot) {
+			sd_printk(KERN_NOTICE, sdkp, "Write Protect is %s\n",
+				  sdkp->write_prot ? "on" : "off");
+		}
+		return;
+#endif
 	} else {
 		/*
 		 * First attempt: ask for all pages (0x3F), but only 4 bytes.

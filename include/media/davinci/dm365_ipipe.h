@@ -1352,6 +1352,7 @@ void rsz_src_enable(int enable);
 int rsz_set_output_address(struct ipipe_params *params,
 			      int resize_no, unsigned int address);
 int rsz_set_in_pix_format(unsigned char y_c);
+int rsz_get_busy(void);
 
 #endif
 #endif

@@ -412,6 +412,7 @@ static int davinci_i2s_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+#if 1 // DJS
 static int davinci_i2s_prepare(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
@@ -424,6 +425,7 @@ static int davinci_i2s_prepare(struct snd_pcm_substream *substream,
 	}
 	return 0;
 }
+#endif
 
 static int davinci_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 			       struct snd_soc_dai *dai)
@@ -431,8 +433,10 @@ static int davinci_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 	struct davinci_mcbsp_dev *dev = dai->private_data;
 	int ret = 0;
 	int playback = (substream->stream == SNDRV_PCM_STREAM_PLAYBACK);
+#if 1 // DJS
 	if ((dev->pcr & DAVINCI_MCBSP_PCR_FSXM) == 0)
 		return 0;	/* return if codec is master */
+#endif
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
@@ -451,6 +455,7 @@ static int davinci_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 	return ret;
 }
 
+#if 1 // DJS
 static void davinci_i2s_shutdown(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
@@ -458,12 +463,15 @@ static void davinci_i2s_shutdown(struct snd_pcm_substream *substream,
 	int playback = (substream->stream == SNDRV_PCM_STREAM_PLAYBACK);
 	davinci_mcbsp_stop(dev, playback);
 }
+#endif
 
 #define DAVINCI_I2S_RATES	SNDRV_PCM_RATE_8000_96000
 
 static struct snd_soc_dai_ops davinci_i2s_dai_ops = {
+#if 1 // DJS
 	.shutdown	= davinci_i2s_shutdown,
 	.prepare	= davinci_i2s_prepare,
+#endif
 	.trigger	= davinci_i2s_trigger,
 	.hw_params	= davinci_i2s_hw_params,
 	.set_fmt	= davinci_i2s_set_dai_fmt,

@@ -326,4 +326,14 @@ config INPUT_PCAP
 	  To compile this driver as a module, choose M here: the
 	  module will be called pcap_keys.
 
+config INPUT_HTC_BEEP
+	tristate "Hanover HTC Beeper support"
+	depends on MACH_DAVINCI_DM365_HTC
+	help
+	  Say Y here to enale terminal support for the Hanover Transport
+	  Computer's beeper.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called htc_beep
+
 endif

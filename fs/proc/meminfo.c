@@ -19,6 +19,8 @@ void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
 {
 }
 
+extern unsigned long real_mem_size;		// DJS
+
 static int meminfo_proc_show(struct seq_file *m, void *v)
 {
 	struct sysinfo i;
@@ -101,6 +103,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 #ifdef CONFIG_MEMORY_FAILURE
 		"HardwareCorrupted: %5lu kB\n"
 #endif
+		"RealMemTotal:   %8lu kB\n"		// DJS
 		,
 		K(i.totalram),
 		K(i.freeram),
@@ -151,6 +154,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 #ifdef CONFIG_MEMORY_FAILURE
 		,atomic_long_read(&mce_bad_pages) << (PAGE_SHIFT - 10)
 #endif
+		,real_mem_size >> 10		// DJS
 		);
 
 	hugetlb_report_meminfo(m);

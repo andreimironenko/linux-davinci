@@ -61,3 +61,12 @@ config  SND_DA850_SOC_EVM
 	  Say Y if you want to add support for SoC audio on TI
 	  DA850/OMAP-L138 EVM
 
+config SND_DAVINCI_SOC_HTC
+	tristate "TLV320aic23 Audio support for Hanover HTC"
+	depends on SND_DAVINCI_SOC
+	depends on MACH_DAVINCI_DM365_HTC
+	select SND_DAVINCI_SOC_I2S
+	select SND_SOC_TLV320AIC23
+	help
+	  Say Y if you want to add support for SoC audio on DaVinci
+	  DM365 based Hanover Transport Computer

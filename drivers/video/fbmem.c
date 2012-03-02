@@ -915,9 +915,12 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 	int flags = info->flags;
 	int ret = 0;
 
+//pr_info("fb_set_var: 1\n");
+
 	if (var->activate & FB_ACTIVATE_INV_MODE) {
 		struct fb_videomode mode1, mode2;
 
+//pr_info("fb_set_var: 2\n");
 		fb_var_to_videomode(&mode1, var);
 		fb_var_to_videomode(&mode2, &info->var);
 		/* make sure we don't delete the videomode of current var */
@@ -926,15 +929,19 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 		if (!ret) {
 		    struct fb_event event;
 
+//pr_info("fb_set_var: 3\n");
 		    event.info = info;
 		    event.data = &mode1;
 		    ret = fb_notifier_call_chain(FB_EVENT_MODE_DELETE, &event);
 		}
 
-		if (!ret)
+		if (!ret) {
+//pr_info("fb_set_var: 4\n");
 		    fb_delete_videomode(&mode1, &info->modelist);
+		}
 
 
+//pr_info("fb_set_var: 5\n");
 		ret = (ret) ? -EINVAL : 0;
 		goto done;
 	}
@@ -942,35 +949,46 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 	if ((var->activate & FB_ACTIVATE_FORCE) ||
 	    memcmp(&info->var, var, sizeof(struct fb_var_screeninfo))) {
 		u32 activate = var->activate;
+//pr_info("fb_set_var: 6\n");
 
 		if (!info->fbops->fb_check_var) {
+//pr_info("fb_set_var: 7\n");
 			*var = info->var;
 			goto done;
 		}
 
 		ret = info->fbops->fb_check_var(var, info);
 
-		if (ret)
+		if (ret) {
+//pr_info("fb_set_var: 8\n");
 			goto done;
+		}
 
-		if ((var->activate & FB_ACTIVATE_MASK) == FB_ACTIVATE_NOW) {
+//		if ((var->activate & FB_ACTIVATE_MASK) == FB_ACTIVATE_NOW) {
+		if ((activate & FB_ACTIVATE_MASK) == FB_ACTIVATE_NOW) {			// DJS - original var->activate value may be lost
 			struct fb_var_screeninfo old_var;
 			struct fb_videomode mode;
 
+//pr_info("fb_set_var: 9\n");
 			if (info->fbops->fb_get_caps) {
 				ret = fb_check_caps(info, var, activate);
 
-				if (ret)
+				if (ret) {
+//pr_info("fb_set_var: 10\n");
 					goto done;
+				}
 			}
 
 			old_var = info->var;
 			info->var = *var;
 
+//pr_info("fb_set_var: 11\n");
 			if (info->fbops->fb_set_par) {
+//pr_info("fb_set_var: 12\n");
 				ret = info->fbops->fb_set_par(info);
 
 				if (ret) {
+//pr_info("fb_set_var: 13\n");
 					info->var = old_var;
 					printk(KERN_WARNING "detected "
 						"fb_set_par error, "
@@ -979,13 +997,17 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 				}
 			}
 
+//pr_info("fb_set_var: 14\n");
 			fb_pan_display(info, &info->var);
 			fb_set_cmap(&info->cmap, info);
 			fb_var_to_videomode(&mode, &info->var);
+//pr_info("fb_set_var: 15\n");
 
 			if (info->modelist.prev && info->modelist.next &&
-			    !list_empty(&info->modelist))
+			    !list_empty(&info->modelist)) {
+//pr_info("fb_set_var: 16\n");
 				ret = fb_add_videomode(&mode, &info->modelist);
+			}
 
 			if (!ret && (flags & FBINFO_MISC_USEREVENT)) {
 				struct fb_event event;
@@ -993,6 +1015,7 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 					FB_EVENT_MODE_CHANGE_ALL :
 					FB_EVENT_MODE_CHANGE;
 
+//pr_info("fb_set_var: 17\n");
 				info->flags &= ~FBINFO_MISC_USEREVENT;
 				event.info = info;
 				event.data = &mode;
@@ -1000,6 +1023,7 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
 			}
 		}
 	}
+//pr_info("fb_set_var: 18\n");
 
  done:
 	return ret;

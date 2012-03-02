@@ -118,6 +118,7 @@ static void davinci_spi_chipselect(struct spi_device *spi, int value)
 	struct davinci_spi_platform_data *pdata;
 	u32 data1_reg_val = 0;
 
+#if 0
 	davinci_spi = spi_master_get_devdata(spi->master);
 	pdata = davinci_spi->pdata;
 
@@ -135,6 +136,7 @@ static void davinci_spi_chipselect(struct spi_device *spi, int value)
 					& SPIBUF_RXEMPTY_MASK) == 0)
 			cpu_relax();
 	}
+#endif
 }
 
 /*
@@ -313,7 +315,8 @@ static int davinci_spi_setup(struct spi_device *spi)
 	 * SPI in DaVinci and DA8xx operate between
 	 * 600 KHz and 50 MHz
 	 */
-	if (spi->max_speed_hz < 600000 || spi->max_speed_hz > 50000000)
+	//if (spi->max_speed_hz < 600000 || spi->max_speed_hz > 50000000)
+	if (spi->max_speed_hz < 500000 || spi->max_speed_hz > 50000000)
 		return -EINVAL;
 
 	/*

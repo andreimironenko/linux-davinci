@@ -179,6 +179,188 @@ struct pcf8563_limit
 	unsigned char max;
 };
 
+static ssize_t show_alarm_flag(struct device *dev, struct device_attribute *attr, char *buf) {
+	struct i2c_client *client = to_i2c_client(dev);
+	unsigned char data[3] = { PCF8563_REG_ST1 };
+
+	struct i2c_msg msgs[] = {
+		{ client->addr, 0, 1, data },	/* setup read ptr */
+		{ client->addr, I2C_M_RD, 3, data },	/* read status + date */
+	};
+
+	/* read registers */
+	if ((i2c_transfer(client->adapter, msgs, 2)) != 2) {
+		dev_err(&client->dev, "%s: read error\n", __func__);
+		*buf = 0;
+		return -EIO;
+	}
+
+	if (data[PCF8563_REG_SC] & PCF8563_SC_LV)
+		dev_info(&client->dev,
+			"low voltage detected, date/time is not reliable.\n");
+
+	return sprintf(buf, "%u\n", !!(data[PCF8563_REG_ST2] & BIT(3)));
+}
+static ssize_t store_alarm_flag(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	struct i2c_client *client = to_i2c_client(dev);
+	unsigned char data[2] = { PCF8563_REG_ST2, 0};
+	int val = -1, err;
+	struct i2c_msg msgs[] = {
+		{ client->addr, 0, 1, data },	/* setup read ptr */
+		{ client->addr, I2C_M_RD, 1, data },	/* read status */
+	};
+
+	/* read registers */
+	if ((i2c_transfer(client->adapter, msgs, 2)) != 2) {
+		dev_err(&client->dev, "%s: read error\n", __func__);
+		return -EIO;
+	}
+
+	if((sscanf(buf, "%u", &val) == -1) || (val == -1))
+		return -EINVAL;
+
+	val = val ? BIT(4) : 0;
+
+	if(data[0] & BIT(1))
+		val |= BIT(1);
+	data[0] = PCF8563_REG_ST2;
+	data[1] = val;
+
+	err = i2c_master_send(client, data, sizeof(data));
+	if (err != sizeof(data)) {
+		dev_err(&client->dev,
+			"%s: err=%d addr=%02x, data=%02x\n",
+			__func__, err, data[0], data[1]);
+		return -EIO;
+	}
+	return strlen(buf);
+}
+DEVICE_ATTR(alarm_flag, 0644, show_alarm_flag, store_alarm_flag);
+
+static ssize_t show_alarm_wakeup(struct device *dev, struct device_attribute *attr, char *buf) {
+	struct i2c_client *client = to_i2c_client(dev);
+	unsigned char data[3] = { PCF8563_REG_ST1 };
+
+	struct i2c_msg msgs[] = {
+		{ client->addr, 0, 1, data },	/* setup read ptr */
+		{ client->addr, I2C_M_RD, 3, data },	/* read status + date */
+	};
+
+	/* read registers */
+	if ((i2c_transfer(client->adapter, msgs, 2)) != 2) {
+		dev_err(&client->dev, "%s: read error\n", __func__);
+		*buf = 0;
+		return -EIO;
+	}
+
+	if (data[PCF8563_REG_SC] & PCF8563_SC_LV)
+		dev_info(&client->dev,
+			"low voltage detected, date/time is not reliable.\n");
+
+	return sprintf(buf, "%u\n", !!(data[PCF8563_REG_ST2] & BIT(1)));
+}
+static ssize_t store_alarm_wakeup(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	struct i2c_client *client = to_i2c_client(dev);
+	unsigned char data[2] = { PCF8563_REG_ST2, 0};
+	int val = -1, err;
+
+	if((sscanf(buf, "%u", &val) == -1) || (val == -1))
+		return -EINVAL;
+
+	val = val ? BIT(1) : 0;
+	data[1] = val;
+
+	err = i2c_master_send(client, data, sizeof(data));
+	if (err != sizeof(data)) {
+		dev_err(&client->dev,
+			"%s: err=%d addr=%02x, data=%02x\n",
+			__func__, err, data[0], data[1]);
+		return -EIO;
+	}
+	return strlen(buf);
+}
+DEVICE_ATTR(alarm_wakeup, 0644, show_alarm_wakeup, store_alarm_wakeup);
+
+static ssize_t show_alarm_value(struct device *dev, char *buf, int reg) {
+	struct i2c_client *client = to_i2c_client(dev);
+	unsigned char data[1] = { reg };
+
+	struct i2c_msg msgs[] = {
+		{ client->addr, 0, 1, data },	/* setup read ptr */
+		{ client->addr, I2C_M_RD, 1, data },	/* read status + date */
+	};
+
+	/* read registers */
+	if ((i2c_transfer(client->adapter, msgs, 2)) != 2) {
+		dev_err(&client->dev, "%s: read error\n", __func__);
+		*buf = 0;
+		return -EIO;
+	}
+
+	if(data[0] & BIT(7)) {
+		strcpy(buf, "off\n");
+		return 4;
+	}
+	return sprintf(buf, "%u\n", bcd2bin(data[0]));
+}
+
+static ssize_t store_alarm_value(struct device *dev, const char *buf, int reg, int min, int max) {
+	struct i2c_client *client = to_i2c_client(dev);
+	int val = -1;
+	unsigned char data[2] = { reg, 0};
+	int err;
+
+	//if(!strcmp(buf, "off") || !strcmp(buf, "off\n"))
+	if((buf[0] == 'o') && (buf[1] == 'f') && (buf[2] == 'f') && (buf[3] <= ' '))
+		val = BIT(7);
+	else if((sscanf(buf, "%u", &val) == -1) || (val == -1))
+		return strlen(buf);
+	else {
+		if((val < min) || (val > max))
+			return -EINVAL;
+		val = bin2bcd(val);
+	}
+	data[1] = val;
+
+	err = i2c_master_send(client, data, sizeof(data));
+	if (err != sizeof(data)) {
+		dev_err(&client->dev,
+			"%s: err=%d addr=%02x, data=%02x\n",
+			__func__, err, data[0], data[1]);
+		return -EIO;
+	}
+	return strlen(buf);
+}
+
+static ssize_t show_minute_alarm(struct device *dev, struct device_attribute *attr, char *buf) {
+	return show_alarm_value(dev, buf, PCF8563_REG_AMN);
+}
+static ssize_t store_minute_alarm(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	return store_alarm_value(dev, buf, PCF8563_REG_AMN, 0, 59);
+}
+DEVICE_ATTR(minute_alarm, 0644, show_minute_alarm, store_minute_alarm);
+static ssize_t show_hour_alarm(struct device *dev, struct device_attribute *attr, char *buf) {
+	return show_alarm_value(dev, buf, PCF8563_REG_AHR);
+}
+static ssize_t store_hour_alarm(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	return store_alarm_value(dev, buf, PCF8563_REG_AHR, 0, 23);
+}
+DEVICE_ATTR(hour_alarm, 0644, show_hour_alarm, store_hour_alarm);
+static ssize_t show_day_alarm(struct device *dev, struct device_attribute *attr, char *buf) {
+	return show_alarm_value(dev, buf, PCF8563_REG_ADM);
+}
+static ssize_t store_day_alarm(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	return store_alarm_value(dev, buf, PCF8563_REG_ADM, 1, 31);
+}
+DEVICE_ATTR(day_alarm, 0644, show_day_alarm, store_day_alarm);
+static ssize_t show_weekday_alarm(struct device *dev, struct device_attribute *attr, char *buf) {
+	return show_alarm_value(dev, buf, PCF8563_REG_ADW);
+}
+static ssize_t store_weekday_alarm(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	return store_alarm_value(dev, buf, PCF8563_REG_ADW, 0, 6);
+}
+DEVICE_ATTR(weekday_alarm, 0644, show_weekday_alarm, store_weekday_alarm);
+
 static int pcf8563_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	return pcf8563_get_datetime(to_i2c_client(dev), tm);
@@ -222,6 +404,13 @@ static int pcf8563_probe(struct i2c_client *client,
 
 	i2c_set_clientdata(client, pcf8563);
 
+	err = device_create_file(&client->dev, &dev_attr_alarm_flag);
+	err = device_create_file(&client->dev, &dev_attr_alarm_wakeup);
+	err = device_create_file(&client->dev, &dev_attr_minute_alarm);
+	err = device_create_file(&client->dev, &dev_attr_hour_alarm);
+	err = device_create_file(&client->dev, &dev_attr_day_alarm);
+	err = device_create_file(&client->dev, &dev_attr_weekday_alarm);
+
 	return 0;
 
 exit_kfree:
@@ -233,6 +422,13 @@ exit_kfree:
 static int pcf8563_remove(struct i2c_client *client)
 {
 	struct pcf8563 *pcf8563 = i2c_get_clientdata(client);
+
+	device_remove_file(&client->dev, &dev_attr_alarm_flag);
+	device_remove_file(&client->dev, &dev_attr_alarm_wakeup);
+	device_remove_file(&client->dev, &dev_attr_minute_alarm);
+	device_remove_file(&client->dev, &dev_attr_hour_alarm);
+	device_remove_file(&client->dev, &dev_attr_day_alarm);
+	device_remove_file(&client->dev, &dev_attr_weekday_alarm);
 
 	if (pcf8563->rtc)
 		rtc_device_unregister(pcf8563->rtc);

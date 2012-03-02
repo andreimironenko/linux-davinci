@@ -128,6 +128,8 @@ struct imp_hw_interface {
 	 * shared channel is assumed
 	 */
 	int (*hw_setup) (struct device *dev, void *config);
+	/* DJS - Get busy state */
+	int (*get_busy) (void);
 	/* Get preview irq numbers */
 	void (*get_preview_irq) (struct irq_numbers *irq);
 	/* Get resize irq numbers */

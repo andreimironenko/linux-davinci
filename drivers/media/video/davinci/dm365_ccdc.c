@@ -1175,12 +1175,16 @@ static int ccdc_set_hw_if_params(struct vpfe_hw_if_param *params)
 {
 	ccdc_cfg.if_type = params->if_type;
 
+	pr_info("################ ccdc_set_hw_if_params: if_type=%d\n", params->if_type);
+
 	switch (params->if_type) {
 	case VPFE_BT656:
 	case VPFE_BT656_10BIT:
 	case VPFE_YCBCR_SYNC_8:
 		ccdc_cfg.ycbcr.pix_fmt = CCDC_PIXFMT_YCBCR_8BIT;
 		ccdc_cfg.ycbcr.pix_order = CCDC_PIXORDER_CBYCRY;
+		ccdc_cfg.ycbcr.ycswap = params->ycswap;
+		//pr_info("################# ccdc_set_hw_if_params: params->ycswap = %d\n", params->ycswap);
 		break;
 	case VPFE_BT1120:
 	case VPFE_YCBCR_SYNC_16:
@@ -1266,6 +1270,15 @@ static int ccdc_config_ycbcr(int mode)
 	 */
 	dev_dbg(dev, "\nStarting ccdc_config_ycbcr...");
 
+	params->pix_fmt = CCDC_PIXFMT_YCBCR_8BIT;
+	//params->pix_order = CCDC_PIXORDER_CBYCRY;
+	params->pix_order = CCDC_PIXORDER_YCBYCR;
+	//params->buf_type = CCDC_BUFTYPE_FLD_INTERLEAVED;
+	params->buf_type = CCDC_BUFTYPE_FLD_SEPARATED;
+
+	ccdc_cfg.if_type = VPFE_BT656;
+	//ccdc_cfg.if_type = VPFE_YCBCR_SYNC_16;
+
 	/* configure pixel format or input mode */
 	modeset = modeset | ((params->pix_fmt & CCDC_INPUT_MASK)
 		<< CCDC_INPUT_SHIFT) |
@@ -1277,6 +1290,7 @@ static int ccdc_config_ycbcr(int mode)
 	/* pack the data to 8-bit CCDCCFG */
 	switch (ccdc_cfg.if_type) {
 	case VPFE_BT656:
+		pr_info("DM365_CCDC: VPFE_BT656\n");
 		if (params->pix_fmt != CCDC_PIXFMT_YCBCR_8BIT) {
 			dev_dbg(dev, "Invalid pix_fmt(input mode)\n");
 			return -1;
@@ -1285,9 +1299,18 @@ static int ccdc_config_ycbcr(int mode)
 			((VPFE_PINPOL_NEGATIVE & CCDC_VD_POL_MASK)
 			<< CCDC_VD_POL_SHIFT);
 		regw(3, REC656IF);
-		ccdcfg = ccdcfg | CCDC_DATA_PACK8 | CCDC_YCINSWP_YCBCR;
+		//ccdcfg = ccdcfg | CCDC_DATA_PACK8 | CCDC_YCINSWP_YCBCR;
+		ccdcfg = ccdcfg | CCDC_DATA_PACK8;
+		if(params->ycswap == VPFE_DATA_Y) {
+			ccdcfg |= CCDC_YCINSWP_YCBCR;
+//			pr_info("DM365_CCDC: Swap Y/C\n");
+		} else {
+			ccdcfg &= ~CCDC_YCINSWP_YCBCR;
+//			pr_info("DM365_CCDC: No swap Y/C\n");
+		}
 		break;
 	case VPFE_BT656_10BIT:
+//		pr_info("DM365_CCDC: VPFE_BT656_10BIT\n");
 		if (params->pix_fmt != CCDC_PIXFMT_YCBCR_8BIT) {
 			dev_dbg(dev, "Invalid pix_fmt(input mode)\n");
 			return -1;
@@ -1299,6 +1322,7 @@ static int ccdc_config_ycbcr(int mode)
 			CCDC_BW656_ENABLE;
 		break;
 	case VPFE_BT1120:
+//		pr_info("DM365_CCDC: VPFE_BT1120\n");
 		if (params->pix_fmt != CCDC_PIXFMT_YCBCR_16BIT) {
 			dev_dbg(dev, "Invalid pix_fmt(input mode)\n");
 			return -EINVAL;
@@ -1307,14 +1331,23 @@ static int ccdc_config_ycbcr(int mode)
 		break;
 
 	case VPFE_YCBCR_SYNC_8:
+		pr_info("DM365_CCDC: VPFE_YCBCR_SYNC_8\n");
 		ccdcfg |= CCDC_DATA_PACK8;
-		ccdcfg |= CCDC_YCINSWP_YCBCR;
+		//ccdcfg |= CCDC_YCINSWP_YCBCR;
+		if(params->ycswap == VPFE_DATA_Y) {
+			ccdcfg |= CCDC_YCINSWP_YCBCR;
+//			pr_info("DM365_CCDC: Swap Y/C\n");
+		} else {
+			ccdcfg &= ~CCDC_YCINSWP_YCBCR;
+//			pr_info("DM365_CCDC: No swap Y/C\n");
+		}
 		if (params->pix_fmt != CCDC_PIXFMT_YCBCR_8BIT) {
 			dev_dbg(dev, "Invalid pix_fmt(input mode)\n");
 			return -EINVAL;
 		}
 		break;
 	case VPFE_YCBCR_SYNC_16:
+//		pr_info("DM365_CCDC: VPFE_YCBCR_SYNC_16\n");
 		if (params->pix_fmt != CCDC_PIXFMT_YCBCR_16BIT) {
 			dev_dbg(dev, "Invalid pix_fmt(input mode)\n");
 			return -EINVAL;
@@ -1464,11 +1497,11 @@ static int __init dm365_ccdc_probe(struct platform_device *pdev)
 		i++;
 	}
 
-	davinci_cfg_reg(DM365_VIN_CAM_WEN);
+	//davinci_cfg_reg(DM365_VIN_CAM_WEN);		// DJS - we need this as a GPIO!
 	davinci_cfg_reg(DM365_VIN_CAM_VD);
 	davinci_cfg_reg(DM365_VIN_CAM_HD);
-	davinci_cfg_reg(DM365_VIN_YIN4_7_EN);
-	davinci_cfg_reg(DM365_VIN_YIN0_3_EN);
+	//davinci_cfg_reg(DM365_VIN_YIN4_7_EN);		// DJS - we need SPI3!
+	//davinci_cfg_reg(DM365_VIN_YIN0_3_EN);		// DJS - we need these as GPIOs!
 
 	printk(KERN_NOTICE "%s is registered with vpfe.\n",
 		ccdc_hw_dev.name);

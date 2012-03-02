@@ -190,6 +190,7 @@ This function	will process IOCTL commands sent by
 the application	and
 control the device IO operations.
 */
+extern int imp_common_resizer_busy(void);	// DJS
 static int rsz_doioctl(struct inode *inode, struct file *file,
 		       unsigned int cmd, unsigned long arg)
 {
@@ -216,6 +217,7 @@ static int rsz_doioctl(struct inode *inode, struct file *file,
 	case RSZ_REQBUF:
 	case RSZ_RESIZE:
 	case RSZ_RECONFIG:
+	case RSZ_G_BUSY:		// DJS
 		{
 			if (mode == IMP_MODE_CONTINUOUS)
 				return -EACCES;
@@ -289,9 +291,11 @@ static int rsz_doioctl(struct inode *inode, struct file *file,
 			struct rsz_channel_config *user_config =
 			    (struct rsz_channel_config *)arg;
 
+#if 0	// DJS removed
 			dev_err(rsz_device, "RSZ_G_CONFIG:%d:%d:%d\n",
 				user_config->oper_mode, user_config->chain,
 				user_config->len);
+#endif
 			if (ISNULL(user_config->config)) {
 				ret = -EINVAL;
 				dev_err(rsz_device,
@@ -376,6 +380,9 @@ static int rsz_doioctl(struct inode *inode, struct file *file,
 			}
 		}
 		break;
+	case RSZ_G_BUSY:
+		ret = imp_common_resizer_busy();
+		break;
 
 	case RSZ_RECONFIG:
 		{
@@ -421,6 +428,9 @@ static int rsz_ioctl(struct inode *inode, struct file *file,
 	void *parg = NULL;
 
 	dev_dbg(rsz_device, "Start of resizer ioctl\n");
+
+	if(cmd == RSZ_G_BUSY)
+		return imp_common_resizer_busy();
 
 	/*  Copy arguments into temp kernel buffer  */
 	switch (_IOC_DIR(cmd)) {

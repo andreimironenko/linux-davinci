@@ -134,6 +134,18 @@ MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:" MUSB_DRIVER_NAME);
 
+// DJS
+#ifndef CONFIG_USB_MUSB_DISABLE_HIGHSPEED
+static unsigned musb_highspeed = 1;
+#else
+static unsigned musb_highspeed = 1;
+#endif
+module_param_named(highspeed, musb_highspeed, uint, S_IRUGO | S_IWUSR);
+#ifndef CONFIG_USB_MUSB_DISABLE_HIGHSPEED
+MODULE_PARM_DESC(highspeed, "Enable high speed mode. Default = 1");
+#else
+MODULE_PARM_DESC(highspeed, "Enable high speed mode. Default = 0");
+#endif
 
 /*-------------------------------------------------------------------------*/
 
@@ -887,6 +899,7 @@ void musb_start(struct musb *musb)
 {
 	void __iomem	*regs = musb->mregs;
 	u8		devctl = musb_readb(regs, MUSB_DEVCTL);
+	u8		musb_pwr;
 
 	DBG(2, "<== devctl %02x\n", devctl);
 
@@ -897,13 +910,16 @@ void musb_start(struct musb *musb)
 
 	musb_writeb(regs, MUSB_TESTMODE, 0);
 
+	pr_info(KERN_INFO "USB: %s high-speed mode\n", musb_highspeed ? "Enabling" : "Disabling");
+
+	musb_pwr =	MUSB_POWER_ISOUPDATE |
+				MUSB_POWER_SOFTCONN;
+				/* ENSUSPEND wedges tusb */
+				/* | MUSB_POWER_ENSUSPEND; */
+	if(musb_highspeed)
+		musb_pwr |= MUSB_POWER_HSENAB;
 	/* put into basic highspeed mode and start session */
-	musb_writeb(regs, MUSB_POWER, MUSB_POWER_ISOUPDATE
-						| MUSB_POWER_SOFTCONN
-						| MUSB_POWER_HSENAB
-						/* ENSUSPEND wedges tusb */
-						/* | MUSB_POWER_ENSUSPEND */
-						);
+	musb_writeb(regs, MUSB_POWER, musb_pwr);
 
 	musb->is_active = 0;
 	devctl = musb_readb(regs, MUSB_DEVCTL);
@@ -1805,6 +1821,13 @@ allocate_instance(struct device *dev,
 	int			epnum;
 #ifdef CONFIG_USB_MUSB_HDRC_HCD
 	struct usb_hcd	*hcd;
+
+	// DJS (I've left the '#ifndef CONFIG_USB_MUSB_DISABLE_HIGHSPEED' in
+	// musb_host.c for no particular reason)
+	if(musb_highspeed)
+		((struct hc_driver*)&musb_hc_driver)->flags = HCD_USB2 | HCD_MEMORY;
+	else
+		((struct hc_driver*)&musb_hc_driver)->flags = HCD_USB11 | HCD_MEMORY;
 
 	hcd = usb_create_hcd(&musb_hc_driver, dev, dev_name(dev));
 	if (!hcd)

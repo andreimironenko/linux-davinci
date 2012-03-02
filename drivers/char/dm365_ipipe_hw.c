@@ -406,8 +406,8 @@ static int ipipe_setup_resizer(struct ipipe_params *params)
 
 	regw_rsz(params->rsz_en[0], RSZ_EN_A);
 	if (params->rsz_en[0]) {
-		printk(KERN_DEBUG
-		       "ipipe_set_resizer, resizer - A enabled\n");
+//		printk(KERN_DEBUG
+//		       "ipipe_set_resizer, resizer - A enabled\n");
 		/*setting rescale parameters */
 		rsz_set_rsz_regs(RSZ_A, params);
 	}
@@ -519,7 +519,7 @@ int rsz_set_output_address(struct ipipe_params *params,
 	struct ipipe_rsz_rescale_param *rsc_param =
 		&params->rsz_rsc_param[resize_no];
 
-	printk(KERN_DEBUG "rsz_set_output_address %d\n", resize_no);
+	//printk(KERN_DEBUG "rsz_set_output_address %d\n", resize_no);
 	if (resize_no == RSZ_A)
 		rsz_start_add = RSZ_EN_A;
 	else
@@ -1176,6 +1176,35 @@ void rsz_src_enable(int enable)
 	regw_rsz(enable, RSZ_SRC_EN);
 }
 
+int rsz_get_busy(void) {
+#if 0
+	pr_info("Resizer: busy? - RSZ_SRC_EN = %u , RSZ_EN_A = %u, RSZ_EN_B = %u\n",
+		regr_rsz(RSZ_SRC_EN) & 1,
+		regr_rsz(RSZ_EN_A) & 1,
+		regr_rsz(RSZ_EN_B) & 1);
+#endif
+	if(regr_rsz(RSZ_SRC_EN) & 1)
+		goto busy;
+//		return 1;
+#if 1
+	if(regr_rsz(RSZ_EN_A) & 1)
+		goto busy;
+//		return 1;
+	if(regr_rsz(RSZ_EN_B) & 1)
+		goto busy;
+//		return 1;
+#endif
+	return 0;
+busy:
+#if 0
+	pr_info("Resizer: busy - RSZ_SRC_EN = %u , RSZ_EN_A = %u, RSZ_EN_B = %u\n",
+		regr_rsz(RSZ_SRC_EN) & 1,
+		regr_rsz(RSZ_EN_A) & 1,
+		regr_rsz(RSZ_EN_B) & 1);
+#endif
+	return 1;
+}
+
 int rsz_enable(int rsz_id, int enable)
 {
 	if (rsz_id == RSZ_A) {
@@ -1189,4 +1218,10 @@ int rsz_enable(int rsz_id, int enable)
 	else
 		return -EINVAL;
 	return 0;
+}
+
+void rsz_disable(void) {
+	regw_rsz(0, RSZ_SRC_EN);
+	regw_rsz(0, RSZ_EN_A);
+	regw_rsz(0, RSZ_EN_B);
 }

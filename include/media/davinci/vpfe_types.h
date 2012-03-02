@@ -40,11 +40,17 @@ enum vpfe_hw_if_type {
 	VPFE_BT656_10BIT
 };
 
+enum vpfe_data_swap {
+	VPFE_DATA_C,
+	VPFE_DATA_Y
+};
+
 /* interface description */
 struct vpfe_hw_if_param {
 	enum vpfe_hw_if_type if_type;
 	enum vpfe_pin_pol hdpol;
 	enum vpfe_pin_pol vdpol;
+	enum vpfe_data_swap ycswap;
 };
 
 #endif

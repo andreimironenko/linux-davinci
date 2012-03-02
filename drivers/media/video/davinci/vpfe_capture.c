@@ -84,7 +84,7 @@
 #define PAL_IMAGE_SIZE		(720 * 576 * 2)
 #define SECOND_IMAGE_SIZE_MAX	(640 * 480 * 2)
 
-static int debug;
+static int debug = 1;
 static u32 numbuffers = 3;
 static u32 bufsize = HD_IMAGE_SIZE + SECOND_IMAGE_SIZE_MAX;
 static int interface;
@@ -111,7 +111,7 @@ module_param(cont_bufsize, uint, S_IRUGO);
 MODULE_PARM_DESC(interface, "interface 0-1 (default:0)");
 MODULE_PARM_DESC(numbuffers, "buffer count (default:3)");
 MODULE_PARM_DESC(bufsize, "buffer size in bytes, (default:4147200 bytes)");
-MODULE_PARM_DESC(debug, "Debug level 0-1");
+//MODULE_PARM_DESC(debug, "Debug level 0-1");
 MODULE_PARM_DESC(cont_bufoffset, "Capture buffer offset (default 0)");
 MODULE_PARM_DESC(cont_bufsize, "Capture buffer size (default 0)");
 
@@ -438,6 +438,10 @@ static int vpfe_config_ccdc_image_format(struct vpfe_device *vpfe_dev)
 			pix_fmt = V4L2_PIX_FMT_UYVY;
 	}
 
+	pix_fmt = V4L2_PIX_FMT_UYVY;
+//	pix_fmt = V4L2_PIX_FMT_YUYV;
+//	pix_fmt = V4L2_PIX_FMT_NV12;
+
 	if (ccdc_dev->hw_ops.set_pixel_format(pix_fmt) < 0) {
 		v4l2_err(&vpfe_dev->v4l2_dev,
 			"couldn't set pix format in ccdc\n");
@@ -445,6 +449,8 @@ static int vpfe_config_ccdc_image_format(struct vpfe_device *vpfe_dev)
 	}
 	/* configure the image window */
 	ccdc_dev->hw_ops.set_image_window(&vpfe_dev->crop);
+
+	vpfe_dev->fmt.fmt.pix.field=V4L2_FIELD_INTERLACED;
 
 	switch (vpfe_dev->fmt.fmt.pix.field) {
 	case V4L2_FIELD_INTERLACED:
@@ -524,6 +530,7 @@ static int vpfe_config_image_format(struct vpfe_device *vpfe_dev,
 	}
 
 	sd_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	//sd_fmt.type = V4L2_BUF_TYPE_SLICED_VBI_CAPTURE;
 	/* if sub device supports g_fmt, override the defaults */
 	ret = v4l2_device_call_until_err(&vpfe_dev->v4l2_dev,
 			sdinfo->grp_id, video, g_fmt, &sd_fmt);
@@ -1436,7 +1443,7 @@ static int vpfe_config_imp_image_format(struct vpfe_device *vpfe_dev)
 	if (bytesperline !=
 		vpfe_dev->fmt.fmt.pix.bytesperline) {
 		v4l2_err(&vpfe_dev->v4l2_dev, "Mismatch between bytesperline"
-			"at IMP and vpfe\n");
+			"at IMP (%d) and vpfe (%d)\n", bytesperline, vpfe_dev->fmt.fmt.pix.bytesperline);
 		goto imp_exit;
 	}
 
@@ -1720,7 +1727,9 @@ static int vpfe_s_input(struct file *file, void *priv, unsigned int index)
 
 		ret = vpfe_set_format_in_sensor(vpfe_dev, &vpfe_dev->fmt);
 	} else {
-		vpfe_dev->std_index = 0;
+		//vpfe_dev->std_index = 0;
+		//vpfe_dev->std_index = 1;
+		vpfe_dev->std_index = 5;
 		/*
 		 * For non-camera sub device, use standard to configure vpfe
 		 * default
@@ -1808,6 +1817,7 @@ static int vpfe_g_std(struct file *file, void *priv, v4l2_std_id *std_id)
 		return -EINVAL;
 	}
 	*std_id = vpfe_standards[vpfe_dev->std_index].std_id;
+
 	return 0;
 }
 

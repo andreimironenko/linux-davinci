@@ -25,6 +25,7 @@
 #include <linux/ctype.h>
 #include <linux/delay.h>
 #include <video/davinci_vpbe.h>
+#include <video/davinci_osd.h>
 #include <media/davinci/vid_encoder_if.h>
 #include <media/davinci/vpbe_encoder.h>
 #include <media/davinci/davinci_platform.h>
@@ -88,7 +89,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 0,
 	 .hsync_len = 0,
 	 .vsync_len = 0,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_PAL,
 	 .std = 1,
@@ -103,7 +104,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 0,
 	 .hsync_len = 0,
 	 .vsync_len = 0,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_NTSC_RGB,
 	 .std = 1,
@@ -118,7 +119,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 0,
 	 .hsync_len = 0,
 	 .vsync_len = 0,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_PAL_RGB,
 	 .std = 1,
@@ -133,7 +134,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 0,
 	 .hsync_len = 0,
 	 .vsync_len = 0,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_480P_60,
 	 .std = 1,
@@ -148,7 +149,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 0,
 	 .hsync_len = 0,
 	 .vsync_len = 0,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_576P_50,
 	 .std = 1,
@@ -163,7 +164,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 0,
 	 .hsync_len = 0,
 	 .vsync_len = 0,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_720P_60,
 	 .std = 1,
@@ -178,7 +179,22 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 3,
 	 .hsync_len = 80,
 	 .vsync_len = 5,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
+	{
+	 .name = VID_ENC_STD_720P_60_1610,
+	 .std = 1,
+	 .if_type = VID_ENC_IF_INT,
+	 .interlaced = 0,
+	 .xres = 1152,
+	 .yres = 720,
+	 .fps = {60, 1},
+	 .left_margin = 300,
+	 .right_margin = 70,
+	 .upper_margin = 26,
+	 .lower_margin = 3,
+	 .hsync_len = 80,
+	 .vsync_len = 5,
+	 .flags = DAVINCI_VID_ENC_FLAG_POS_HSYNC | DAVINCI_VID_ENC_FLAG_NEG_VSYNC},		// negative vsync
 	{
 	 .name = VID_ENC_STD_720P_50,
 	 .std = 1,
@@ -193,7 +209,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 3,
 	 .hsync_len = 80,
 	 .vsync_len = 5,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_720P_30,
 	 .std = 1,
@@ -208,7 +224,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 3,
 	 .hsync_len = 80,
 	 .vsync_len = 5,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_720P_25,
 	 .std = 1,
@@ -223,7 +239,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 3,
 	 .hsync_len = 80,
 	 .vsync_len = 5,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_720P_24,
 	 .std = 1,
@@ -238,7 +254,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 3,
 	 .hsync_len = 80,
 	 .vsync_len = 5,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_1080I_30,
 	 .std = 1,
@@ -253,7 +269,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 31,
 	 .hsync_len = 88,
 	 .vsync_len = 5,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 	{
 	 .name = VID_ENC_STD_1080I_25,
 	 .std = 1,
@@ -268,7 +284,7 @@ static struct vid_enc_mode_info vpbe_encoder_modes[VPBE_ENCODER_MAX_NUM_STD] = {
 	 .lower_margin = 31,
 	 .hsync_len = 88,
 	 .vsync_len = 5,
-	 .flags = 0},
+	 .flags = DAVINCI_VID_ENC_FLAGS_POS_SYNC},
 };
 
 static struct vpbe_encoder_config vpbe_encoder_configuration = {
@@ -380,9 +396,9 @@ static int vpbe_encoder_set_dac(char *output)
 		} else if (!strcmp(output, VID_ENC_OUTPUT_SVIDEO)) {
 			printk(KERN_DEBUG "Setting output to S-Video\n");
 			venc_reg_out(VENC_DACSEL, 0x210);
-		} else if (!strcmp(output, VID_ENC_OUTPUT_COMPONENT)) {
+		} else if (!strcmp(output, VID_ENC_OUTPUT_COMPONENT) || !strcmp(output, "VGA")) {
 			printk(KERN_DEBUG
-			       "Setting output to Component Video\n");
+			       "Setting output to VGA\n");
 			venc_reg_out(VENC_DACSEL, 0x543);
 		} else
 			error = -1;
@@ -500,7 +516,46 @@ static int vpbe_encoder_setmode(struct vid_enc_mode_info *mode_info,
 			return -EINVAL;
 		}
 		/* Store the standard in global object of vpbe_encoder */
-		vpbe_encoder_channel_info.params.mode = mymode;
+//		vpbe_encoder_channel_info.params.mode = mymode;		// DJS - store real name below
+
+		/*
+			DJS
+			On startup, vid_enc_register_encoder() (in davinci_enc_manager.c) will construct
+			struct vid_enc_mode_info with .std == 1 and the mode name and then pass it in.
+			Since I now actually use fields in this structure other than just the name, this
+			can result in incorrect results (namely with the .flags field).
+			So, we now search through all the modes and find the _real_ definition that matches
+			the supplied name.
+		*/
+		// We have to cope with a mode called 720P-60-16:10 but with a width of 1280 being passed in.
+		// This is quite clearly wrong, so we'll just correct the name
+		if(!strncmp(mymode, "720P-60", 7)) {
+			switch(mode_info->xres) {
+				case 1152:
+					mymode = "720P-60-16:10";
+					break;
+				case 1280:
+					mymode = "720P-60";
+					break;
+			}
+		}
+		for(i=0; i<VPBE_ENCODER_MAX_NUM_STD; i++) {
+			if((vpbe_encoder_modes[i].name != NULL) && (!strcmp(vpbe_encoder_modes[i].name, mymode)))
+				break;
+		}
+		if(i == VPBE_ENCODER_MAX_NUM_STD) {
+			printk(KERN_ERR "Unknown mode name supplied: %s\n", mymode);
+			return -EINVAL;
+		}
+		if(mode_info != &vpbe_encoder_modes[i]) {
+			printk(KERN_INFO "Matched to real mode info from passed in mode name: %s\n", mymode);
+			pr_info("Passed in mode: %u x %u\n", mode_info->xres, mode_info->yres);
+			mode_info = &vpbe_encoder_modes[i];
+			pr_info("Matched mode:   %u x %u\n", mode_info->xres, mode_info->yres);
+		}
+		vpbe_encoder_channel_info.params.mode = mymode;		// DJS - store real name
+		/* DJS - end */
+
 		if (!strcmp(mymode, VID_ENC_STD_NTSC)) {
 			/* Setup NTSC */
 			venc_reg_out(VENC_VMOD, 0);
@@ -579,7 +634,9 @@ static int vpbe_encoder_setmode(struct vid_enc_mode_info *mode_info,
 		} else if (!strncmp(mymode, VID_ENC_STD_720P_60, 5) && dm365) {
 			char buf[16];
 			unsigned long xh, val;
-			strcpy(buf, mymode + 5);
+			//strcpy(buf, mymode + 5);
+			strncpy(buf, mymode + 5, 2);		// DJS only want the 2 digit frame rate
+			buf[2] = 0;
 			venc_reg_out(VENC_VMOD, 0);
 			/* DM365 component HD mode */
 			venc_reg_merge(VENC_VMOD,
@@ -649,10 +706,33 @@ static int vpbe_encoder_setmode(struct vid_enc_mode_info *mode_info,
 			}
 			venc_reg_out(VENC_XHINTVL, xh);
 		} else {
-			printk(KERN_ERR "Mode not supported..\n");
+			printk(KERN_ERR "Mode '%s' not supported..\n", mymode);
 			return -EINVAL;
 		}
+		/* DJS - video registers for VGA mode */
+		pr_info("HTC: Setting VGA output\n");
+		//venc_reg_out(VENC_VMOD, 0x1c3);
+		venc_reg_out(VENC_CMPNT, 0x8000);
+		venc_reg_out(VENC_VIDCTL, 0);	// DJS - old, how come this worked? - actually this is correct!
+		//venc_reg_out(VENC_VIDCTL, 3);	// DJS - correct value - actually this is wrong
+		{
+		int syncctl = 3;
+		if(!(mode_info->flags & DAVINCI_VID_ENC_FLAG_POS_HSYNC)) {
+			pr_info("HTC: Positive HSYNC\n");
+			syncctl |= 1 << 2;
+		} else
+			pr_info("HTC: Negative HSYNC\n");
+		if(!(mode_info->flags & DAVINCI_VID_ENC_FLAG_POS_VSYNC)) {
+			pr_info("HTC: Positive VSYNC\n");
+			syncctl |= 1 << 3;
+		} else
+			pr_info("HTC: Negative VSYNC\n");
+		venc_reg_out(VENC_SYNCCTL, syncctl);
+		//venc_reg_out(VENC_SYNCCTL, 3);
+		}
+		davinci_disp_set_background(ROM_CLUT, 0xff);		// black background
 	} else {
+#if 0
 		/* Non- Standard mode. Check if we support it. If so
 		   save the timing info and return */
 		my_mode_info = get_modeinfo(VID_ENC_STD_NON_STANDARD);
@@ -678,6 +758,42 @@ static int vpbe_encoder_setmode(struct vid_enc_mode_info *mode_info,
 			   do this here */
 			return 0;
 		}
+#else
+		// DJS - find a matching mode
+		printk(KERN_DEBUG "Non standard mode... searching for match (%u, %u, %u, {%u,%u}, 0x%04x)\n", mode_info->interlaced, mode_info->xres, mode_info->yres, mode_info->fps.numerator, mode_info->fps.denominator, mode_info->flags);
+		my_mode_info = NULL;
+		// look through all modes
+		for(i=0; i<VPBE_ENCODER_MAX_NUM_STD; i++) {
+			int j;
+			printk(KERN_DEBUG "  Trying %s:\n", vpbe_encoder_modes[i].name);
+			if(vpbe_encoder_modes[i].interlaced != mode_info->interlaced)
+			{	printk(KERN_DEBUG "    Failed on interlaced %u\n", vpbe_encoder_modes[i].interlaced); continue;}
+			if(vpbe_encoder_modes[i].xres != mode_info->xres)
+			{	printk(KERN_DEBUG "    Failed on xres %u\n", vpbe_encoder_modes[i].xres); continue;}
+			if(vpbe_encoder_modes[i].yres != mode_info->yres)
+			{	printk(KERN_DEBUG "    Failed on yres %u\n", vpbe_encoder_modes[i].yres); continue;}
+			if(vpbe_encoder_modes[i].fps.numerator != mode_info->fps.numerator)
+			{	printk(KERN_DEBUG "    Failed on fps numerator %u\n", vpbe_encoder_modes[i].fps.numerator); continue;}
+			if(vpbe_encoder_modes[i].fps.denominator != mode_info->fps.denominator)
+			{	printk(KERN_DEBUG "    Failed on fps denominator %u\n", vpbe_encoder_modes[i].fps.denominator); continue;}
+			if((vpbe_encoder_modes[i].flags & DAVINCI_VID_ENC_FLAGS_POS_SYNC) != (mode_info->flags & DAVINCI_VID_ENC_FLAGS_POS_SYNC))
+			{	printk(KERN_DEBUG "    Failed on sync flags: 0x%04x\n", vpbe_encoder_modes[i].flags); continue;}
+			printk(KERN_DEBUG "    Possible match on %s (%u)\n", vpbe_encoder_modes[i].name, outindex);
+			// got a match... do we have it listed in our output's standards list?
+			for(j=0; j<vpbe_encoder_configuration.output[outindex].no_of_standard; j++)
+				if((vpbe_encoder_configuration.output[outindex].standards[j] != NULL) &&
+					(!strcmp(vpbe_encoder_configuration.output[outindex].standards[j], vpbe_encoder_modes[i].name)))
+					break;
+			if(j != vpbe_encoder_configuration.output[outindex].no_of_standard) {
+				my_mode_info = &vpbe_encoder_modes[i];
+				break;
+			}
+		}
+		if(my_mode_info) {
+			printk(KERN_INFO "Found match to nonstandard mode: %s\n", my_mode_info->name);
+			return vpbe_encoder_setmode(my_mode_info, enc);
+		}
+#endif
 		printk(KERN_ERR "Mode not supported..\n");
 		return -EINVAL;
 	}
@@ -723,6 +839,9 @@ static int vpbe_encoder_setoutput(char *output, struct vid_encoder_device *enc)
 		printk(KERN_ERR "output: NULL Pointer.\n");
 		return -EINVAL;
 	}
+
+	if(!strcmp(output, "VGA"))
+		output = "COMPONENT";
 
 	for (index = 0; index < vpbe_encoder_configuration.no_of_outputs;
 	     index++) {
@@ -848,6 +967,7 @@ static int vpbe_encoder_init(void)
 		    VPBE_DM365_ENCODER_COMPONENT_NUM_STD;
 		vpbe_encoder_configuration.output[1].output_name =
 		    VID_ENC_OUTPUT_COMPONENT;
+#if 1
 		vpbe_encoder_configuration.output[1].standards[0] =
 		    VID_ENC_STD_480P_60;
 		vpbe_encoder_configuration.output[1].standards[1] =
@@ -863,9 +983,17 @@ static int vpbe_encoder_init(void)
 		vpbe_encoder_configuration.output[1].standards[6] =
 		    VID_ENC_STD_720P_60;
 		vpbe_encoder_configuration.output[1].standards[7] =
-		    VID_ENC_STD_1080I_25;
+		    VID_ENC_STD_720P_60_1610;
 		vpbe_encoder_configuration.output[1].standards[8] =
+		    VID_ENC_STD_1080I_25;
+		vpbe_encoder_configuration.output[1].standards[9] =
 		    VID_ENC_STD_1080I_30;
+#else
+		vpbe_encoder_configuration.output[1].standards[0] =
+		    VID_ENC_STD_720P_60;
+		vpbe_encoder_configuration.output[1].standards[1] =
+		    VID_ENC_STD_720P_60_1610;
+#endif
   } else
 		return -1;
 

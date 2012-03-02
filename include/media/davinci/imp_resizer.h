@@ -54,7 +54,9 @@
 #define RSZ_RECONFIG		_IOWR(RSZ_IOC_BASE, 10, struct rsz_reconfig)
 /* only for debug purpose */
 #define RSZ_DUMP_HW_CONFIG	_IOW(RSZ_IOC_BASE, 11, unsigned long)
-#define RSZ_IOC_MAXNR		11
+#define RSZ_G_BUSY			_IOW(RSZ_IOC_BASE, 12, unsigned long)
+//#define RSZ_IOC_MAXNR		11
+#define RSZ_IOC_MAXNR		12
 
 #ifdef __KERNEL__
 

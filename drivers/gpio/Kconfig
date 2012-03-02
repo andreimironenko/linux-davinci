@@ -85,6 +85,20 @@ config GPIO_VR41XX
 	help
 	  Say yes here to support the NEC VR4100 series General-purpose I/O Uint
 
+config GPIO_HTC_CPLD
+	tristate "Hanover HTC CPLD based I/O support"
+	depends on MACH_DAVINCI_DM365_HTC
+	help
+	  Say yes here to support all the I/Os on the CPLD on the
+	  HTC CPU board.
+
+config GPIO_HTC_FPGA
+	tristate "Hanover Transport Computer FPGA based I/O support"
+	depends on MACH_DAVINCI_DM365_HTC
+	help
+	  Say yes here to support of the I/Os on the FPGAs in the
+	  Hanover Displays HTC
+
 comment "I2C GPIO expanders:"
 
 config GPIO_MAX732X

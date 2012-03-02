@@ -50,6 +50,7 @@
 /* functions definition */
 void rsz_hardware_setup(struct channel_config *rsz_conf_chan);
 int rsz_enable(struct channel_config *rsz_conf_chan);
+void rsz_get_busy(void);	// DJS
 
 static inline void rsz_set_exp(int exp)
 {

@@ -199,3 +199,11 @@ config	USB_MUSB_DEBUG
 	  This enables musb debugging. To set the logging level use the debug
 	  module parameter. Starting at level 3, per-transfer (urb, usb_request,
 	  packet, or dma transfer) tracing may kick in.
+
+config USB_MUSB_DISABLE_HIGHSPEED
+	bool "Disable High-Speed mode"
+	default n
+	depends on USB_MUSB_HDRC
+	help
+	  If Y, High Speed mode will be disabled and the USB system will
+	  only support Full Speed mode.

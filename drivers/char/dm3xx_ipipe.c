@@ -241,6 +241,7 @@ int ipipeif_hw_setup(struct ipipeif *params)
 
 				isif_port_if =
 				    params->var.if_5_1.isif_port.if_type;
+				isif_port_if = VPFE_BT656;		// DJS - hardcoded
 				/* configure CFG2 */
 				utemp =
 				    params->var.if_5_1.isif_port.hdpol
@@ -414,17 +415,26 @@ static struct platform_driver dm3xx_ipipeif_driver = {
         .probe = dm3xx_ipipeif_probe,
 };
 
-static int dm3xx_ipipeif_init(void)
+// DJS : non-static functions so we can call from dm365_ipipe.c
+//       hopefully this should allow us to build this as a module
+// (changed back for the moment due to:
+//    drivers/built-in.o: In function `vpfe_probe':
+//    hid-quirks.c:(.init.text+0x5640): undefined reference to `imp_get_hw_if'
+// :-(
+/*static*/ int dm3xx_ipipeif_init(void)
 {
 	return platform_driver_register(&dm3xx_ipipeif_driver);
 }
 
-static void dm3xx_ipipeif_exit(void)
+/*static*/ void dm3xx_ipipeif_exit(void)
 {
 	platform_driver_unregister(&dm3xx_ipipeif_driver);
 }
 
+// DJS - not defined as module_(init|exit) as we already have these in dm365_ipipe.c
+#if 0	// changed back for the moment (see above)
 module_init(dm3xx_ipipeif_init);
 module_exit(dm3xx_ipipeif_exit);
+#endif
 
 MODULE_LICENSE("GPL");

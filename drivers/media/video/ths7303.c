@@ -195,7 +195,8 @@ static int ths7303_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
 	struct v4l2_subdev *sd;
-	v4l2_std_id std_id = V4L2_STD_NTSC;
+	//v4l2_std_id std_id = V4L2_STD_NTSC;
+	v4l2_std_id std_id = V4L2_STD_720P_60;
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA))
 		return -ENODEV;

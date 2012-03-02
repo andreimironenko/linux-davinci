@@ -39,7 +39,18 @@ void __init dm365_init_ks(struct davinci_ks_platform_data *pdata);
 void dm365_set_vpfe_config(struct vpfe_config *cfg);
 
 struct spi_board_info;
+#if 0
 void dm365_init_spi0(unsigned chipselect_mask,
 		struct spi_board_info *info, unsigned len);
+#else
+void dm365_init_spi0(unsigned chipselect_mask,
+			struct spi_board_info *info, unsigned len);
+void dm365_init_spi1(unsigned chipselect_mask,
+			struct spi_board_info *info, unsigned len);
+void dm365_init_spi2(unsigned chipselect_mask,
+			struct spi_board_info *info, unsigned len);
+void dm365_init_spi3(unsigned chipselect_mask,
+			struct spi_board_info *info, unsigned len);
+#endif
 
 #endif /* __ASM_ARCH_DM365_H */

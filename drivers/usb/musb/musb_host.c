@@ -2542,7 +2542,11 @@ const struct hc_driver musb_hc_driver = {
 	.description		= "musb-hcd",
 	.product_desc		= "MUSB HDRC host driver",
 	.hcd_priv_size		= sizeof(struct musb),
+#ifndef CONFIG_USB_MUSB_DISABLE_HIGHSPEED
 	.flags			= HCD_USB2 | HCD_MEMORY,
+#else
+	.flags			= HCD_USB11 | HCD_MEMORY,
+#endif
 
 	/* not using irq handler or reset hooks from usbcore, since
 	 * those must be shared with peripheral code for OTG configs

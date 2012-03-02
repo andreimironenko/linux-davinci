@@ -257,6 +257,15 @@ config SCSI_SCAN_ASYNC
 	  You can override this choice by specifying "scsi_mod.scan=sync"
 	  or async on the kernel's command line.
 
+config SCSI_USB_DRIVE_WP_HTC_FIX
+	bool "Enable USB drive writeprotect fix for Hanover HTC"
+	depends on SCSI && MACH_DAVINCI_DM365_HTC
+	help
+	  This enables a fix in sd.c to enable USB drives to be
+	  detected correctly. Without it, the write-protect sense
+	  will have to timeout before the device will be available.
+	  This fix should only be needed on the Hanover Displays HTC.
+
 config SCSI_WAIT_SCAN
 	tristate  # No prompt here, this is an invisible symbol.
 	default m

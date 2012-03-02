@@ -461,6 +461,7 @@ struct imp_hw_interface dm365_ipipe_interface = {
 	.enable = ipipe_enable,
 	.enable_resize = rsz_src_enable,
 	.hw_setup = ipipe_do_hw_setup,
+	.get_busy = rsz_get_busy,		// DJS
 	.get_preview_irq = ipipe_get_irq,
 	.get_rsz_irq = ipipe_get_irq,
 	.get_resizer_config_state = ipipe_get_rsz_config_state,
@@ -3965,8 +3966,19 @@ int ipipe_set_hw_if_param(struct vpfe_hw_if_param *if_param)
 	return 0;
 }
 
+extern void rsz_disable(void);
+
+#if 1
+// DJS (commented out for the moment, see bottom of dm3xx_ipipe.c)
+extern int dm3xx_ipipeif_init(void);
+extern void dm3xx_ipipeif_exit(void);
+#endif
+
 static int dm365_ipipe_init(void)
 {
+	dm3xx_ipipeif_init();	// DJS (commented out for the moment, see
+							// bottom of dm3xx_ipipe.c)
+
 	oper_state.shared_config_param =
 	    kmalloc(sizeof(struct ipipe_params), GFP_KERNEL);
 	if (ISNULL(oper_state.shared_config_param)) {
@@ -3997,6 +4009,7 @@ static int dm365_ipipe_init(void)
 	else
 		printk(KERN_NOTICE
 		       "DM365 IPIPE initialized in Continuous mode\n");
+	rsz_disable();
 	return 0;
 }
 
@@ -4004,6 +4017,9 @@ static void dm365_ipipe_cleanup(void)
 {
 	kfree(oper_state.shared_config_param);
 	printk(KERN_NOTICE "DM365 IPIPE hardware module exited\n");
+
+	dm3xx_ipipeif_exit();	// DJS (commented out for the moment, see
+							// bottom of dm3xx_ipipe.c)
 }
 
 subsys_initcall(dm365_ipipe_init);

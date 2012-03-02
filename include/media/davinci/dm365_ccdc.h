@@ -675,6 +675,8 @@ struct ccdc_ycbcr_config {
 	enum vpfe_pin_pol hd_pol;
 	/* ccdc pix order. Only used for ycbcr capture */
 	enum ccdc_pixorder pix_order;
+	/* ccdc data connection. 8 bit ycbcr data bus connection */
+	enum vpfe_data_swap ycswap;
 	/* ccdc buffer type. Only used for ycbcr capture */
 	enum ccdc_buftype buf_type;
 };
