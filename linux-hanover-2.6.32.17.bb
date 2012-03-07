@@ -1,21 +1,9 @@
 inherit srctree gitver kernel siteinfo
 
-
 SECTION = "kernel"
 DESCRIPTION = "Hanover Linux Kernel"
 LICENSE = "GPLv2"
 KERNEL_IMAGETYPE = "uImage"
-
-#require recipes/linux/linux.inc
-#DEPENDS += "android-image-utils-native"
-
-#require recipes/linux/multi-kernel.inc
-
-
-#GITVER_NO_V = "${@'${GITVER}'[1:]}"
-#PV = "${GITVER_NO_V}"
-#PV = ${GITVER}
-#PR = "r27"
 
 PV = "2.6.32.17+${GITVER}"
 
@@ -50,10 +38,4 @@ do_deploy() {
         rm -f ${KERNEL_IMAGE_SYMLINK_NAME}.bin
         ln -sf ${KERNEL_IMAGE_BASE_NAME}.bin ${KERNEL_IMAGE_SYMLINK_NAME}.bin
         #package_stagefile_shell ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGE_SYMLINK_NAME}.bin
-
-    	#touch -f empty
-    	#mkbootimg --kernel ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGE_BASE_NAME}.bin \
-        #      --ramdisk empty \
-        #      --cmdline "${CMDLINE}" \
-        #      --output ${DEPLOY_DIR_IMAGE}/${KERNEL_IMAGE_BASE_NAME}.fastboot
 }
