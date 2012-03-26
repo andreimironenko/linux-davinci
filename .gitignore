@@ -47,6 +47,9 @@ Module.symvers
 #
 include/asm
 include/asm-*/asm-offsets.h
+include/asm-*/mach-types.h
+include/asm-arm/asm-offsets.h
+include/asm-arm/mach-types.h
 include/config
 include/linux/autoconf.h
 include/linux/compile.h
