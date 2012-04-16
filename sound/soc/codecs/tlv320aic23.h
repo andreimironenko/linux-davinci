@@ -33,8 +33,9 @@
 #define TLV320AIC23_LIV_MIN		0x0000
 
 /* Left (right) channel headphone volume control register */
-#define TLV320AIC23_LZC_ON		0x0080
-#define TLV320AIC23_LHV_DEFAULT		0x0079
+#define TLV320AIC23_LRS_ON      0x0100
+#define TLV320AIC23_LZC_ON	    0x0080
+#define TLV320AIC23_LHV_DEFAULT	0x0079
 #define TLV320AIC23_LHV_MAX		0x007f
 #define TLV320AIC23_LHV_MIN		0x0000
 

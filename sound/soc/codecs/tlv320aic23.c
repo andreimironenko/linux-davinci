@@ -735,13 +735,13 @@ static int tlv320aic23_init(struct snd_soc_device *socdev)
 	/* Unmute input */
 	reg = tlv320aic23_read_reg_cache(codec, TLV320AIC23_LINVOL);
 	tlv320aic23_write(codec, TLV320AIC23_LINVOL,
-			  (reg & (~TLV320AIC23_LIM_MUTED)) |
-			  (TLV320AIC23_LRS_ENABLED));
+			  (reg & (~TLV320AIC23_LIM_MUTED)) );
+			   //| (TLV320AIC23_LRS_ENABLED));
 
 	reg = tlv320aic23_read_reg_cache(codec, TLV320AIC23_RINVOL);
 	tlv320aic23_write(codec, TLV320AIC23_RINVOL,
-			  (reg & (~TLV320AIC23_LIM_MUTED)) |
-			  TLV320AIC23_LRS_ENABLED);
+			  (reg & (~TLV320AIC23_LIM_MUTED)) );
+			  // |TLV320AIC23_LRS_ENABLED);
 
 	reg = tlv320aic23_read_reg_cache(codec, TLV320AIC23_ANLG);
 	tlv320aic23_write(codec, TLV320AIC23_ANLG,
@@ -750,11 +750,11 @@ static int tlv320aic23_init(struct snd_soc_device *socdev)
 
 	/* Default output volume */
 	tlv320aic23_write(codec, TLV320AIC23_LCHNVOL,
-			  TLV320AIC23_DEFAULT_OUT_VOL &
-			  TLV320AIC23_OUT_VOL_MASK);
+			  (TLV320AIC23_DEFAULT_OUT_VOL &
+			  TLV320AIC23_OUT_VOL_MASK)|TLV320AIC23_LRS_ON);
 	tlv320aic23_write(codec, TLV320AIC23_RCHNVOL,
-			  TLV320AIC23_DEFAULT_OUT_VOL &
-			  TLV320AIC23_OUT_VOL_MASK);
+			  (TLV320AIC23_DEFAULT_OUT_VOL &
+			  TLV320AIC23_OUT_VOL_MASK)|TLV320AIC23_LRS_ON);
 
 	tlv320aic23_write(codec, TLV320AIC23_ACTIVE, 0x1);
 

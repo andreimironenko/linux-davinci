@@ -33,9 +33,13 @@
 #include "davinci-mcasp.h"
 
 // DSP B, codec is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
-#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
+// #define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
 // DSP B, cpu is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
 //#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_IB_NF)
+
+//David's changes
+// DSP A, codec is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
+#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
 
 static int htc_hw_params(struct snd_pcm_substream *substream,
 			 struct snd_pcm_hw_params *params)
