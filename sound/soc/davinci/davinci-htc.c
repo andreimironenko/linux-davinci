@@ -33,13 +33,13 @@
 #include "davinci-mcasp.h"
 
 // DSP B, codec is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
-// #define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
+ #define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
 // DSP B, cpu is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
 //#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_IB_NF)
 
 //David's changes
 // DSP A, codec is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
-#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
+//#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
 
 static int htc_hw_params(struct snd_pcm_substream *substream,
 			 struct snd_pcm_hw_params *params)
@@ -50,29 +50,8 @@ static int htc_hw_params(struct snd_pcm_substream *substream,
 	int ret = 0;
 	unsigned sysclk;
 
-//	pr_info("htc_hw_params(bits=%u rate=%u/%u)\n", params->msbits, params->rate_num, params->rate_den);
-
-#if 0
-	/* ASP1 on DM355 EVM is clocked by an external oscillator */
-//	if (machine_is_davinci_dm355_evm() || machine_is_davinci_dm6467_evm() ||
-//	    machine_is_davinci_dm365_evm())
-//		sysclk = 27000000;
-
-	/* ASP0 in DM6446 EVM is clocked by U55, as configured by
-	 * board-dm644x-evm.c using GPIOs from U18.  There are six
-	 * options; here we "know" we use a 48 KHz sample rate.
-	 */
-/*	else if (machine_is_davinci_evm())
-		sysclk = 12288000;
-
-	else if (machine_is_davinci_da830_evm() ||
-				machine_is_davinci_da850_evm())
-		sysclk = 24576000;
-
-	else
-		return -EINVAL;*/
-#endif
-	sysclk = 12000000;
+	sysclk = 27000000;
+	//sysclk = 12000000;
 	//sysclk = 18432000;
 	//sysclk = 12288000;
 	//sysclk = 24576000;
@@ -89,8 +68,9 @@ static int htc_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 
 	/* set the codec system clock */
-	//ret = snd_soc_dai_set_sysclk(codec_dai, 0, sysclk, SND_SOC_CLOCK_OUT);
-	ret = snd_soc_dai_set_sysclk(codec_dai, 0, sysclk, SND_SOC_CLOCK_IN);
+	ret = snd_soc_dai_set_sysclk(codec_dai, 0, sysclk, SND_SOC_CLOCK_OUT);
+	//David's change
+	//ret = snd_soc_dai_set_sysclk(codec_dai, 0, sysclk, SND_SOC_CLOCK_IN);
 	if (ret < 0)
 		return ret;
 

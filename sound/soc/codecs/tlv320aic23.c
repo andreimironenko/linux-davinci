@@ -615,7 +615,8 @@ static int tlv320aic23_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_STANDBY:
 //		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_STANDBY\n");
 		/* everything off except vref/vmid, */
-		tlv320aic23_write(codec, TLV320AIC23_PWR, reg | 0x0040);
+		tlv320aic23_write(codec, TLV320AIC23_PWR, reg | \
+			TLV320AIC23_CLK_OFF);
 		break;
 	case SND_SOC_BIAS_OFF:
 //		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_OFF\n");
@@ -682,7 +683,7 @@ static int tlv320aic23_resume(struct platform_device *pdev)
 //	pr_info("tlv320aic23_resume\n");
 
 	/* Sync reg_cache with the hardware */
-	for (reg = 0; reg < TLV320AIC23_RESET; reg++) {
+	for (reg = 0; reg <= TLV320AIC23_ACTIVE; reg++) {
 		u16 val = tlv320aic23_read_reg_cache(codec, reg);
 		tlv320aic23_write(codec, reg, val);
 	}
@@ -728,20 +729,19 @@ static int tlv320aic23_init(struct snd_soc_device *socdev)
 
 	/* power on device */
 	tlv320aic23_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
-//	tlv320aic23_write(codec, TLV320AIC23_PWR, 0);		// DJS
 
 	tlv320aic23_write(codec, TLV320AIC23_DIGT, TLV320AIC23_DEEMP_44K);
 
 	/* Unmute input */
 	reg = tlv320aic23_read_reg_cache(codec, TLV320AIC23_LINVOL);
 	tlv320aic23_write(codec, TLV320AIC23_LINVOL,
-			  (reg & (~TLV320AIC23_LIM_MUTED)) );
-			   //| (TLV320AIC23_LRS_ENABLED));
+			  (reg & (~TLV320AIC23_LIM_MUTED)) |
+			  (TLV320AIC23_LRS_ENABLED));
 
 	reg = tlv320aic23_read_reg_cache(codec, TLV320AIC23_RINVOL);
 	tlv320aic23_write(codec, TLV320AIC23_RINVOL,
-			  (reg & (~TLV320AIC23_LIM_MUTED)) );
-			  // |TLV320AIC23_LRS_ENABLED);
+			  (reg & (~TLV320AIC23_LIM_MUTED)) |
+			  TLV320AIC23_LRS_ENABLED);
 
 	reg = tlv320aic23_read_reg_cache(codec, TLV320AIC23_ANLG);
 	tlv320aic23_write(codec, TLV320AIC23_ANLG,
