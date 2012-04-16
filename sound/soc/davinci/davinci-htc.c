@@ -50,8 +50,8 @@ static int htc_hw_params(struct snd_pcm_substream *substream,
 	int ret = 0;
 	unsigned sysclk;
 
-	sysclk = 27000000;
-	//sysclk = 12000000;
+	//sysclk = 27000000;
+	sysclk = 12000000;
 	//sysclk = 18432000;
 	//sysclk = 12288000;
 	//sysclk = 24576000;
