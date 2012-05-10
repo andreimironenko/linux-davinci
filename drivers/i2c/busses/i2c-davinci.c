@@ -35,6 +35,7 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/gpio.h>
 
 #include <mach/hardware.h>
 
@@ -43,6 +44,7 @@
 /* ----- global defines ----------------------------------------------- */
 
 #define DAVINCI_I2C_TIMEOUT	(1*HZ)
+#define DAVINCI_I2C_MAX_TRIES 2
 #define I2C_DAVINCI_INTR_ALL    (DAVINCI_I2C_IMR_AAS | \
 				 DAVINCI_I2C_IMR_SCD | \
 				 DAVINCI_I2C_IMR_ARDY | \
@@ -134,6 +136,44 @@ static inline u16 davinci_i2c_read_reg(struct davinci_i2c_dev *i2c_dev, int reg)
 	return __raw_readw(i2c_dev->base + reg);
 }
 
+/* Generate a pulse on the i2c clock pin. */
+static void generic_i2c_clock_pulse(unsigned int scl_pin)
+{
+	u16 i;
+
+	if (scl_pin) {
+		/* Send high and low on the SCL line */
+		for (i = 0; i < 9; i++) {
+			gpio_set_value(scl_pin, 0);
+			udelay(20);
+			gpio_set_value(scl_pin, 1);
+			udelay(20);
+		}
+	}
+}
+
+/* This routine does i2c bus recovery as specified in the
+ * i2c protocol Rev. 03 section 3.16 titled "Bus clear"
+ */
+static void i2c_recover_bus(struct davinci_i2c_dev *dev)
+{
+	u32 flag = 0;
+	struct davinci_i2c_platform_data *pdata = dev->dev->platform_data;
+
+	dev_err(dev->dev, "initiating i2c bus recovery\n");
+	/* Send NACK to the slave */
+	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
+	flag |=  DAVINCI_I2C_MDR_NACK;
+	/* write the data into mode register */
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
+	if (pdata)
+		generic_i2c_clock_pulse(pdata->scl_pin);
+	/* Send STOP */
+	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
+	MOD_REG_BIT(flag, DAVINCI_I2C_MDR_STP, 1);
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
+}
+
 /*
  * This functions configures I2C and brings I2C out of reset.
  * This function is called during I2C init function. This function
@@ -221,15 +261,44 @@ static int i2c_davinci_wait_bus_not_busy(struct davinci_i2c_dev *dev,
 					 char allow_sleep)
 {
 	unsigned long timeout;
+	static u16 to_cnt = 0;
 
 	timeout = jiffies + dev->adapter.timeout;
+	//In a loop with attempt to read
 	while (davinci_i2c_read_reg(dev, DAVINCI_I2C_STR_REG)
-	       & DAVINCI_I2C_STR_BB) {
-		if (time_after(jiffies, timeout)) {
+			& DAVINCI_I2C_STR_BB) {
+		if(to_cnt < DAVINCI_I2C_MAX_TRIES){
+
+			if (time_after(jiffies, timeout)) {
+				//If here, then there is bus timeout
+				dev_warn(dev->dev,
+						"Timeout waiting for bus ready\n");
+				//increase counter
+				to_cnt++;
+				//and let's try to recover the bus
+				i2c_recover_bus(dev);
+				i2c_davinci_init(dev);
+			}
+			else
+			{
+				//Operation successful, exit the loop and reset the counter
+				to_cnt = 0;
+				break;
+			}
+		}
+		else
+		{
+			//We exceeded the number of max attempts,
+			//recover bus and inform user about this!
 			dev_warn(dev->dev,
-				 "timeout waiting for bus ready\n");
+						"Bus busy, exceed max number of attempts to recover \n");
+			to_cnt = 0;
+			i2c_recover_bus(dev);
+			i2c_davinci_init(dev);
 			return -ETIMEDOUT;
 		}
+
+
 		if (allow_sleep)
 			schedule_timeout(1);
 	}
@@ -244,6 +313,9 @@ static int i2c_davinci_wait_bus_not_busy(struct davinci_i2c_dev *dev,
 static int
 i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 {
+	//Write attempt counter
+	static u16 attempt = 0;
+
 	struct davinci_i2c_dev *dev = i2c_get_adapdata(adap);
 	struct davinci_i2c_platform_data *pdata = dev->dev->platform_data;
 	u32 flag;
@@ -303,6 +375,7 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 		dev->buf_len--;
 	}
 
+#if 0
 	/* write the data into mode register */
 	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
 
@@ -310,10 +383,45 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 						      dev->adapter.timeout);
 	if (r == 0) {
 		dev_err(dev->dev, "controller timed out\n");
-		i2c_davinci_init(dev);
 		dev->buf_len = 0;
+		i2c_recover_bus(dev);
+		i2c_davinci_init(dev);
 		return -ETIMEDOUT;
 	}
+
+#endif
+
+
+	while(1)
+	{
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
+		r = wait_for_completion_interruptible_timeout(&dev->cmd_complete,
+				dev->adapter.timeout);
+		if(r == 0)
+		{
+			dev_warn(dev->dev, "controller timed out\n");
+			if(attempt < DAVINCI_I2C_MAX_TRIES)
+			{
+				attempt ++;
+				i2c_recover_bus(dev);
+				i2c_davinci_init(dev);
+			}
+			else
+			{
+				dev_err(dev->dev, "exceed max num of attempts to recover \n");
+				dev->buf_len = 0;
+				i2c_recover_bus(dev);
+				i2c_davinci_init(dev);
+				return -ETIMEDOUT;
+			}
+		}
+		else
+		{
+			break;
+		}
+
+	}
+
 	if (dev->buf_len) {
 		/* This should be 0 if all bytes were transferred
 		 * or dev->cmd_err denotes an error.

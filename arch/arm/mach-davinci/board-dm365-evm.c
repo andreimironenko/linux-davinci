@@ -299,7 +299,9 @@ static struct i2c_board_info __initdata dm365_evm_tsc2004_dev = {
 
 static struct davinci_i2c_platform_data i2c_pdata = {
 	.bus_freq	= 400	/* kHz */,
-	.bus_delay	= 0	/* usec */,
+	.bus_delay	= 0	    /* usec */,
+	.sda_pin    = 21    /* GIO21*/,
+	.scl_pin    = 20    /* GIO20*/,
 };
 
 static int dm365evm_keyscan_enable(struct device *dev)
