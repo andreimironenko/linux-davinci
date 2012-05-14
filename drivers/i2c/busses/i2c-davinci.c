@@ -261,28 +261,33 @@ static int i2c_davinci_wait_bus_not_busy(struct davinci_i2c_dev *dev,
 					 char allow_sleep)
 {
 	unsigned long timeout;
-	static u16 to_cnt = 0;
+	static u16 recovery_attempt = 0;
 
 	timeout = jiffies + dev->adapter.timeout;
 	//In a loop with attempt to read
 	while (davinci_i2c_read_reg(dev, DAVINCI_I2C_STR_REG)
 			& DAVINCI_I2C_STR_BB) {
-		if(to_cnt < DAVINCI_I2C_MAX_TRIES){
+		if(recovery_attempt < DAVINCI_I2C_MAX_TRIES){
 
 			if (time_after(jiffies, timeout)) {
 				//If here, then there is bus timeout
 				dev_warn(dev->dev,
-						"Timeout waiting for bus ready\n");
+						"timeout waiting for bus ready\n");
 				//increase counter
-				to_cnt++;
+				recovery_attempt++;
 				//and let's try to recover the bus
 				i2c_recover_bus(dev);
 				i2c_davinci_init(dev);
+
+				if (allow_sleep)
+					schedule_timeout(1);
+
+				continue;
 			}
 			else
 			{
 				//Operation successful, exit the loop and reset the counter
-				to_cnt = 0;
+				recovery_attempt = 0;
 				break;
 			}
 		}
@@ -292,15 +297,12 @@ static int i2c_davinci_wait_bus_not_busy(struct davinci_i2c_dev *dev,
 			//recover bus and inform user about this!
 			dev_warn(dev->dev,
 						"Bus busy, exceed max number of attempts to recover \n");
-			to_cnt = 0;
+			recovery_attempt = 0;
 			i2c_recover_bus(dev);
 			i2c_davinci_init(dev);
 			return -ETIMEDOUT;
 		}
 
-
-		if (allow_sleep)
-			schedule_timeout(1);
 	}
 
 	return 0;
@@ -313,8 +315,8 @@ static int i2c_davinci_wait_bus_not_busy(struct davinci_i2c_dev *dev,
 static int
 i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 {
-	//Write attempt counter
-	static u16 attempt = 0;
+	//Bus recovery attempt counter
+	u16 recovery_attempt = 0;
 
 	struct davinci_i2c_dev *dev = i2c_get_adapdata(adap);
 	struct davinci_i2c_platform_data *pdata = dev->dev->platform_data;
@@ -375,7 +377,6 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 		dev->buf_len--;
 	}
 
-#if 0
 	/* write the data into mode register */
 	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
 
@@ -384,43 +385,9 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 	if (r == 0) {
 		dev_err(dev->dev, "controller timed out\n");
 		dev->buf_len = 0;
-		i2c_recover_bus(dev);
-		i2c_davinci_init(dev);
 		return -ETIMEDOUT;
 	}
 
-#endif
-
-
-	while(1)
-	{
-		davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
-		r = wait_for_completion_interruptible_timeout(&dev->cmd_complete,
-				dev->adapter.timeout);
-		if(r == 0)
-		{
-			dev_warn(dev->dev, "controller timed out\n");
-			if(attempt < DAVINCI_I2C_MAX_TRIES)
-			{
-				attempt ++;
-				i2c_recover_bus(dev);
-				i2c_davinci_init(dev);
-			}
-			else
-			{
-				dev_err(dev->dev, "exceed max num of attempts to recover \n");
-				dev->buf_len = 0;
-				i2c_recover_bus(dev);
-				i2c_davinci_init(dev);
-				return -ETIMEDOUT;
-			}
-		}
-		else
-		{
-			break;
-		}
-
-	}
 
 	if (dev->buf_len) {
 		/* This should be 0 if all bytes were transferred
@@ -430,14 +397,22 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 		if (r >= 0) {
 			dev_err(dev->dev, "abnormal termination buf_len=%i\n",
 				dev->buf_len);
+
 			r = -EREMOTEIO;
 		}
 		dev->terminate = 1;
 		wmb();
 		dev->buf_len = 0;
 	}
+
 	if (r < 0)
+	{
+		dev_err(dev->dev, "abnormal termination err =%i\n",r);
+		i2c_recover_bus(dev);
+		i2c_davinci_init(dev);
 		return r;
+	}
+
 
 	/* no error */
 	if (likely(!dev->cmd_err))
@@ -445,11 +420,17 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 
 	/* We have an error */
 	if (dev->cmd_err & DAVINCI_I2C_STR_AL) {
+		dev_err(dev->dev,
+				"abnormal termination,AL(arbitration-lost) interrupt received\n");
 		i2c_davinci_init(dev);
 		return -EIO;
 	}
 
 	if (dev->cmd_err & DAVINCI_I2C_STR_NACK) {
+
+		dev_warn(dev->dev,
+				"abnormal termination,NACK interrupt received\n");
+
 		if (msg->flags & I2C_M_IGNORE_NAK)
 			return msg->len;
 		if (stop) {
@@ -457,6 +438,8 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 			MOD_REG_BIT(w, DAVINCI_I2C_MDR_STP, 1);
 			davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, w);
 		}
+
+
 		return -EREMOTEIO;
 	}
 	return -EIO;
