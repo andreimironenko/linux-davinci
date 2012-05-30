@@ -421,15 +421,12 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 	/* We have an error */
 	if (dev->cmd_err & DAVINCI_I2C_STR_AL) {
 		dev_err(dev->dev,
-				"abnormal termination,AL(arbitration-lost) interrupt received\n");
+				"AL(arbitration-lost) interrupt received\n");
 		i2c_davinci_init(dev);
 		return -EIO;
 	}
 
 	if (dev->cmd_err & DAVINCI_I2C_STR_NACK) {
-
-		dev_warn(dev->dev,
-				"abnormal termination,NACK interrupt received\n");
 
 		if (msg->flags & I2C_M_IGNORE_NAK)
 			return msg->len;
@@ -438,7 +435,6 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 			MOD_REG_BIT(w, DAVINCI_I2C_MDR_STP, 1);
 			davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, w);
 		}
-
 
 		return -EREMOTEIO;
 	}
