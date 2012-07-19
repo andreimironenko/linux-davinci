@@ -50,6 +50,7 @@
 				 DAVINCI_I2C_IMR_ARDY | \
 				 DAVINCI_I2C_IMR_NACK | \
 				 DAVINCI_I2C_IMR_AL)
+#define I2C_DAVINCI_INTR_DISABLE_ALL  (~I2C_DAVINCI_INTR_ALL)
 
 #define DAVINCI_I2C_OAR_REG	0x00
 #define DAVINCI_I2C_IMR_REG	0x04
@@ -65,37 +66,81 @@
 #define DAVINCI_I2C_EMDR_REG	0x2c
 #define DAVINCI_I2C_PSC_REG	0x30
 
-#define DAVINCI_I2C_IVR_AAS	0x07
-#define DAVINCI_I2C_IVR_SCD	0x06
+#define DAVINCI_I2C_PFUNC_REG  0x48
+#define DAVINCI_I2C_PDIN_REG   0x50
+#define DAVINCI_I2C_PDSET_REG  0x58
+#define DAVINCI_I2C_PDOUT_REG  0x54
+
+/*
+ * Bit 0, ICPFUNC0 register, controls the function of the I2C_SCL and I2C_SDA
+ * 0 - Pins function as I2C_SCL and I2C_SDA
+ * 1 - Pins function as GPIO
+ */
+#define DAVINCI_I2C_PFUNC_PFUNC0  (1 << 0)
+#define DAVINCI_I2C_PFUNC_PFUNC0_I2C   0
+#define DAVINCI_I2C_PFUNC_PFUNC0_GPIO  1
+
+/*
+ * PDIN0, Bit 0, ICPDIN register, indicates the logic level present on I2C_SCL
+ * pin.
+ */
+#define DAVINCI_I2C_PDIN_PDIN0   (1 << 0)
+
+/*
+ * PDIN1, Bit 1, ICPDIN register, indicates the logic level present on I2C_SDA
+ * pin.
+ */
+#define DAVINCI_I2C_PDIN_PDIN1   (1 << 1)
+
+
+/* Bit 0, ICPDSET register, controls the signal level of I2C_SDA/GPIO */
+#define DAVINCI_I2C_PDSET_PDSET1 (1 << 1)
+/* Bit 1, ICPDSET register, controls the signal level of I2C_SCL/GPIO */
+#define DAVINCI_I2C_PDSET_PDSET0 (1 << 0)
+
+/* Bit 0, ICPDSET register, controls the signal level of I2C_SDA/GPIO */
+#define DAVINCI_I2C_PDOUT_PDOUT1 (1 << 1)
+/* Bit 1, ICPDSET register, controls the signal level of I2C_SCL/GPIO */
+#define DAVINCI_I2C_PDOUT_PDOUT0 (1 << 0)
+
+
+#define DAVINCI_I2C_IVR_AAS	    0x07
+#define DAVINCI_I2C_IVR_SCD	    0x06
 #define DAVINCI_I2C_IVR_XRDY	0x05
-#define DAVINCI_I2C_IVR_RDR	0x04
+#define DAVINCI_I2C_IVR_RDR	    0x04
 #define DAVINCI_I2C_IVR_ARDY	0x03
 #define DAVINCI_I2C_IVR_NACK	0x02
-#define DAVINCI_I2C_IVR_AL	0x01
+#define DAVINCI_I2C_IVR_AL	    0x01
 
-#define DAVINCI_I2C_STR_BB	(1 << 12)
+#define DAVINCI_I2C_STR_BB	    (1 << 12)
 #define DAVINCI_I2C_STR_RSFULL	(1 << 11)
-#define DAVINCI_I2C_STR_SCD	(1 << 5)
+#define DAVINCI_I2C_STR_SCD	    (1 << 5)
 #define DAVINCI_I2C_STR_ARDY	(1 << 2)
 #define DAVINCI_I2C_STR_NACK	(1 << 1)
-#define DAVINCI_I2C_STR_AL	(1 << 0)
+#define DAVINCI_I2C_STR_AL	    (1 << 0)
 
 #define DAVINCI_I2C_MDR_NACK	(1 << 15)
-#define DAVINCI_I2C_MDR_STT	(1 << 13)
-#define DAVINCI_I2C_MDR_STP	(1 << 11)
-#define DAVINCI_I2C_MDR_MST	(1 << 10)
-#define DAVINCI_I2C_MDR_TRX	(1 << 9)
-#define DAVINCI_I2C_MDR_XA	(1 << 8)
-#define DAVINCI_I2C_MDR_RM	(1 << 7)
-#define DAVINCI_I2C_MDR_IRS	(1 << 5)
+#define DAVINCI_I2C_MDR_STT	    (1 << 13)
+#define DAVINCI_I2C_MDR_STP	    (1 << 11)
+#define DAVINCI_I2C_MDR_MST	    (1 << 10)
+#define DAVINCI_I2C_MDR_TRX	    (1 << 9)
+#define DAVINCI_I2C_MDR_XA	    (1 << 8)
+#define DAVINCI_I2C_MDR_RM	    (1 << 7)
+#define DAVINCI_I2C_MDR_DLB     (1 << 6)
+#define DAVINCI_I2C_MDR_IRS	    (1 << 5)
+#define DAVINCI_I2C_MDR_FDF	    (1 << 3)
 
-#define DAVINCI_I2C_IMR_AAS	(1 << 6)
-#define DAVINCI_I2C_IMR_SCD	(1 << 5)
+#define DAVINCI_I2C_IMR_AAS	    (1 << 6)
+#define DAVINCI_I2C_IMR_SCD	    (1 << 5)
 #define DAVINCI_I2C_IMR_XRDY	(1 << 4)
 #define DAVINCI_I2C_IMR_RRDY	(1 << 3)
 #define DAVINCI_I2C_IMR_ARDY	(1 << 2)
 #define DAVINCI_I2C_IMR_NACK	(1 << 1)
-#define DAVINCI_I2C_IMR_AL	(1 << 0)
+#define DAVINCI_I2C_IMR_AL	    (1 << 0)
+
+
+
+
 
 #define MOD_REG_BIT(val, mask, set) do { \
 	if (set) { \
@@ -136,43 +181,8 @@ static inline u16 davinci_i2c_read_reg(struct davinci_i2c_dev *i2c_dev, int reg)
 	return __raw_readw(i2c_dev->base + reg);
 }
 
-/* Generate a pulse on the i2c clock pin. */
-static void generic_i2c_clock_pulse(unsigned int scl_pin)
-{
-	u16 i;
 
-	if (scl_pin) {
-		/* Send high and low on the SCL line */
-		for (i = 0; i < 9; i++) {
-			gpio_set_value(scl_pin, 0);
-			udelay(20);
-			gpio_set_value(scl_pin, 1);
-			udelay(20);
-		}
-	}
-}
 
-/* This routine does i2c bus recovery as specified in the
- * i2c protocol Rev. 03 section 3.16 titled "Bus clear"
- */
-static void i2c_recover_bus(struct davinci_i2c_dev *dev)
-{
-	u32 flag = 0;
-	struct davinci_i2c_platform_data *pdata = dev->dev->platform_data;
-
-	dev_err(dev->dev, "initiating i2c bus recovery\n");
-	/* Send NACK to the slave */
-	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
-	flag |=  DAVINCI_I2C_MDR_NACK;
-	/* write the data into mode register */
-	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
-	if (pdata)
-		generic_i2c_clock_pulse(pdata->scl_pin);
-	/* Send STOP */
-	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
-	MOD_REG_BIT(flag, DAVINCI_I2C_MDR_STP, 1);
-	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
-}
 
 /*
  * This functions configures I2C and brings I2C out of reset.
@@ -254,6 +264,225 @@ static int i2c_davinci_init(struct davinci_i2c_dev *dev)
 	return 0;
 }
 
+
+/* Generate a pulse on the i2c clock pin. */
+static void generic_i2c_clock_pulse(unsigned int scl_pin)
+{
+	u16 i;
+
+	if (scl_pin) {
+		/* Send high and low on the SCL line */
+		for (i = 0; i < 9; i++) {
+			gpio_set_value(scl_pin, 0);
+			udelay(20);
+			gpio_set_value(scl_pin, 1);
+			udelay(20);
+		}
+	}
+}
+
+
+/*
+ * This routine will help to recover the bus when the "arbitration lost"
+ * interrupt is received. Here is the excerpt from
+ *     http://processors.wiki.ti.com/index.php/I2C_Tips
+ * ...
+ * A problematic scenario can arise if the processor/I2C module gets reset while
+ * it is in the middle of mastering a transfer. In this scenario the external
+ * slave might be holding SDA low to transmit a 0 (or ACK). In this case it will
+ * not release SDA until it gets another falling edge on SCL. Even in this case
+ * it's not until it tries to transmit a '1' that it will actually release SDA
+ * after seeing SCL fall. The end result is that the bus will hang. If the I2C
+ * tries to initiate a new transfer it will hit an "arbitration lost" condition
+ * because SDA won't match the address it's sending.
+ * ...
+ * Here is also the given solution:
+ * For devices that mux the SCL/SDA pins with GPIO, the easiest thing is to
+ * configure the pins for GPIO operation and toggle SCL until the slave releases
+ * SDA. At this point you should be able to resume normal operation.
+ */
+static void i2c_arbitration_lost_recovery(struct davinci_i2c_dev *dev)
+{
+	u16 i;
+	dev_err(dev->dev, "AL recovery started \n");
+
+	//Switch signals from I2C to GPIO
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_PFUNC_REG,
+			DAVINCI_I2C_PFUNC_PFUNC0_GPIO);
+	mdelay(20);
+
+	//Set both line to logical low for a few clock cycles
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 0);
+	mdelay(20);
+
+	//for(i = 0; i< 9; i++)
+	//Wait until SDA is became high
+#if 0
+	while(!(davinci_i2c_read_reg(dev,DAVINCI_I2C_PDIN_REG)
+			& DAVINCI_I2C_PDIN_PDIN1))
+	{
+		//Toggle SCL line to high for some time
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 0);
+		//5 us delay corresponds to half-period of 100 kHz clock
+		udelay(5);
+
+		//Set both lines back to logical 0
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+		udelay(5);
+	}
+#endif
+
+	//Toggle SCL line to high for some time
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+	mdelay(50);
+
+
+	//Set both lines back to logical 0
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG,0);
+	//hold again
+	mdelay(20);
+
+	//Switch back to I2C pin function
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_PFUNC_REG,
+			DAVINCI_I2C_PFUNC_PFUNC0_I2C);
+	mdelay(20);
+
+	//Now we should be recovered!
+	dev_err(dev->dev, "AL recovery completed \n");
+}
+
+
+
+/* This routine does i2c bus recovery as specified in the
+ * i2c protocol Rev. 03 section 3.16 titled "Bus clear"
+ */
+static void i2c_recover_bus(struct davinci_i2c_dev *dev)
+{
+	u32 flag = 0;
+	struct davinci_i2c_platform_data *pdata = dev->dev->platform_data;
+
+	//If this was due to "Arbitration Lost" we must recovery from this condition
+	//if(dev->cmd_err & DAVINCI_I2C_STR_AL)
+	//i2c_arbitration_lost_recovery(dev);
+
+	dev_err(dev->dev, "initiating i2c bus recovery\n");
+	/* Send NACK to the slave */
+	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
+	flag |=  DAVINCI_I2C_MDR_NACK;
+	/* write the data into mode register */
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
+	if (pdata)
+	{
+		generic_i2c_clock_pulse(pdata->scl_pin);
+		//i2c_arbitration_lost_recovery(dev);
+	}
+	/* Send STOP */
+	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
+	MOD_REG_BIT(flag, DAVINCI_I2C_MDR_STP, 1);
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
+	mdelay(100);
+}
+
+
+static void i2c_recover_bus2(struct davinci_i2c_dev *dev)
+{
+	u16 flag;
+	u32 counter = 0;
+
+	dev_err(dev->dev, "initiating i2c bus recovery\n");
+
+	struct davinci_i2c_platform_data *pdata = dev->dev->platform_data;
+	if (!pdata)
+			pdata = &davinci_i2c_platform_data_default;
+
+	//Calculating half period in usecs. It's used in udelay() for forming
+	//I2C clock signal.
+	u32 half_period_usec = (1000/pdata->bus_freq)/2;
+	dev_warn(dev->dev, "half_period_usec =%d", half_period_usec);
+
+
+	dev_warn(dev->dev, "is davinci is still master? \n");
+
+	//Accordingly to DM365 I2C TRM, after "Arbitration Lost" condition
+	//Davinci can be automatically go to "Slave mode" and this is a problem.
+	//We need it to be a master.
+	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
+
+	if(flag & DAVINCI_I2C_MDR_MST)
+	{
+		dev_warn(dev->dev, "davinci is master \n");
+	}
+	else
+	{
+		dev_warn(dev->dev, "davinci is not master \n");
+		dev_warn(dev->dev, "let's make it! \n");
+		flag |= DAVINCI_I2C_MDR_MST;
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
+	}
+
+	// 1) Master tries to assert a Logic 1 on the SDA line
+	if(davinci_i2c_read_reg(dev,DAVINCI_I2C_PDIN_REG)
+			& DAVINCI_I2C_PDIN_PDIN1)
+	{
+		dev_warn(dev->dev, "SDA is asserted high already\n");
+		return;
+	}
+	else
+	{
+		//i2c_arbitration_lost_recovery(dev);
+
+		/* Send NACK to the slave */
+		dev_warn(dev->dev, "Send NACK to the slave \n");
+		flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
+		flag |=  DAVINCI_I2C_MDR_NACK;
+
+		dev_warn(dev->dev, "Start 9 cycles on  \n");
+		while((davinci_i2c_read_reg(dev,DAVINCI_I2C_PDIN_REG)
+				& DAVINCI_I2C_PDIN_PDIN1) == 0)
+		{
+			// 2) Master still sees a Logic 0 and then generates
+			//   a clock pulse on SCL (1-0-1 transition)
+
+			//Set SCL to logical 1 and wait for half-period
+			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+			udelay(half_period_usec);
+
+			//Set SCL to logical 0 and wait for half-period
+			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 0);
+			udelay(half_period_usec);
+
+			//Set SCL to logical 1 and wait for half-period
+			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+			udelay(half_period_usec);
+
+			// 3) Master examinses SDA:
+			//  - If SDA = 0, got to Step2;
+			counter ++;
+
+			// If counter exceeds the maximum 9 clocks exit - means we did not
+			// recover
+			if(counter == 9)
+			{
+				dev_err(dev->dev, "i2c bus recover has failed \n");
+				dev_warn(dev->dev, "cycles repeated = %d", counter);
+				break;
+			}
+		}
+
+		//  - If SDA = 1 or , got to Step4;
+	}
+
+	// 4) Generate a STOP condition
+	dev_warn(dev->dev, "generate STOP condition");
+	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
+	MOD_REG_BIT(flag, DAVINCI_I2C_MDR_STP, 1);
+	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
+	mdelay(100);
+
+	dev_err(dev->dev, "i2c bus recovery completed\n");
+	dev_warn(dev->dev, "cycles repeated = %d", counter);
+}
+
 /*
  * Waiting for bus not busy
  */
@@ -276,7 +505,7 @@ static int i2c_davinci_wait_bus_not_busy(struct davinci_i2c_dev *dev,
 				//increase counter
 				recovery_attempt++;
 				//and let's try to recover the bus
-				i2c_recover_bus(dev);
+				i2c_recover_bus2(dev);
 				i2c_davinci_init(dev);
 
 				if (allow_sleep)
@@ -298,7 +527,7 @@ static int i2c_davinci_wait_bus_not_busy(struct davinci_i2c_dev *dev,
 			dev_warn(dev->dev,
 						"Bus busy, exceed max number of attempts to recover \n");
 			recovery_attempt = 0;
-			i2c_recover_bus(dev);
+			i2c_recover_bus2(dev);
 			i2c_davinci_init(dev);
 			return -ETIMEDOUT;
 		}
@@ -315,9 +544,6 @@ static int i2c_davinci_wait_bus_not_busy(struct davinci_i2c_dev *dev,
 static int
 i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 {
-	//Bus recovery attempt counter
-	u16 recovery_attempt = 0;
-
 	struct davinci_i2c_dev *dev = i2c_get_adapdata(adap);
 	struct davinci_i2c_platform_data *pdata = dev->dev->platform_data;
 	u32 flag;
@@ -364,6 +590,7 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 		MOD_REG_BIT(w, DAVINCI_I2C_IMR_RRDY, 1);
 	else
 		MOD_REG_BIT(w, DAVINCI_I2C_IMR_XRDY, 1);
+
 	davinci_i2c_write_reg(dev, DAVINCI_I2C_IMR_REG, w);
 
 	dev->terminate = 0;
@@ -380,11 +607,18 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 	/* write the data into mode register */
 	davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
 
+	//Wait for operation to complete. In the ISR, once it's done the cmd_complete
+	//flag will be toggled.
 	r = wait_for_completion_interruptible_timeout(&dev->cmd_complete,
 						      dev->adapter.timeout);
+
 	if (r == 0) {
 		dev_err(dev->dev, "controller timed out\n");
 		dev->buf_len = 0;
+
+		i2c_recover_bus2(dev);
+		i2c_davinci_init(dev);
+
 		return -ETIMEDOUT;
 	}
 
@@ -398,6 +632,9 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 			dev_err(dev->dev, "abnormal termination buf_len=%i\n",
 				dev->buf_len);
 
+			i2c_recover_bus2(dev);
+			i2c_davinci_init(dev);
+
 			r = -EREMOTEIO;
 		}
 		dev->terminate = 1;
@@ -407,9 +644,11 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 
 	if (r < 0)
 	{
-		dev_err(dev->dev, "abnormal termination err =%i\n",r);
-		i2c_recover_bus(dev);
+		dev_err(dev->dev, "Unhandled err =%i\n",r);
+
+		i2c_recover_bus2(dev);
 		i2c_davinci_init(dev);
+
 		return r;
 	}
 
@@ -422,11 +661,17 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 	if (dev->cmd_err & DAVINCI_I2C_STR_AL) {
 		dev_err(dev->dev,
 				"AL(arbitration-lost) interrupt received\n");
+
+		i2c_recover_bus2(dev);
 		i2c_davinci_init(dev);
+
 		return -EIO;
 	}
 
 	if (dev->cmd_err & DAVINCI_I2C_STR_NACK) {
+
+		//dev_warn(dev->dev,
+		//		"No acknowledge from device %x \n", msg->addr);
 
 		if (msg->flags & I2C_M_IGNORE_NAK)
 			return msg->len;
@@ -438,8 +683,12 @@ i2c_davinci_xfer_msg(struct i2c_adapter *adap, struct i2c_msg *msg, int stop)
 
 		return -EREMOTEIO;
 	}
-	return -EIO;
+
+
+	return r;
+
 }
+
 
 /*
  * Prepare controller for a transaction and call i2c_davinci_xfer_msg
@@ -463,11 +712,14 @@ i2c_davinci_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 		ret = i2c_davinci_xfer_msg(adap, &msgs[i], (i == (num - 1)));
 		dev_dbg(dev->dev, "%s [%d/%d] ret: %d\n", __func__, i + 1, num,
 			ret);
-		if (ret < 0)
+
+		if(ret < 0)
 			return ret;
 	}
+
 	return num;
 }
+
 
 static u32 i2c_davinci_func(struct i2c_adapter *adap)
 {
@@ -571,8 +823,7 @@ static irqreturn_t i2c_davinci_isr(int this_irq, void *dev_id)
 							 DAVINCI_I2C_IMR_REG);
 				MOD_REG_BIT(w, DAVINCI_I2C_IMR_XRDY, 0);
 				davinci_i2c_write_reg(dev,
-						      DAVINCI_I2C_IMR_REG,
-						      w);
+						      DAVINCI_I2C_IMR_REG, w);
 			} else {
 				/* signal can terminate transfer */
 				terminate_write(dev);
