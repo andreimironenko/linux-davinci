@@ -66,7 +66,9 @@
 #define DAVINCI_I2C_EMDR_REG	0x2c
 #define DAVINCI_I2C_PSC_REG	0x30
 
+
 #define DAVINCI_I2C_PFUNC_REG  0x48
+#define DAVINCI_I2C_ICPDIR_REG 0X4c
 #define DAVINCI_I2C_PDIN_REG   0x50
 #define DAVINCI_I2C_PDSET_REG  0x58
 #define DAVINCI_I2C_PDOUT_REG  0x54
@@ -274,12 +276,20 @@ static void i2c_recover_bus(struct davinci_i2c_dev *dev)
 	dev_err(dev->dev, "initiating i2c bus recovery\n");
 
 	struct davinci_i2c_platform_data *pdata = dev->dev->platform_data;
+
 	if (!pdata)
 			pdata = &davinci_i2c_platform_data_default;
 
 	//Calculating half period in usecs. It's used in udelay() for forming
-	//I2C clock signal.
-	u32 half_period_usec = (1000/pdata->bus_freq)/2;
+	//I2C clock signal. We can't use fraction numbers here, if for instance for
+	//400 kHz clock half period will be 1.25 it's better to round it to 2.
+	//It will be a bit low frequency but it should not be a problem for the
+	//slave as the master provides the clock.
+
+	u32 half_period_usec = (1000 % pdata->bus_freq == 0)?
+			(1000/pdata->bus_freq)/2:
+			(1000/pdata->bus_freq)/2 + 1;
+
 	dev_warn(dev->dev, "half_period_usec =%d", half_period_usec);
 
 	//Accordingly to DM365 I2C TRM, after "Arbitration Lost" condition
@@ -309,12 +319,21 @@ static void i2c_recover_bus(struct davinci_i2c_dev *dev)
 	}
 	else
 	{
-		//i2c_arbitration_lost_recovery(dev);
-
 		/* Send NACK to the slave */
 		dev_warn(dev->dev, "Send NACK to the slave \n");
 		flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
 		flag |=  DAVINCI_I2C_MDR_NACK;
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_MDR_REG, flag);
+		udelay(5);
+
+		//Switch signals from I2C to GPIO
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_PFUNC_REG,
+					DAVINCI_I2C_PFUNC_PFUNC0_GPIO);
+		udelay(5);
+
+		//Set GPIO direction as output
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_ICPDIR_REG,3);
+		udelay(5);
 
 		dev_warn(dev->dev, "Start 9 cycles on  \n");
 		while((davinci_i2c_read_reg(dev,DAVINCI_I2C_PDIN_REG)
@@ -325,14 +344,17 @@ static void i2c_recover_bus(struct davinci_i2c_dev *dev)
 
 			//Set SCL to logical 1 and wait for half-period
 			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+			//gpio_set_value(pdata->scl_pin, 1);
 			udelay(half_period_usec);
 
 			//Set SCL to logical 0 and wait for half-period
 			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 0);
+			//gpio_set_value(pdata->scl_pin, 0);
 			udelay(half_period_usec);
 
 			//Set SCL to logical 1 and wait for half-period
 			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+			//gpio_set_value(pdata->scl_pin, 1);
 			udelay(half_period_usec);
 
 			// 3) Master examinses SDA:
@@ -344,10 +366,18 @@ static void i2c_recover_bus(struct davinci_i2c_dev *dev)
 			if(counter == 9)
 			{
 				dev_err(dev->dev, "i2c bus recover has failed \n");
-				dev_warn(dev->dev, "cycles repeated = %d", counter);
 				break;
 			}
 		}
+
+		//Set back GPIO direction to input
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_ICPDIR_REG,0);
+		udelay(5);
+
+		//Switch back to I2C pin function
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_PFUNC_REG,
+				DAVINCI_I2C_PFUNC_PFUNC0_I2C);
+		udelay(5);
 
 		//  - If SDA = 1 or , got to Step4;
 	}
