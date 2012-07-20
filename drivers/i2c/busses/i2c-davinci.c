@@ -72,6 +72,7 @@
 #define DAVINCI_I2C_PDIN_REG   0x50
 #define DAVINCI_I2C_PDSET_REG  0x58
 #define DAVINCI_I2C_PDOUT_REG  0x54
+#define DAVINCI_I2C_PDCLR_REG  0x5c
 
 /*
  * Bit 0, ICPFUNC0 register, controls the function of the I2C_SCL and I2C_SDA
@@ -293,8 +294,8 @@ static void i2c_recover_bus(struct davinci_i2c_dev *dev)
 	dev_warn(dev->dev, "half_period_usec =%d", half_period_usec);
 
 	//Accordingly to DM365 I2C TRM, after "Arbitration Lost" condition
-	//Davinci can be automatically go to "Slave mode" and this is a problem.
-	//We need it to be a master.
+	//Davinci can automatically go to "Slave mode" and this is a problem.
+	//We need it to be a master!
 	dev_warn(dev->dev, "is davinci is still master? \n");
 	flag = davinci_i2c_read_reg(dev, DAVINCI_I2C_MDR_REG);
 
@@ -335,6 +336,9 @@ static void i2c_recover_bus(struct davinci_i2c_dev *dev)
 		davinci_i2c_write_reg(dev, DAVINCI_I2C_ICPDIR_REG,3);
 		udelay(5);
 
+		//Reset both SDA and SCL pins
+		davinci_i2c_write_reg(dev, DAVINCI_I2C_PDCLR_REG, 3);
+
 		dev_warn(dev->dev, "Start 9 cycles on  \n");
 		while((davinci_i2c_read_reg(dev,DAVINCI_I2C_PDIN_REG)
 				& DAVINCI_I2C_PDIN_PDIN1) == 0)
@@ -343,17 +347,20 @@ static void i2c_recover_bus(struct davinci_i2c_dev *dev)
 			//   a clock pulse on SCL (1-0-1 transition)
 
 			//Set SCL to logical 1 and wait for half-period
-			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+			//davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDSET_REG, 1);
 			//gpio_set_value(pdata->scl_pin, 1);
 			udelay(half_period_usec);
 
 			//Set SCL to logical 0 and wait for half-period
-			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 0);
+			//davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 0);
+			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDCLR_REG, 1);
 			//gpio_set_value(pdata->scl_pin, 0);
 			udelay(half_period_usec);
 
 			//Set SCL to logical 1 and wait for half-period
-			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+			//davinci_i2c_write_reg(dev, DAVINCI_I2C_PDOUT_REG, 1);
+			davinci_i2c_write_reg(dev, DAVINCI_I2C_PDSET_REG, 1);
 			//gpio_set_value(pdata->scl_pin, 1);
 			udelay(half_period_usec);
 
@@ -365,7 +372,7 @@ static void i2c_recover_bus(struct davinci_i2c_dev *dev)
 			// recover
 			if(counter == 9)
 			{
-				dev_err(dev->dev, "i2c bus recover has failed \n");
+				dev_err(dev->dev, "9 clock cycles seems did not help \n");
 				break;
 			}
 		}
