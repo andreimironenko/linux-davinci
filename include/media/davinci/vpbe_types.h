@@ -17,10 +17,10 @@
 #ifndef _VPBE_TYPES_H
 #define _VPBE_TYPES_H
 
-enum vpbe_types {
-	DM644X_VPBE = 1,
-	DM355_VPBE,
-	DM365_VPBE,
+enum vpbe_version {
+	VPBE_VERSION_1 = 1,
+	VPBE_VERSION_2,
+	VPBE_VERSION_3,
 };
 
 /* vpbe_timing_type - Timing types used in vpbe device */
@@ -87,7 +87,5 @@ struct vpbe_enc_mode_info {
 	unsigned int vsync_len;
 	unsigned int flags;
 };
-
-#define CUSTOM_TIMING_480_272 0x480272
 
 #endif

@@ -34,9 +34,6 @@
 /* debugging */
 //#define LART_DEBUG
 
-/* partition support */
-#define HAVE_PARTITIONS
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/types.h>
@@ -44,9 +41,7 @@
 #include <linux/errno.h>
 #include <linux/string.h>
 #include <linux/mtd/mtd.h>
-#ifdef HAVE_PARTITIONS
 #include <linux/mtd/partitions.h>
-#endif
 
 #ifndef CONFIG_SA1100_LART
 #error This is for LART architecture only
@@ -353,7 +348,7 @@ static inline int erase_block (__u32 offset)
    /* put the flash back into command mode */
    write32 (DATA_TO_FLASH (READ_ARRAY),offset);
 
-   /* was the erase successfull? */
+   /* was the erase successful? */
    if ((status & STATUS_ERASE_ERR))
 	 {
 		printk (KERN_WARNING "%s: erase error at address 0x%.8x.\n",module_name,offset);
@@ -508,7 +503,7 @@ static inline int write_dword (__u32 offset,__u32 x)
    /* put the flash back into command mode */
    write32 (DATA_TO_FLASH (READ_ARRAY),offset);
 
-   /* was the write successfull? */
+   /* was the write successful? */
    if ((status & STATUS_PGM_ERR) || read32 (offset) != x)
 	 {
 		printk (KERN_WARNING "%s: write error at address 0x%.8x.\n",module_name,offset);
@@ -598,7 +593,6 @@ static struct mtd_erase_region_info erase_regions[] = {
 	}
 };
 
-#ifdef HAVE_PARTITIONS
 static struct mtd_partition lart_partitions[] = {
 	/* blob */
 	{
@@ -619,7 +613,7 @@ static struct mtd_partition lart_partitions[] = {
 		.size	= INITRD_LEN,		/* MTDPART_SIZ_FULL */
 	}
 };
-#endif
+#define NUM_PARTITIONS ARRAY_SIZE(lart_partitions)
 
 static int __init lart_flash_init (void)
 {
@@ -668,7 +662,6 @@ static int __init lart_flash_init (void)
 			   result,mtd.eraseregions[result].erasesize,mtd.eraseregions[result].erasesize / 1024,
 			   result,mtd.eraseregions[result].numblocks);
 
-#ifdef HAVE_PARTITIONS
    printk ("\npartitions = %d\n", ARRAY_SIZE(lart_partitions));
 
    for (result = 0; result < ARRAY_SIZE(lart_partitions); result++)
@@ -681,24 +674,16 @@ static int __init lart_flash_init (void)
 			 result,lart_partitions[result].offset,
 			 result,lart_partitions[result].size,lart_partitions[result].size / 1024);
 #endif
-#endif
 
-#ifndef HAVE_PARTITIONS
-   result = add_mtd_device (&mtd);
-#else
-   result = add_mtd_partitions (&mtd,lart_partitions, ARRAY_SIZE(lart_partitions));
-#endif
+   result = mtd_device_register(&mtd, lart_partitions,
+                                ARRAY_SIZE(lart_partitions));
 
    return (result);
 }
 
 static void __exit lart_flash_exit (void)
 {
-#ifndef HAVE_PARTITIONS
-   del_mtd_device (&mtd);
-#else
-   del_mtd_partitions (&mtd);
-#endif
+   mtd_device_unregister(&mtd);
 }
 
 module_init (lart_flash_init);

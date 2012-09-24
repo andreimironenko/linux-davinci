@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Nokia Corporation
  *
  * Contacts: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *	     Sakari Ailus <sakari.ailus@maxwell.research.nokia.com>
+ *	     Sakari Ailus <sakari.ailus@iki.fi>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -59,7 +59,7 @@ struct media_entity {
 	unsigned long flags;		/* Entity flags (MEDIA_ENT_FL_*) */
 	u32 group_id;			/* Entity group ID */
 
-	u16 num_pads;			/* Number of input and output pads */
+	u16 num_pads;			/* Number of sink and source pads */
 	u16 num_links;			/* Number of existing links, both
 					 * enabled and disabled */
 	u16 num_backlinks;		/* Number of backlinks */
@@ -70,6 +70,10 @@ struct media_entity {
 
 	const struct media_entity_operations *ops;	/* Entity operations */
 
+	/* Reference counts must never be negative, but are signed integers on
+	 * purpose: a simple WARN_ON(<0) check can be used to detect reference
+	 * count bugs that would make them negative.
+	 */
 	int stream_count;		/* Stream count for the entity. */
 	int use_count;			/* Use count for the entity. */
 
@@ -94,7 +98,7 @@ struct media_entity {
 
 		/* Sub-device specifications */
 		/* Nothing needed yet */
-	};
+	} info;
 };
 
 static inline u32 media_entity_type(struct media_entity *entity)

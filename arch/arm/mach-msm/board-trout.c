@@ -17,6 +17,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/platform_device.h>
+#include <linux/clkdev.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -47,8 +48,8 @@ static void __init trout_init_irq(void)
 	msm_init_irq();
 }
 
-static void __init trout_fixup(struct machine_desc *desc, struct tag *tags,
-				char **cmdline, struct meminfo *mi)
+static void __init trout_fixup(struct tag *tags, char **cmdline,
+			       struct meminfo *mi)
 {
 	mi->nr_banks = 1;
 	mi->bank[0].start = PHYS_OFFSET;
@@ -92,9 +93,7 @@ static void __init trout_map_io(void)
 }
 
 MACHINE_START(TROUT, "HTC Dream")
-#ifdef CONFIG_MSM_DEBUG_UART
-#endif
-	.boot_params	= 0x10000100,
+	.atag_offset	= 0x100,
 	.fixup		= trout_fixup,
 	.map_io		= trout_map_io,
 	.init_irq	= trout_init_irq,

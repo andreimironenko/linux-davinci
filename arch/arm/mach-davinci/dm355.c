@@ -13,13 +13,11 @@
 #include <linux/serial_8250.h>
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
-#include <linux/gpio.h>
 
 #include <linux/spi/spi.h>
 
 #include <asm/mach/map.h>
 
-#include <mach/dm355.h>
 #include <mach/cputype.h>
 #include <mach/edma.h>
 #include <mach/psc.h>
@@ -30,7 +28,9 @@
 #include <mach/common.h>
 #include <mach/asp.h>
 #include <mach/spi.h>
+#include <mach/gpio-davinci.h>
 
+#include "davinci.h"
 #include "clock.h"
 #include "mux.h"
 
@@ -314,7 +314,7 @@ static struct clk timer2_clk = {
 	.name = "timer2",
 	.parent = &pll1_aux_clk,
 	.lpsc = DAVINCI_LPSC_TIMER2,
-	.usecount = 1,              /* REVISIT: why cant' this be disabled? */
+	.usecount = 1,              /* REVISIT: why can't this be disabled? */
 };
 
 static struct clk timer3_clk = {
@@ -403,16 +403,13 @@ static struct resource dm355_spi0_resources[] = {
 		.start = 16,
 		.flags = IORESOURCE_DMA,
 	},
-	{
-		.start = EVENTQ_1,
-		.flags = IORESOURCE_DMA,
-	},
 };
 
 static struct davinci_spi_platform_data dm355_spi0_pdata = {
 	.version 	= SPI_VERSION_1,
 	.num_chipselect = 2,
 	.cshold_bug	= true,
+	.dma_event_q	= EVENTQ_1,
 };
 static struct platform_device dm355_spi0_device = {
 	.name = "spi_davinci",
@@ -594,6 +591,7 @@ static struct edma_soc_info edma_cc0_info = {
 	.n_cc			= 1,
 	.queue_tc_mapping	= queue_tc_mapping,
 	.queue_priority_mapping	= queue_priority_mapping,
+	.default_queue		= EVENTQ_1,
 };
 
 static struct edma_soc_info *dm355_edma_info[EDMA_MAX_CC] = {
@@ -1084,9 +1082,8 @@ static struct davinci_soc_info davinci_soc_info_dm355 = {
 	.gpio_num		= 104,
 	.gpio_irq		= IRQ_DM355_GPIOBNK0,
 	.serial_dev		= &dm355_serial_device,
-	.sram_dma		= 0x00010000,
+	.sram_phys		= 0x00010000,
 	.sram_len		= SZ_32K,
-	.reset_device		= &davinci_wdt_device,
 };
 
 void __init dm355_init_asp1(u32 evt_enable, struct snd_platform_data *pdata)
@@ -1105,30 +1102,7 @@ void __init dm355_init_asp1(u32 evt_enable, struct snd_platform_data *pdata)
 void __init dm355_init(void)
 {
 	davinci_common_init(&davinci_soc_info_dm355);
-	davinci_sysmodbase = ioremap_nocache(DAVINCI_SYSTEM_MODULE_BASE, 0x800);
-	WARN_ON(!davinci_sysmodbase);
-}
-
-static struct platform_device *dm355_video_devices[] __initdata = {
-	&dm355_vpss_device,
-	&dm355_ccdc_dev,
-	&vpfe_capture_dev,
-	&dm355_osd_dev,
-	&dm355_venc_dev,
-	&dm355_vpbe_dev,
-	&dm355_vpbe_v4l2_display,
-	&dm355_vpbe_fb_display,
-};
-
-static int __init dm355_init_video(void)
-{
-	/* Add ccdc clock aliases */
-	clk_add_alias("master", dm355_ccdc_dev.name, "vpss_master", NULL);
-	clk_add_alias("slave", dm355_ccdc_dev.name, "vpss_slave", NULL);
-	vpss_clk_ctrl_reg = DAVINCI_SYSMODULE_VIRT(0x44);
-	platform_add_devices(dm355_video_devices,
-				ARRAY_SIZE(dm355_video_devices));
-	return 0;
+	davinci_map_sysmod();
 }
 
 static int __init dm355_init_devices(void)

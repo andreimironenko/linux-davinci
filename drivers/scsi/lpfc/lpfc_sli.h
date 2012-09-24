@@ -34,9 +34,11 @@ struct lpfc_cq_event {
 	union {
 		struct lpfc_mcqe		mcqe_cmpl;
 		struct lpfc_acqe_link		acqe_link;
-		struct lpfc_acqe_fcoe		acqe_fcoe;
+		struct lpfc_acqe_fip		acqe_fip;
 		struct lpfc_acqe_dcbx		acqe_dcbx;
 		struct lpfc_acqe_grp5		acqe_grp5;
+		struct lpfc_acqe_fc_la		acqe_fc;
+		struct lpfc_acqe_sli		acqe_sli;
 		struct lpfc_rcqe		rcqe_cmpl;
 		struct sli4_wcqe_xri_aborted	wcqe_axri;
 		struct lpfc_wcqe_complete	wcqe_cmpl;
@@ -50,6 +52,7 @@ struct lpfc_iocbq {
 	struct list_head clist;
 	struct list_head dlist;
 	uint16_t iotag;         /* pre-assigned IO tag */
+	uint16_t sli4_lxritag;  /* logical pre-assigned XRI. */
 	uint16_t sli4_xritag;   /* pre-assigned XRI, (OXID) tag. */
 	struct lpfc_cq_event cq_event;
 
@@ -82,6 +85,7 @@ struct lpfc_iocbq {
 		struct lpfc_iocbq    *rsp_iocb;
 		struct lpfcMboxq     *mbox;
 		struct lpfc_nodelist *ndlp;
+		struct lpfc_node_rrq *rrq;
 	} context_un;
 
 	void (*fabric_iocb_cmpl) (struct lpfc_hba *, struct lpfc_iocbq *,
@@ -289,13 +293,11 @@ struct lpfc_sli {
 	struct lpfc_lnk_stat lnk_stat_offsets;
 };
 
-#define LPFC_MBOX_TMO           30	/* Sec tmo for outstanding mbox
-					   command */
-#define LPFC_MBOX_SLI4_CONFIG_TMO 60	/* Sec tmo for outstanding mbox
-					   command */
-#define LPFC_MBOX_TMO_FLASH_CMD 300     /* Sec tmo for outstanding FLASH write
-					 * or erase cmds. This is especially
-					 * long because of the potential of
-					 * multiple flash erases that can be
-					 * spawned.
-					 */
+/* Timeout for normal outstanding mbox command (Seconds) */
+#define LPFC_MBOX_TMO				30
+/* Timeout for non-flash-based outstanding sli_config mbox command (Seconds) */
+#define LPFC_MBOX_SLI4_CONFIG_TMO		60
+/* Timeout for flash-based outstanding sli_config mbox command (Seconds) */
+#define LPFC_MBOX_SLI4_CONFIG_EXTENDED_TMO	300
+/* Timeout for other flash-based outstanding mbox command (Seconds) */
+#define LPFC_MBOX_TMO_FLASH_CMD			300

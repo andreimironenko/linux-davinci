@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Nokia Corporation
  *
  * Contact: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *	    Sakari Ailus <sakari.ailus@maxwell.research.nokia.com>
+ *	    Sakari Ailus <sakari.ailus@iki.fi>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -24,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/videodev2.h>
+#include <linux/export.h>
 
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
@@ -65,9 +66,6 @@ static int subdev_open(struct file *file)
 #endif
 	int ret;
 
-	if (!sd->initialized)
-		return -EAGAIN;
-
 	subdev_fh = kzalloc(sizeof(*subdev_fh), GFP_KERNEL);
 	if (subdev_fh == NULL)
 		return -ENOMEM;
@@ -78,20 +76,7 @@ static int subdev_open(struct file *file)
 		return ret;
 	}
 
-	ret = v4l2_fh_init(&subdev_fh->vfh, vdev);
-	if (ret)
-		goto err;
-
-	if (sd->flags & V4L2_SUBDEV_FL_HAS_EVENTS) {
-		ret = v4l2_event_init(&subdev_fh->vfh);
-		if (ret)
-			goto err;
-
-		ret = v4l2_event_alloc(&subdev_fh->vfh, sd->nevents);
-		if (ret)
-			goto err;
-	}
-
+	v4l2_fh_init(&subdev_fh->vfh, vdev);
 	v4l2_fh_add(&subdev_fh->vfh);
 	file->private_data = &subdev_fh->vfh;
 #if defined(CONFIG_MEDIA_CONTROLLER)
@@ -104,9 +89,11 @@ static int subdev_open(struct file *file)
 	}
 #endif
 
-	ret = v4l2_subdev_call(sd, file, open, subdev_fh);
-	if (ret < 0 && ret != -ENOIOCTLCMD)
-		goto err;
+	if (sd->internal_ops && sd->internal_ops->open) {
+		ret = sd->internal_ops->open(sd, subdev_fh);
+		if (ret < 0)
+			goto err;
+	}
 
 	return 0;
 
@@ -130,7 +117,8 @@ static int subdev_close(struct file *file)
 	struct v4l2_fh *vfh = file->private_data;
 	struct v4l2_subdev_fh *subdev_fh = to_v4l2_subdev_fh(vfh);
 
-	v4l2_subdev_call(sd, file, close, subdev_fh);
+	if (sd->internal_ops && sd->internal_ops->close)
+		sd->internal_ops->close(sd, subdev_fh);
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	if (sd->v4l2_dev->mdev)
 		media_entity_put(&sd->entity);
@@ -155,25 +143,25 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 
 	switch (cmd) {
 	case VIDIOC_QUERYCTRL:
-		return v4l2_subdev_queryctrl(sd, arg);
+		return v4l2_queryctrl(vfh->ctrl_handler, arg);
 
 	case VIDIOC_QUERYMENU:
-		return v4l2_subdev_querymenu(sd, arg);
+		return v4l2_querymenu(vfh->ctrl_handler, arg);
 
 	case VIDIOC_G_CTRL:
-		return v4l2_subdev_g_ctrl(sd, arg);
+		return v4l2_g_ctrl(vfh->ctrl_handler, arg);
 
 	case VIDIOC_S_CTRL:
-		return v4l2_subdev_s_ctrl(sd, arg);
+		return v4l2_s_ctrl(vfh, vfh->ctrl_handler, arg);
 
 	case VIDIOC_G_EXT_CTRLS:
-		return v4l2_subdev_g_ext_ctrls(sd, arg);
+		return v4l2_g_ext_ctrls(vfh->ctrl_handler, arg);
 
 	case VIDIOC_S_EXT_CTRLS:
-		return v4l2_subdev_s_ext_ctrls(sd, arg);
+		return v4l2_s_ext_ctrls(vfh, vfh->ctrl_handler, arg);
 
 	case VIDIOC_TRY_EXT_CTRLS:
-		return v4l2_subdev_try_ext_ctrls(sd, arg);
+		return v4l2_try_ext_ctrls(vfh->ctrl_handler, arg);
 
 	case VIDIOC_DQEVENT:
 		if (!(sd->flags & V4L2_SUBDEV_FL_HAS_EVENTS))
@@ -186,6 +174,29 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 
 	case VIDIOC_UNSUBSCRIBE_EVENT:
 		return v4l2_subdev_call(sd, core, unsubscribe_event, vfh, arg);
+
+#ifdef CONFIG_VIDEO_ADV_DEBUG
+	case VIDIOC_DBG_G_REGISTER:
+	{
+		struct v4l2_dbg_register *p = arg;
+
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
+		return v4l2_subdev_call(sd, core, g_register, p);
+	}
+	case VIDIOC_DBG_S_REGISTER:
+	{
+		struct v4l2_dbg_register *p = arg;
+
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
+		return v4l2_subdev_call(sd, core, s_register, p);
+	}
+#endif
+
+	case VIDIOC_LOG_STATUS:
+		return v4l2_subdev_call(sd, core, log_status);
+
 #if defined(CONFIG_VIDEO_V4L2_SUBDEV_API)
 	case VIDIOC_SUBDEV_G_FMT: {
 		struct v4l2_subdev_format *format = arg;
@@ -285,7 +296,7 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 static long subdev_ioctl(struct file *file, unsigned int cmd,
 	unsigned long arg)
 {
-	return __video_usercopy(file, cmd, arg, subdev_do_ioctl);
+	return video_usercopy(file, cmd, arg, subdev_do_ioctl);
 }
 
 static unsigned int subdev_poll(struct file *file, poll_table *wait)
@@ -297,7 +308,7 @@ static unsigned int subdev_poll(struct file *file, poll_table *wait)
 	if (!(sd->flags & V4L2_SUBDEV_FL_HAS_EVENTS))
 		return POLLERR;
 
-	poll_wait(file, &fh->events->wait, wait);
+	poll_wait(file, &fh->wait, wait);
 
 	if (v4l2_event_pending(fh))
 		return POLLPRI;
@@ -324,23 +335,9 @@ void v4l2_subdev_init(struct v4l2_subdev *sd, const struct v4l2_subdev_ops *ops)
 	sd->grp_id = 0;
 	sd->dev_priv = NULL;
 	sd->host_priv = NULL;
-	sd->initialized = 1;
 #if defined(CONFIG_MEDIA_CONTROLLER)
 	sd->entity.name = sd->name;
 	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
 #endif
 }
 EXPORT_SYMBOL(v4l2_subdev_init);
-
-#if defined(CONFIG_MEDIA_CONTROLLER)
-int v4l2_subdev_set_power(struct media_entity *entity, int power)
-{
-	struct v4l2_subdev *sd = media_entity_to_v4l2_subdev(entity);
-
-	dev_dbg(entity->parent->dev,
-		"%s power%s\n", entity->name, power ? "on" : "off");
-
-	return v4l2_subdev_call(sd, core, s_power, power);
-}
-EXPORT_SYMBOL_GPL(v4l2_subdev_set_power);
-#endif

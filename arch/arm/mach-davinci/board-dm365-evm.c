@@ -28,13 +28,13 @@
 #include <linux/input.h>
 #include <linux/spi/spi.h>
 #include <linux/spi/eeprom.h>
+#include <linux/mfd/davinci_aemif.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
 #include <mach/gpio.h>
 #include <mach/mux.h>
-#include <mach/dm365.h>
 #include <mach/common.h>
 #include <mach/i2c.h>
 #include <mach/serial.h>
@@ -49,7 +49,8 @@
 #include <media/tvp7002.h>
 #include <media/davinci/videohd.h>
 
-/* have_imager() - Check if we have support for imager interface */
+#include "davinci.h"
+
 static inline int have_imager(void)
 {
 #if defined(CONFIG_SOC_CAMERA_MT9P031) || \
@@ -69,7 +70,7 @@ static inline int have_tvp7002(void)
 #endif
 }
 
-#define DM365_EVM_PHY_ID		"0:01"
+#define DM365_EVM_PHY_ID		"davinci_mdio-0:01"
 /*
  * A MAX-II CPLD is used for various board control functions.
  */
@@ -177,7 +178,7 @@ static struct davinci_nand_pdata davinci_nand_data = {
 	.parts			= davinci_nand_partitions,
 	.nr_parts		= ARRAY_SIZE(davinci_nand_partitions),
 	.ecc_mode		= NAND_ECC_HW,
-	.options		= NAND_USE_FLASH_BBT,
+	.bbt_options		= NAND_BBT_USE_FLASH,
 	.ecc_bits		= 4,
 	.timing			= &dm365_evm_nandflash_timing,
 };
@@ -194,13 +195,16 @@ static struct resource davinci_nand_resources[] = {
 	},
 };
 
-static struct platform_device davinci_nand_device = {
-	.name			= "davinci_nand",
-	.id			= 0,
-	.num_resources		= ARRAY_SIZE(davinci_nand_resources),
-	.resource		= davinci_nand_resources,
-	.dev			= {
-		.platform_data	= &davinci_nand_data,
+static struct platform_device dm365_emif_devices[] __initdata = {
+	{
+		.name		= "davinci_nand",
+		.id		= 0,
+
+		.resource		= davinci_nand_resources,
+		.num_resources		= ARRAY_SIZE(davinci_nand_resources),
+		.dev		= {
+			.platform_data	= &davinci_nand_data,
+		},
 	},
 };
 
@@ -887,8 +891,17 @@ static void __init evm_init_i2c(void)
 	i2c_register_board_info(1, i2c_info, ARRAY_SIZE(i2c_info));
 }
 
-static struct platform_device *dm365_evm_nand_devices[] __initdata = {
-	&davinci_nand_device,
+static struct davinci_aemif_devices davinci_emif_devices = {
+	.devices	= dm365_emif_devices,
+	.num_devices	= ARRAY_SIZE(dm365_emif_devices),
+};
+
+static struct platform_device davinci_emif_device = {
+	.name	= "davinci_aemif",
+	.id	= -1,
+	.dev	= {
+		.platform_data	= &davinci_emif_devices,
+	},
 };
 
 static inline int have_leds(void)
@@ -1016,8 +1029,7 @@ fail:
 		/* external keypad mux */
 		mux |= BIT(7);
 
-		platform_add_devices(dm365_evm_nand_devices,
-				ARRAY_SIZE(dm365_evm_nand_devices));
+		platform_device_register(&davinci_emif_device);
 	} else {
 		/* no OneNAND support yet */
 	}
@@ -1042,17 +1054,17 @@ fail:
 	 */
 	if (have_imager()) {
 		label = "HD imager";
-		mux |= CPLD_VIDEO_INPUT_MUX_IMAGER;
-		/* externally mux MMC1 to imager */
-		mux |= BIT(6);
-		dm365evm_reset_imager(1);
+		mux |= 2;
+
+		/* externally mux MMC1/ENET/AIC33 to imager */
+		mux |= BIT(6) | BIT(5) | BIT(3);
 	} else {
 		/* we can use MMC1 ... */
 		dm365evm_mmc_configure();
 		davinci_setup_mmc(1, &dm365evm_mmc_config);
 
 		if (have_tvp7002()) {
-			mux |= CPLD_VIDEO_INPUT_MUX_TVP7002;
+			mux |= 1;
 			resets &= ~BIT(2);
 			label = "tvp7002 HD";
 		} else {
@@ -1161,11 +1173,13 @@ static __init void dm365_evm_init(void)
 	dm365evm_usb_configure();
 }
 
-MACHINE_START(DAVINCI_DM365_EVM, "DaVinci DM36x EVM")
-	.boot_params	= (0x80000100),
+MACHINE_START(DAVINCI_DM365_EVM, "DaVinci DM365 EVM")
+	.atag_offset	= 0x100,
 	.map_io		= dm365_evm_map_io,
 	.init_irq	= davinci_irq_init,
 	.timer		= &davinci_timer,
 	.init_machine	= dm365_evm_init,
+	.dma_zone_size	= SZ_128M,
+	.restart	= davinci_restart,
 MACHINE_END
 

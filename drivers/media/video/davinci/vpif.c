@@ -1,5 +1,5 @@
 /*
- * vpif - DM646x Video Port Interface driver
+ * vpif - Video Port Interface driver
  * VPIF is a receiver and transmitter for video data. It has two channels(0, 1)
  * that receiveing video byte stream and two channels(2, 3) for video output.
  * The hardware supports SDTV, HDTV formats, raw data capture.
@@ -45,10 +45,283 @@ spinlock_t vpif_lock;
 void __iomem *vpif_base;
 struct clk *vpif_clk;
 
-/* For module, capture and display driver will not get
-   reference to this variable unless it is exported */
-EXPORT_SYMBOL(vpif_base);
+/**
+ * ch_params: video standard configuration parameters for vpif
+ * The table must include all presets from supported subdevices.
+ */
+const struct vpif_channel_config_params ch_params[] = {
+	/* raw bayer Camera standars */
+	{
+		.name = "CAMERA",
+		.width = 640,
+		.height = 480,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 0,
+		.sav2eav = 0,
+		.l1 = 0,
+		.l3 = 0,
+		.l5 = 0,
+		.l7 = 0,
+		.l9 = 0,
+		.l11 = 0,
+		.vsize = 0,
+		.capture_format = 1,
+		.vbi_supported = 0,
+		.hd_sd = 0,
+		.stdid = V4L2_STD_BAYER_640,
+	},
+	{
+		.name = "CAMERA",
+		.width = 1024,
+		.height = 768,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 0,
+		.sav2eav = 0,
+		.l1 = 0,
+		.l3 = 0,
+		.l5 = 0,
+		.l7 = 0,
+		.l9 = 0,
+		.l11 = 0,
+		.vsize = 0,
+		.capture_format = 1,
+		.vbi_supported = 0,
+		.hd_sd = 0,
+		.stdid = V4L2_STD_BAYER_1024,
+	},
+	{
+		.name = "CAMERA",
+		.width = 1280,
+		.height = 1024,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 0,
+		.sav2eav = 0,
+		.l1 = 0,
+		.l3 = 0,
+		.l5 = 0,
+		.l7 = 0,
+		.l9 = 0,
+		.l11 = 0,
+		.vsize = 0,
+		.capture_format = 1,
+		.vbi_supported = 0,
+		.hd_sd = 0,
+		.stdid = V4L2_STD_BAYER_1280,
+	},
+	{
+		.name = "CAMERA",
+		.width = 1600,
+		.height = 1200,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 0,
+		.sav2eav = 0,
+		.l1 = 0,
+		.l3 = 0,
+		.l5 = 0,
+		.l7 = 0,
+		.l9 = 0,
+		.l11 = 0,
+		.vsize = 0,
+		.capture_format = 1,
+		.vbi_supported = 0,
+		.hd_sd = 0,
+		.stdid = V4L2_STD_BAYER_1600,
+	},
+	{
+		.name = "CAMERA",
+		.width = 2048,
+		.height = 1536,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 0,
+		.sav2eav = 0,
+		.l1 = 0,
+		.l3 = 0,
+		.l5 = 0,
+		.l7 = 0,
+		.l9 = 0,
+		.l11 = 0,
+		.vsize = 0,
+		.capture_format = 1,
+		.vbi_supported = 0,
+		.hd_sd = 0,
+		.stdid = V4L2_STD_BAYER_2048,
+	},
+	/* HDTV formats */
+	{
+		.name = "480p59_94",
+		.width = 720,
+		.height = 480,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 138-8,
+		.sav2eav = 720,
+		.l1 = 1,
+		.l3 = 43,
+		.l5 = 523,
+		.vsize = 525,
+		.capture_format = 0,
+		.vbi_supported = 0,
+		.hd_sd = 1,
+		.dv_preset = V4L2_DV_480P59_94,
+	},
+	{
+		.name = "576p50",
+		.width = 720,
+		.height = 576,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 144-8,
+		.sav2eav = 720,
+		.l1 = 1,
+		.l3 = 45,
+		.l5 = 621,
+		.vsize = 625,
+		.capture_format = 0,
+		.vbi_supported = 0,
+		.hd_sd = 1,
+		.dv_preset = V4L2_DV_576P50,
+	},
+	{
+		.name = "720p50",
+		.width = 1280,
+		.height = 720,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 700-8,
+		.sav2eav = 1280,
+		.l1 = 1,
+		.l3 = 26,
+		.l5 = 746,
+		.vsize = 750,
+		.capture_format = 0,
+		.vbi_supported = 0,
+		.hd_sd = 1,
+		.dv_preset = V4L2_DV_720P50,
+	},
+	{
+		.name = "720p60",
+		.width = 1280,
+		.height = 720,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 370 - 8,
+		.sav2eav = 1280,
+		.l1 = 1,
+		.l3 = 26,
+		.l5 = 746,
+		.vsize = 750,
+		.capture_format = 0,
+		.vbi_supported = 0,
+		.hd_sd = 1,
+		.dv_preset = V4L2_DV_720P60,
+	},
+	{
+		.name = "1080I50",
+		.width = 1920,
+		.height = 1080,
+		.frm_fmt = 0,
+		.ycmux_mode = 0,
+		.eav2sav = 720 - 8,
+		.sav2eav = 1920,
+		.l1 = 1,
+		.l3 = 21,
+		.l5 = 561,
+		.l7 = 563,
+		.l9 = 584,
+		.l11 = 1124,
+		.vsize = 1125,
+		.capture_format = 0,
+		.vbi_supported = 0,
+		.hd_sd = 1,
+		.dv_preset = V4L2_DV_1080I50,
+	},
+	{
+		.name = "1080I60",
+		.width = 1920,
+		.height = 1080,
+		.frm_fmt = 0,
+		.ycmux_mode = 0,
+		.eav2sav = 280 - 8,
+		.sav2eav = 1920,
+		.l1 = 1,
+		.l3 = 21,
+		.l5 = 561,
+		.l7 = 563,
+		.l9 = 584,
+		.l11 = 1124,
+		.vsize = 1125,
+		.capture_format = 0,
+		.vbi_supported = 0,
+		.hd_sd = 1,
+		.dv_preset = V4L2_DV_1080I60,
+	},
+	{
+		.name = "1080p60",
+		.width = 1920,
+		.height = 1080,
+		.frm_fmt = 1,
+		.ycmux_mode = 0,
+		.eav2sav = 280 - 8,
+		.sav2eav = 1920,
+		.l1 = 1,
+		.l3 = 42,
+		.l5 = 1122,
+		.vsize = 1125,
+		.capture_format = 0,
+		.vbi_supported = 0,
+		.hd_sd = 1,
+		.dv_preset = V4L2_DV_1080P60,
+	},
 
+	/* SDTV formats */
+	{
+		.name = "NTSC_M",
+		.width = 720,
+		.height = 480,
+		.frm_fmt = 0,
+		.ycmux_mode = 1,
+		.eav2sav = 268,
+		.sav2eav = 1440,
+		.l1 = 1,
+		.l3 = 23,
+		.l5 = 263,
+		.l7 = 266,
+		.l9 = 286,
+		.l11 = 525,
+		.vsize = 525,
+		.capture_format = 0,
+		.vbi_supported = 1,
+		.hd_sd = 0,
+		.stdid = V4L2_STD_525_60,
+	},
+	{
+		.name = "PAL_BDGHIK",
+		.width = 720,
+		.height = 576,
+		.frm_fmt = 0,
+		.ycmux_mode = 1,
+		.eav2sav = 280,
+		.sav2eav = 1440,
+		.l1 = 1,
+		.l3 = 23,
+		.l5 = 311,
+		.l7 = 313,
+		.l9 = 336,
+		.l11 = 624,
+		.vsize = 625,
+		.capture_format = 0,
+		.vbi_supported = 1,
+		.hd_sd = 0,
+		.stdid = V4L2_STD_625_50,
+	},
+};
+
+const unsigned int vpif_ch_params_count = ARRAY_SIZE(ch_params);
 
 static inline void vpif_wr_bit(u32 reg, u32 bit, u32 val)
 {
@@ -254,7 +527,7 @@ static int __init vpif_probe(struct platform_device *pdev)
 	if (!res)
 		return -ENOENT;
 
-	res_len = res->end - res->start + 1;
+	res_len = resource_size(res);
 
 	res = request_mem_region(res->start, res_len, res->name);
 	if (!res)
@@ -266,14 +539,12 @@ static int __init vpif_probe(struct platform_device *pdev)
 		goto fail;
 	}
 
-	if (!pdata->clk_enabled) {
-		vpif_clk = clk_get(&pdev->dev, "vpif");
-		if (IS_ERR(vpif_clk)) {
-			status = PTR_ERR(vpif_clk);
-			goto clk_fail;
-		}
-		clk_enable(vpif_clk);
+	vpif_clk = clk_get(&pdev->dev, "vpif");
+	if (IS_ERR(vpif_clk)) {
+		status = PTR_ERR(vpif_clk);
+		goto clk_fail;
 	}
+	clk_enable(vpif_clk);
 
 	spin_lock_init(&vpif_lock);
 	dev_info(&pdev->dev, "vpif probe success\n");
@@ -311,7 +582,7 @@ static int vpif_resume(struct device *dev)
 	return 0;
 }
 
-static struct dev_pm_ops vpif_pm = {
+static const struct dev_pm_ops vpif_pm = {
 	.suspend        = vpif_suspend,
 	.resume         = vpif_resume,
 };

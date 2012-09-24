@@ -330,7 +330,7 @@ static int parport_da8xx_resume(struct device *dev)
 	return 0;
 }
 
-static struct dev_pm_ops parport_da8xx_pm = {
+static const struct dev_pm_ops parport_da8xx_pm = {
 	.suspend        = parport_da8xx_suspend,
 	.resume         = parport_da8xx_resume,
 };

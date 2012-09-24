@@ -80,7 +80,7 @@ static ssize_t store_temp(struct device *dev,
 	unsigned long val;
 	int retval;
 
-	if (strict_strtoul(buf, 10, &val))
+	if (kstrtoul(buf, 10, &val))
 		return -EINVAL;
 	retval = i2c_smbus_write_byte_data(client, sda->index,
 					DIV_ROUND_CLOSEST(val, 1000));
@@ -98,7 +98,7 @@ static ssize_t store_bit(struct device *dev,
 	unsigned long val;
 	int retval;
 
-	if (strict_strtoul(buf, 10, &val))
+	if (kstrtoul(buf, 10, &val))
 		return -EINVAL;
 
 	mutex_lock(&data->mutex);
@@ -151,7 +151,7 @@ static ssize_t store_hyst(struct device *dev,
 	int hyst;
 	unsigned long val;
 
-	if (strict_strtoul(buf, 10, &val))
+	if (kstrtoul(buf, 10, &val))
 		return -EINVAL;
 
 	mutex_lock(&data->mutex);
@@ -269,23 +269,30 @@ static int emc1403_detect(struct i2c_client *client,
 			struct i2c_board_info *info)
 {
 	int id;
-	/* Check if thermal chip is SMSC and EMC1403 */
+	/* Check if thermal chip is SMSC and EMC1403 or EMC1423 */
 
 	id = i2c_smbus_read_byte_data(client, THERMAL_SMSC_ID_REG);
 	if (id != 0x5d)
 		return -ENODEV;
 
+	id = i2c_smbus_read_byte_data(client, THERMAL_PID_REG);
+	switch (id) {
+	case 0x21:
+		strlcpy(info->type, "emc1403", I2C_NAME_SIZE);
+		break;
+	case 0x23:
+		strlcpy(info->type, "emc1423", I2C_NAME_SIZE);
+		break;
 	/* Note: 0x25 is the 1404 which is very similar and this
 	   driver could be extended */
-	id = i2c_smbus_read_byte_data(client, THERMAL_PID_REG);
-	if (id != 0x21)
+	default:
 		return -ENODEV;
+	}
 
 	id = i2c_smbus_read_byte_data(client, THERMAL_REVISION_REG);
 	if (id != 0x01)
 		return -ENODEV;
 
-	strlcpy(info->type, "emc1403", I2C_NAME_SIZE);
 	return 0;
 }
 
@@ -337,11 +344,12 @@ static int emc1403_remove(struct i2c_client *client)
 }
 
 static const unsigned short emc1403_address_list[] = {
-	0x18, 0x2a, 0x4c, 0x4d, I2C_CLIENT_END
+	0x18, 0x29, 0x4c, 0x4d, I2C_CLIENT_END
 };
 
 static const struct i2c_device_id emc1403_idtable[] = {
 	{ "emc1403", 0 },
+	{ "emc1423", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, emc1403_idtable);

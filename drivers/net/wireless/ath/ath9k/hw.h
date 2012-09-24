@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2010 Atheros Communications Inc.
+ * Copyright (c) 2008-2011 Atheros Communications Inc.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,7 +30,6 @@
 #include "btcoex.h"
 
 #include "../regd.h"
-#include "../debug.h"
 
 #define ATHEROS_VENDOR_ID	0x168c
 
@@ -44,6 +43,11 @@
 #define AR9287_DEVID_PCI	0x002d
 #define AR9287_DEVID_PCIE	0x002e
 #define AR9300_DEVID_PCIE	0x0030
+#define AR9300_DEVID_AR9340	0x0031
+#define AR9300_DEVID_AR9485_PCIE 0x0032
+#define AR9300_DEVID_AR9580	0x0033
+#define AR9300_DEVID_AR9462	0x0034
+#define AR9300_DEVID_AR9330	0x0035
 
 #define AR5416_AR9100_DEVID	0x000b
 
@@ -65,50 +69,55 @@
 
 /* Register read/write primitives */
 #define REG_WRITE(_ah, _reg, _val) \
-	ath9k_hw_common(_ah)->ops->write((_ah), (_val), (_reg))
+	(_ah)->reg_ops.write((_ah), (_val), (_reg))
 
 #define REG_READ(_ah, _reg) \
-	ath9k_hw_common(_ah)->ops->read((_ah), (_reg))
+	(_ah)->reg_ops.read((_ah), (_reg))
+
+#define REG_READ_MULTI(_ah, _addr, _val, _cnt)		\
+	(_ah)->reg_ops.multi_read((_ah), (_addr), (_val), (_cnt))
+
+#define REG_RMW(_ah, _reg, _set, _clr) \
+	(_ah)->reg_ops.rmw((_ah), (_reg), (_set), (_clr))
 
 #define ENABLE_REGWRITE_BUFFER(_ah)					\
 	do {								\
-		if (ath9k_hw_common(_ah)->ops->enable_write_buffer)	\
-			ath9k_hw_common(_ah)->ops->enable_write_buffer((_ah)); \
+		if ((_ah)->reg_ops.enable_write_buffer)	\
+			(_ah)->reg_ops.enable_write_buffer((_ah)); \
 	} while (0)
 
 #define REGWRITE_BUFFER_FLUSH(_ah)					\
 	do {								\
-		if (ath9k_hw_common(_ah)->ops->write_flush)		\
-			ath9k_hw_common(_ah)->ops->write_flush((_ah));	\
+		if ((_ah)->reg_ops.write_flush)		\
+			(_ah)->reg_ops.write_flush((_ah));	\
+	} while (0)
+
+#define PR_EEP(_s, _val)						\
+	do {								\
+		len += snprintf(buf + len, size - len, "%20s : %10d\n",	\
+				_s, (_val));				\
 	} while (0)
 
 #define SM(_v, _f)  (((_v) << _f##_S) & _f)
 #define MS(_v, _f)  (((_v) & _f) >> _f##_S)
-#define REG_RMW(_a, _r, _set, _clr)    \
-	REG_WRITE(_a, _r, (REG_READ(_a, _r) & ~(_clr)) | (_set))
 #define REG_RMW_FIELD(_a, _r, _f, _v) \
-	REG_WRITE(_a, _r, \
-	(REG_READ(_a, _r) & ~_f) | (((_v) << _f##_S) & _f))
+	REG_RMW(_a, _r, (((_v) << _f##_S) & _f), (_f))
 #define REG_READ_FIELD(_a, _r, _f) \
 	(((REG_READ(_a, _r) & _f) >> _f##_S))
 #define REG_SET_BIT(_a, _r, _f) \
-	REG_WRITE(_a, _r, REG_READ(_a, _r) | _f)
+	REG_RMW(_a, _r, (_f), 0)
 #define REG_CLR_BIT(_a, _r, _f) \
-	REG_WRITE(_a, _r, REG_READ(_a, _r) & ~_f)
+	REG_RMW(_a, _r, 0, (_f))
 
-#define DO_DELAY(x) do {			\
-		if ((++(x) % 64) == 0)          \
-			udelay(1);		\
+#define DO_DELAY(x) do {					\
+		if (((++(x) % 64) == 0) &&			\
+		    (ath9k_hw_common(ah)->bus_ops->ath_bus_type	\
+			!= ATH_USB))				\
+			udelay(1);				\
 	} while (0)
 
-#define REG_WRITE_ARRAY(iniarray, column, regWr) do {                   \
-		int r;							\
-		for (r = 0; r < ((iniarray)->ia_rows); r++) {		\
-			REG_WRITE(ah, INI_RA((iniarray), (r), 0),	\
-				  INI_RA((iniarray), r, (column)));	\
-			DO_DELAY(regWr);				\
-		}							\
-	} while (0)
+#define REG_WRITE_ARRAY(iniarray, column, regWr) \
+	ath9k_hw_write_array(ah, iniarray, column, &(regWr))
 
 #define AR_GPIO_OUTPUT_MUX_AS_OUTPUT             0
 #define AR_GPIO_OUTPUT_MUX_AS_PCIE_ATTENTION_LED 1
@@ -117,12 +126,22 @@
 #define AR_GPIO_OUTPUT_MUX_AS_RX_CLEAR_EXTERNAL  4
 #define AR_GPIO_OUTPUT_MUX_AS_MAC_NETWORK_LED    5
 #define AR_GPIO_OUTPUT_MUX_AS_MAC_POWER_LED      6
+#define AR_GPIO_OUTPUT_MUX_AS_MCI_WLAN_DATA      0x16
+#define AR_GPIO_OUTPUT_MUX_AS_MCI_WLAN_CLK       0x17
+#define AR_GPIO_OUTPUT_MUX_AS_MCI_BT_DATA        0x18
+#define AR_GPIO_OUTPUT_MUX_AS_MCI_BT_CLK         0x19
+#define AR_GPIO_OUTPUT_MUX_AS_WL_IN_TX           0x14
+#define AR_GPIO_OUTPUT_MUX_AS_WL_IN_RX           0x13
+#define AR_GPIO_OUTPUT_MUX_AS_BT_IN_TX           9
+#define AR_GPIO_OUTPUT_MUX_AS_BT_IN_RX           8
+#define AR_GPIO_OUTPUT_MUX_AS_RUCKUS_STROBE      0x1d
+#define AR_GPIO_OUTPUT_MUX_AS_RUCKUS_DATA        0x1e
 
 #define AR_GPIOD_MASK               0x00001FFF
 #define AR_GPIO_BIT(_gpio)          (1 << (_gpio))
 
 #define BASE_ACTIVATE_DELAY         100
-#define RTC_PLL_SETTLE_DELAY        100
+#define RTC_PLL_SETTLE_DELAY        (AR_SREV_9340(ah) ? 1000 : 100)
 #define COEF_SCALE_S                24
 #define HT40_CHANNEL_CENTER_SHIFT   10
 
@@ -139,6 +158,8 @@
 #define AR_KEYTABLE_SIZE            128
 #define POWER_UP_TIME               10000
 #define SPUR_RSSI_THRESH            40
+#define UPPER_5G_SUB_BAND_START		5700
+#define MID_5G_SUB_BAND_START		5400
 
 #define CAB_TIMEOUT_VAL             10
 #define BEACON_TIMEOUT_VAL          10
@@ -154,8 +175,16 @@
 #define ATH9K_HW_RX_HP_QDEPTH	16
 #define ATH9K_HW_RX_LP_QDEPTH	128
 
-#define PAPRD_GAIN_TABLE_ENTRIES    32
-#define PAPRD_TABLE_SZ              24
+#define PAPRD_GAIN_TABLE_ENTRIES	32
+#define PAPRD_TABLE_SZ			24
+#define PAPRD_IDEAL_AGC2_PWR_RANGE	0xe0
+
+enum ath_hw_txq_subtype {
+	ATH_TXQ_AC_BE = 0,
+	ATH_TXQ_AC_BK = 1,
+	ATH_TXQ_AC_VI = 2,
+	ATH_TXQ_AC_VO = 3,
+};
 
 enum ath_ini_subsys {
 	ATH_INI_PRE = 0,
@@ -167,40 +196,42 @@ enum ath_ini_subsys {
 enum ath9k_hw_caps {
 	ATH9K_HW_CAP_HT                         = BIT(0),
 	ATH9K_HW_CAP_RFSILENT                   = BIT(1),
-	ATH9K_HW_CAP_CST                        = BIT(2),
-	ATH9K_HW_CAP_ENHANCEDPM                 = BIT(3),
-	ATH9K_HW_CAP_AUTOSLEEP                  = BIT(4),
-	ATH9K_HW_CAP_4KB_SPLITTRANS             = BIT(5),
-	ATH9K_HW_CAP_EDMA			= BIT(6),
-	ATH9K_HW_CAP_RAC_SUPPORTED		= BIT(7),
-	ATH9K_HW_CAP_LDPC			= BIT(8),
-	ATH9K_HW_CAP_FASTCLOCK			= BIT(9),
-	ATH9K_HW_CAP_SGI_20			= BIT(10),
-	ATH9K_HW_CAP_PAPRD			= BIT(11),
-	ATH9K_HW_CAP_ANT_DIV_COMB		= BIT(12),
-	ATH9K_HW_CAP_2GHZ			= BIT(13),
-	ATH9K_HW_CAP_5GHZ			= BIT(14),
+	ATH9K_HW_CAP_AUTOSLEEP                  = BIT(2),
+	ATH9K_HW_CAP_4KB_SPLITTRANS             = BIT(3),
+	ATH9K_HW_CAP_EDMA			= BIT(4),
+	ATH9K_HW_CAP_RAC_SUPPORTED		= BIT(5),
+	ATH9K_HW_CAP_LDPC			= BIT(6),
+	ATH9K_HW_CAP_FASTCLOCK			= BIT(7),
+	ATH9K_HW_CAP_SGI_20			= BIT(8),
+	ATH9K_HW_CAP_PAPRD			= BIT(9),
+	ATH9K_HW_CAP_ANT_DIV_COMB		= BIT(10),
+	ATH9K_HW_CAP_2GHZ			= BIT(11),
+	ATH9K_HW_CAP_5GHZ			= BIT(12),
+	ATH9K_HW_CAP_APM			= BIT(13),
+	ATH9K_HW_CAP_RTT			= BIT(14),
+#ifdef CONFIG_ATH9K_BTCOEX_SUPPORT
+	ATH9K_HW_CAP_MCI			= BIT(15),
+#else
+	ATH9K_HW_CAP_MCI			= 0,
+#endif
+	ATH9K_HW_CAP_DFS			= BIT(16),
 };
 
 struct ath9k_hw_capabilities {
 	u32 hw_caps; /* ATH9K_HW_CAP_* from ath9k_hw_caps */
-	u16 total_queues;
-	u16 keycache_size;
-	u16 low_5ghz_chan, high_5ghz_chan;
-	u16 low_2ghz_chan, high_2ghz_chan;
 	u16 rts_aggr_limit;
 	u8 tx_chainmask;
 	u8 rx_chainmask;
-	u16 tx_triglevel_max;
-	u16 reg_cap;
+	u8 max_txchains;
+	u8 max_rxchains;
 	u8 num_gpio_pins;
-	u8 num_antcfg_2ghz;
-	u8 num_antcfg_5ghz;
 	u8 rx_hp_qdepth;
 	u8 rx_lp_qdepth;
 	u8 rx_status_len;
 	u8 tx_desc_len;
 	u8 txs_len;
+	u16 pcie_lcr_offset;
+	bool pcie_lcr_extsync_en;
 };
 
 struct ath9k_ops_config {
@@ -209,12 +240,11 @@ struct ath9k_ops_config {
 	int additional_swba_backoff;
 	int ack_6mb;
 	u32 cwm_ignore_extcca;
-	u8 pcie_powersave_enable;
 	bool pcieSerDesWrite;
 	u8 pcie_clock_req;
 	u32 pcie_waen;
 	u8 analog_shiftreg;
-	u8 ht_enable;
+	u8 paprd_disable;
 	u32 ofdm_trig_low;
 	u32 ofdm_trig_high;
 	u32 cck_trig_high;
@@ -226,7 +256,6 @@ struct ath9k_ops_config {
 #define SPUR_DISABLE        	0
 #define SPUR_ENABLE_IOCTL   	1
 #define SPUR_ENABLE_EEPROM  	2
-#define AR_EEPROM_MODAL_SPURS   5
 #define AR_SPUR_5413_1      	1640
 #define AR_SPUR_5413_2      	1200
 #define AR_NO_SPUR      	0x8000
@@ -251,6 +280,7 @@ enum ath9k_int {
 	ATH9K_INT_TX = 0x00000040,
 	ATH9K_INT_TXDESC = 0x00000080,
 	ATH9K_INT_TIM_TIMER = 0x00000100,
+	ATH9K_INT_MCI = 0x00000200,
 	ATH9K_INT_BB_WATCHDOG = 0x00000400,
 	ATH9K_INT_TXURN = 0x00000800,
 	ATH9K_INT_MIB = 0x00001000,
@@ -321,6 +351,16 @@ enum ath9k_int {
 	 CHANNEL_HT40PLUS |			\
 	 CHANNEL_HT40MINUS)
 
+#define MAX_RTT_TABLE_ENTRY     6
+#define RTT_HIST_MAX            3
+struct ath9k_rtt_hist {
+	u32 table[AR9300_MAX_CHAINS][RTT_HIST_MAX][MAX_RTT_TABLE_ENTRY];
+	u8 num_readings;
+};
+
+#define MAX_IQCAL_MEASUREMENT	8
+#define MAX_CL_TAB_ENTRY	16
+
 struct ath9k_hw_cal_data {
 	u16 channel;
 	u32 channelFlags;
@@ -330,9 +370,15 @@ struct ath9k_hw_cal_data {
 	bool paprd_done;
 	bool nfcal_pending;
 	bool nfcal_interference;
+	bool done_txiqcal_once;
+	bool done_txclcal_once;
 	u16 small_signal_gain[AR9300_MAX_CHAINS];
 	u32 pa_table[AR9300_MAX_CHAINS][PAPRD_TABLE_SZ];
+	u32 num_measures[AR9300_MAX_CHAINS];
+	int tx_corr_coeff[MAX_IQCAL_MEASUREMENT][AR9300_MAX_CHAINS];
+	u32 tx_clcal[AR9300_MAX_CHAINS][MAX_CL_TAB_ENTRY];
 	struct ath9k_nfcal_hist nfCalHist[NUM_NF_READINGS];
+	struct ath9k_rtt_hist rtt_hist;
 };
 
 struct ath9k_channel {
@@ -374,14 +420,6 @@ enum ath9k_power_mode {
 	ATH9K_PM_UNDEFINED
 };
 
-enum ath9k_tp_scale {
-	ATH9K_TP_SCALE_MAX = 0,
-	ATH9K_TP_SCALE_50,
-	ATH9K_TP_SCALE_25,
-	ATH9K_TP_SCALE_12,
-	ATH9K_TP_SCALE_MIN
-};
-
 enum ser_reg_mode {
 	SER_REG_MODE_OFF = 0,
 	SER_REG_MODE_ON = 1,
@@ -394,13 +432,165 @@ enum ath9k_rx_qtype {
 	ATH9K_RX_QUEUE_MAX,
 };
 
+enum mci_message_header {		/* length of payload */
+	MCI_LNA_CTRL     = 0x10,        /* len = 0 */
+	MCI_CONT_NACK    = 0x20,        /* len = 0 */
+	MCI_CONT_INFO    = 0x30,        /* len = 4 */
+	MCI_CONT_RST     = 0x40,        /* len = 0 */
+	MCI_SCHD_INFO    = 0x50,        /* len = 16 */
+	MCI_CPU_INT      = 0x60,        /* len = 4 */
+	MCI_SYS_WAKING   = 0x70,        /* len = 0 */
+	MCI_GPM          = 0x80,        /* len = 16 */
+	MCI_LNA_INFO     = 0x90,        /* len = 1 */
+	MCI_LNA_STATE    = 0x94,
+	MCI_LNA_TAKE     = 0x98,
+	MCI_LNA_TRANS    = 0x9c,
+	MCI_SYS_SLEEPING = 0xa0,        /* len = 0 */
+	MCI_REQ_WAKE     = 0xc0,        /* len = 0 */
+	MCI_DEBUG_16     = 0xfe,        /* len = 2 */
+	MCI_REMOTE_RESET = 0xff         /* len = 16 */
+};
+
+enum ath_mci_gpm_coex_profile_type {
+	MCI_GPM_COEX_PROFILE_UNKNOWN,
+	MCI_GPM_COEX_PROFILE_RFCOMM,
+	MCI_GPM_COEX_PROFILE_A2DP,
+	MCI_GPM_COEX_PROFILE_HID,
+	MCI_GPM_COEX_PROFILE_BNEP,
+	MCI_GPM_COEX_PROFILE_VOICE,
+	MCI_GPM_COEX_PROFILE_MAX
+};
+
+/* MCI GPM/Coex opcode/type definitions */
+enum {
+	MCI_GPM_COEX_W_GPM_PAYLOAD      = 1,
+	MCI_GPM_COEX_B_GPM_TYPE         = 4,
+	MCI_GPM_COEX_B_GPM_OPCODE       = 5,
+	/* MCI_GPM_WLAN_CAL_REQ, MCI_GPM_WLAN_CAL_DONE */
+	MCI_GPM_WLAN_CAL_W_SEQUENCE     = 2,
+
+	/* MCI_GPM_COEX_VERSION_QUERY */
+	/* MCI_GPM_COEX_VERSION_RESPONSE */
+	MCI_GPM_COEX_B_MAJOR_VERSION    = 6,
+	MCI_GPM_COEX_B_MINOR_VERSION    = 7,
+	/* MCI_GPM_COEX_STATUS_QUERY */
+	MCI_GPM_COEX_B_BT_BITMAP        = 6,
+	MCI_GPM_COEX_B_WLAN_BITMAP      = 7,
+	/* MCI_GPM_COEX_HALT_BT_GPM */
+	MCI_GPM_COEX_B_HALT_STATE       = 6,
+	/* MCI_GPM_COEX_WLAN_CHANNELS */
+	MCI_GPM_COEX_B_CHANNEL_MAP      = 6,
+	/* MCI_GPM_COEX_BT_PROFILE_INFO */
+	MCI_GPM_COEX_B_PROFILE_TYPE     = 6,
+	MCI_GPM_COEX_B_PROFILE_LINKID   = 7,
+	MCI_GPM_COEX_B_PROFILE_STATE    = 8,
+	MCI_GPM_COEX_B_PROFILE_ROLE     = 9,
+	MCI_GPM_COEX_B_PROFILE_RATE     = 10,
+	MCI_GPM_COEX_B_PROFILE_VOTYPE   = 11,
+	MCI_GPM_COEX_H_PROFILE_T        = 12,
+	MCI_GPM_COEX_B_PROFILE_W        = 14,
+	MCI_GPM_COEX_B_PROFILE_A        = 15,
+	/* MCI_GPM_COEX_BT_STATUS_UPDATE */
+	MCI_GPM_COEX_B_STATUS_TYPE      = 6,
+	MCI_GPM_COEX_B_STATUS_LINKID    = 7,
+	MCI_GPM_COEX_B_STATUS_STATE     = 8,
+	/* MCI_GPM_COEX_BT_UPDATE_FLAGS */
+	MCI_GPM_COEX_W_BT_FLAGS         = 6,
+	MCI_GPM_COEX_B_BT_FLAGS_OP      = 10
+};
+
+enum mci_gpm_subtype {
+	MCI_GPM_BT_CAL_REQ      = 0,
+	MCI_GPM_BT_CAL_GRANT    = 1,
+	MCI_GPM_BT_CAL_DONE     = 2,
+	MCI_GPM_WLAN_CAL_REQ    = 3,
+	MCI_GPM_WLAN_CAL_GRANT  = 4,
+	MCI_GPM_WLAN_CAL_DONE   = 5,
+	MCI_GPM_COEX_AGENT      = 0x0c,
+	MCI_GPM_RSVD_PATTERN    = 0xfe,
+	MCI_GPM_RSVD_PATTERN32  = 0xfefefefe,
+	MCI_GPM_BT_DEBUG        = 0xff
+};
+
+enum mci_bt_state {
+	MCI_BT_SLEEP,
+	MCI_BT_AWAKE,
+	MCI_BT_CAL_START,
+	MCI_BT_CAL
+};
+
+/* Type of state query */
+enum mci_state_type {
+	MCI_STATE_ENABLE,
+	MCI_STATE_INIT_GPM_OFFSET,
+	MCI_STATE_NEXT_GPM_OFFSET,
+	MCI_STATE_LAST_GPM_OFFSET,
+	MCI_STATE_BT,
+	MCI_STATE_SET_BT_SLEEP,
+	MCI_STATE_SET_BT_AWAKE,
+	MCI_STATE_SET_BT_CAL_START,
+	MCI_STATE_SET_BT_CAL,
+	MCI_STATE_LAST_SCHD_MSG_OFFSET,
+	MCI_STATE_REMOTE_SLEEP,
+	MCI_STATE_CONT_RSSI_POWER,
+	MCI_STATE_CONT_PRIORITY,
+	MCI_STATE_CONT_TXRX,
+	MCI_STATE_RESET_REQ_WAKE,
+	MCI_STATE_SEND_WLAN_COEX_VERSION,
+	MCI_STATE_SET_BT_COEX_VERSION,
+	MCI_STATE_SEND_WLAN_CHANNELS,
+	MCI_STATE_SEND_VERSION_QUERY,
+	MCI_STATE_SEND_STATUS_QUERY,
+	MCI_STATE_NEED_FLUSH_BT_INFO,
+	MCI_STATE_SET_CONCUR_TX_PRI,
+	MCI_STATE_RECOVER_RX,
+	MCI_STATE_NEED_FTP_STOMP,
+	MCI_STATE_NEED_TUNING,
+	MCI_STATE_DEBUG,
+	MCI_STATE_MAX
+};
+
+enum mci_gpm_coex_opcode {
+	MCI_GPM_COEX_VERSION_QUERY,
+	MCI_GPM_COEX_VERSION_RESPONSE,
+	MCI_GPM_COEX_STATUS_QUERY,
+	MCI_GPM_COEX_HALT_BT_GPM,
+	MCI_GPM_COEX_WLAN_CHANNELS,
+	MCI_GPM_COEX_BT_PROFILE_INFO,
+	MCI_GPM_COEX_BT_STATUS_UPDATE,
+	MCI_GPM_COEX_BT_UPDATE_FLAGS
+};
+
+#define MCI_GPM_NOMORE  0
+#define MCI_GPM_MORE    1
+#define MCI_GPM_INVALID 0xffffffff
+
+#define MCI_GPM_RECYCLE(_p_gpm)	do {			  \
+	*(((u32 *)_p_gpm) + MCI_GPM_COEX_W_GPM_PAYLOAD) = \
+				MCI_GPM_RSVD_PATTERN32;   \
+} while (0)
+
+#define MCI_GPM_TYPE(_p_gpm)	\
+	(*(((u8 *)(_p_gpm)) + MCI_GPM_COEX_B_GPM_TYPE) & 0xff)
+
+#define MCI_GPM_OPCODE(_p_gpm)	\
+	(*(((u8 *)(_p_gpm)) + MCI_GPM_COEX_B_GPM_OPCODE) & 0xff)
+
+#define MCI_GPM_SET_CAL_TYPE(_p_gpm, _cal_type)	do {			   \
+	*(((u8 *)(_p_gpm)) + MCI_GPM_COEX_B_GPM_TYPE) = (_cal_type) & 0xff;\
+} while (0)
+
+#define MCI_GPM_SET_TYPE_OPCODE(_p_gpm, _type, _opcode) do {		   \
+	*(((u8 *)(_p_gpm)) + MCI_GPM_COEX_B_GPM_TYPE) = (_type) & 0xff;	   \
+	*(((u8 *)(_p_gpm)) + MCI_GPM_COEX_B_GPM_OPCODE) = (_opcode) & 0xff;\
+} while (0)
+
+#define MCI_GPM_IS_CAL_TYPE(_type) ((_type) <= MCI_GPM_WLAN_CAL_DONE)
+
 struct ath9k_beacon_state {
 	u32 bs_nexttbtt;
 	u32 bs_nextdtim;
 	u32 bs_intval;
-#define ATH9K_BEACON_PERIOD       0x0000ffff
-#define ATH9K_BEACON_ENA          0x00800000
-#define ATH9K_BEACON_RESET_TSF    0x01000000
 #define ATH9K_TSFOOR_THRESHOLD    0x00004240 /* 16k us */
 	u32 bs_dtimperiod;
 	u16 bs_cfpperiod;
@@ -433,7 +623,7 @@ struct ath9k_hw_version {
 	u16 phyRev;
 	u16 analog5GhzRev;
 	u16 analog2GhzRev;
-	u16 subsysid;
+	enum ath_usb_dev usbdev;
 };
 
 /* Generic TSF timer definitions */
@@ -475,6 +665,44 @@ struct ath_hw_antcomb_conf {
 	u8 main_lna_conf;
 	u8 alt_lna_conf;
 	u8 fast_div_bias;
+	u8 main_gaintb;
+	u8 alt_gaintb;
+	int lna1_lna2_delta;
+	u8 div_group;
+};
+
+/**
+ * struct ath_hw_radar_conf - radar detection initialization parameters
+ *
+ * @pulse_inband: threshold for checking the ratio of in-band power
+ *	to total power for short radar pulses (half dB steps)
+ * @pulse_inband_step: threshold for checking an in-band power to total
+ *	power ratio increase for short radar pulses (half dB steps)
+ * @pulse_height: threshold for detecting the beginning of a short
+ *	radar pulse (dB step)
+ * @pulse_rssi: threshold for detecting if a short radar pulse is
+ *	gone (dB step)
+ * @pulse_maxlen: maximum pulse length (0.8 us steps)
+ *
+ * @radar_rssi: RSSI threshold for starting long radar detection (dB steps)
+ * @radar_inband: threshold for checking the ratio of in-band power
+ *	to total power for long radar pulses (half dB steps)
+ * @fir_power: threshold for detecting the end of a long radar pulse (dB)
+ *
+ * @ext_channel: enable extension channel radar detection
+ */
+struct ath_hw_radar_conf {
+	unsigned int pulse_inband;
+	unsigned int pulse_inband_step;
+	unsigned int pulse_height;
+	unsigned int pulse_rssi;
+	unsigned int pulse_maxlen;
+
+	unsigned int radar_rssi;
+	unsigned int radar_inband;
+	int fir_power;
+
+	bool ext_channel;
 };
 
 /**
@@ -488,7 +716,6 @@ struct ath_hw_antcomb_conf {
  *
  * @init_mode_regs: Initializes mode registers
  * @init_mode_gain_regs: Initialize TX/RX gain registers
- * @macversion_supported: If this specific mac revision is supported
  *
  * @rf_set_freq: change frequency
  * @spur_mitigate_freq: spur mitigation
@@ -510,7 +737,6 @@ struct ath_hw_private_ops {
 
 	void (*init_mode_regs)(struct ath_hw *ah);
 	void (*init_mode_gain_regs)(struct ath_hw *ah);
-	bool (*macversion_supported)(u32 macversion);
 	void (*setup_calibration)(struct ath_hw *ah,
 				  struct ath9k_cal_list *currCal);
 
@@ -534,14 +760,16 @@ struct ath_hw_private_ops {
 	void (*set_delta_slope)(struct ath_hw *ah, struct ath9k_channel *chan);
 	bool (*rfbus_req)(struct ath_hw *ah);
 	void (*rfbus_done)(struct ath_hw *ah);
-	void (*enable_rfkill)(struct ath_hw *ah);
 	void (*restore_chainmask)(struct ath_hw *ah);
-	void (*set_diversity)(struct ath_hw *ah, bool value);
 	u32 (*compute_pll_control)(struct ath_hw *ah,
 				   struct ath9k_channel *chan);
 	bool (*ani_control)(struct ath_hw *ah, enum ath9k_ani_cmd cmd,
 			    int param);
 	void (*do_getnf)(struct ath_hw *ah, int16_t nfarray[NUM_NF_READINGS]);
+	void (*set_radar_params)(struct ath_hw *ah,
+				 struct ath_hw_radar_conf *conf);
+	int (*fast_chan_change)(struct ath_hw *ah, struct ath9k_channel *chan,
+				u8 *ini_reloaded);
 
 	/* ANI */
 	void (*ani_cache_ini_regs)(struct ath_hw *ah);
@@ -558,43 +786,23 @@ struct ath_hw_private_ops {
  */
 struct ath_hw_ops {
 	void (*config_pci_powersave)(struct ath_hw *ah,
-				     int restore,
-				     int power_off);
+				     bool power_off);
 	void (*rx_enable)(struct ath_hw *ah);
 	void (*set_desc_link)(void *ds, u32 link);
-	void (*get_desc_link)(void *ds, u32 **link);
 	bool (*calibrate)(struct ath_hw *ah,
 			  struct ath9k_channel *chan,
 			  u8 rxchainmask,
 			  bool longcal);
 	bool (*get_isr)(struct ath_hw *ah, enum ath9k_int *masked);
-	void (*fill_txdesc)(struct ath_hw *ah, void *ds, u32 seglen,
-			    bool is_firstseg, bool is_is_lastseg,
-			    const void *ds0, dma_addr_t buf_addr,
-			    unsigned int qcu);
+	void (*set_txdesc)(struct ath_hw *ah, void *ds,
+			   struct ath_tx_info *i);
 	int (*proc_txdesc)(struct ath_hw *ah, void *ds,
 			   struct ath_tx_status *ts);
-	void (*set11n_txdesc)(struct ath_hw *ah, void *ds,
-			      u32 pktLen, enum ath9k_pkt_type type,
-			      u32 txPower, u32 keyIx,
-			      enum ath9k_key_type keyType,
-			      u32 flags);
-	void (*set11n_ratescenario)(struct ath_hw *ah, void *ds,
-				void *lastds,
-				u32 durUpdateEn, u32 rtsctsRate,
-				u32 rtsctsDuration,
-				struct ath9k_11n_rate_series series[],
-				u32 nseries, u32 flags);
-	void (*set11n_aggr_first)(struct ath_hw *ah, void *ds,
-				  u32 aggrLen);
-	void (*set11n_aggr_middle)(struct ath_hw *ah, void *ds,
-				   u32 numDelims);
-	void (*set11n_aggr_last)(struct ath_hw *ah, void *ds);
-	void (*clr11n_aggr)(struct ath_hw *ah, void *ds);
-	void (*set11n_burstduration)(struct ath_hw *ah, void *ds,
-				     u32 burstDuration);
-	void (*set11n_virtualmorefrag)(struct ath_hw *ah, void *ds,
-				       u32 vmf);
+	void (*antdiv_comb_conf_get)(struct ath_hw *ah,
+			struct ath_hw_antcomb_conf *antconf);
+	void (*antdiv_comb_conf_set)(struct ath_hw *ah,
+			struct ath_hw_antcomb_conf *antconf);
+
 };
 
 struct ath_nf_limits {
@@ -603,7 +811,20 @@ struct ath_nf_limits {
 	s16 nominal;
 };
 
+enum ath_cal_list {
+	TX_IQ_CAL         =	BIT(0),
+	TX_IQ_ON_AGC_CAL  =	BIT(1),
+	TX_CL_CAL         =	BIT(2),
+};
+
+/* ah_flags */
+#define AH_USE_EEPROM   0x1
+#define AH_UNPLUGGED    0x2 /* The card has been physically removed. */
+#define AH_FASTCC       0x4
+
 struct ath_hw {
+	struct ath_ops reg_ops;
+
 	struct ieee80211_hw *hw;
 	struct ath_common common;
 	struct ath9k_hw_version hw_version;
@@ -622,6 +843,7 @@ struct ath_hw {
 
 	bool sw_mgmt_crypto;
 	bool is_pciexpress;
+	bool aspm_enabled;
 	bool is_monitoring;
 	bool need_an_top2_fixup;
 	u16 tx_trig_level;
@@ -639,6 +861,7 @@ struct ath_hw {
 	enum nl80211_iftype opmode;
 	enum ath9k_power_mode power_mode;
 
+	s8 noise;
 	struct ath9k_hw_cal_data *caldata;
 	struct ath9k_pacal_info pacal_info;
 	struct ar5416Stats stats;
@@ -652,8 +875,10 @@ struct ath_hw {
 	u32 txdesc_interrupt_mask;
 	u32 txeol_interrupt_mask;
 	u32 txurn_interrupt_mask;
+	atomic_t intr_ref_cnt;
 	bool chip_fullsleep;
 	u32 atim_window;
+	u32 modes_index;
 
 	/* Calibration */
 	u32 supp_cals;
@@ -692,6 +917,7 @@ struct ath_hw {
 		int32_t sign[AR5416_MAX_CHAINS];
 	} meas3;
 	u16 cal_samples;
+	u8 enabled_cals;
 
 	u32 sta_id1_defaults;
 	u32 misc_mode;
@@ -714,13 +940,10 @@ struct ath_hw {
 	u32 *analogBank6Data;
 	u32 *analogBank6TPCData;
 	u32 *analogBank7Data;
-	u32 *addac5416_21;
 	u32 *bank6Temp;
 
 	u8 txpower_limit;
-	int16_t txpower_indexoffset;
 	int coverage_class;
-	u32 beacon_interval;
 	u32 slottime;
 	u32 globaltxtimeout;
 
@@ -740,10 +963,14 @@ struct ath_hw {
 	u8 txchainmask;
 	u8 rxchainmask;
 
+	struct ath_hw_radar_conf radar_conf;
+
 	u32 originalGain[22];
 	int initPDADC;
 	int PDADCdelta;
-	u8 led_pin;
+	int led_pin;
+	u32 gpio_mask;
+	u32 gpio_val;
 
 	struct ar5416IniArray iniModes;
 	struct ar5416IniArray iniCommon;
@@ -759,16 +986,20 @@ struct ath_hw {
 	struct ar5416IniArray iniPcieSerdes;
 	struct ar5416IniArray iniPcieSerdesLowPower;
 	struct ar5416IniArray iniModesAdditional;
+	struct ar5416IniArray iniModesAdditional_40M;
 	struct ar5416IniArray iniModesRxGain;
 	struct ar5416IniArray iniModesTxGain;
 	struct ar5416IniArray iniModes_9271_1_0_only;
 	struct ar5416IniArray iniCckfirNormal;
 	struct ar5416IniArray iniCckfirJapan2484;
+	struct ar5416IniArray ini_japan2484;
 	struct ar5416IniArray iniCommon_normal_cck_fir_coeff_9271;
 	struct ar5416IniArray iniCommon_japan_2484_cck_fir_coeff_9271;
 	struct ar5416IniArray iniModes_9271_ANI_reg;
 	struct ar5416IniArray iniModes_high_power_tx_gain_9271;
 	struct ar5416IniArray iniModes_normal_power_tx_gain_9271;
+	struct ar5416IniArray ini_radio_post_sys2ant;
+	struct ar5416IniArray ini_BTCOEX_MAX_TXPWR;
 
 	struct ar5416IniArray iniMac[ATH_INI_NUM_SPLIT];
 	struct ar5416IniArray iniBB[ATH_INI_NUM_SPLIT];
@@ -784,11 +1015,17 @@ struct ath_hw {
 	u32 ts_paddr_start;
 	u32 ts_paddr_end;
 	u16 ts_tail;
-	u8 ts_size;
+	u16 ts_size;
 
 	u32 bb_watchdog_last_status;
 	u32 bb_watchdog_timeout_ms; /* in ms, 0 to disable */
+	u8 bb_hang_rx_ofdm; /* true if bb hang due to rx_ofdm */
 
+	unsigned int paprd_target_power;
+	unsigned int paprd_training_power;
+	unsigned int paprd_ratemask;
+	unsigned int paprd_ratemask_ht40;
+	bool paprd_table_write_done;
 	u32 paprd_gain_table_entries[PAPRD_GAIN_TABLE_ENTRIES];
 	u8 paprd_gain_table_index[PAPRD_GAIN_TABLE_ENTRIES];
 	/*
@@ -797,6 +1034,22 @@ struct ath_hw {
 	 * this register when in sleep states.
 	 */
 	u32 WARegVal;
+
+	/* Enterprise mode cap */
+	u32 ent_mode;
+
+	bool is_clk_25mhz;
+	int (*get_mac_revision)(void);
+	int (*external_reset)(void);
+};
+
+struct ath_bus_ops {
+	enum ath_bus_type ath_bus_type;
+	void (*read_cachesize)(struct ath_common *common, int *csz);
+	bool (*eeprom_read)(struct ath_common *common, u32 off, u16 *data);
+	void (*bt_coex_prep)(struct ath_common *common);
+	void (*extn_synch_en)(struct ath_common *common);
+	void (*aspm_init)(struct ath_common *common);
 };
 
 static inline struct ath_common *ath9k_hw_common(struct ath_hw *ah)
@@ -819,10 +1072,9 @@ static inline struct ath_hw_ops *ath9k_hw_ops(struct ath_hw *ah)
 	return &ah->ops;
 }
 
-static inline int sign_extend(int val, const int nbits)
+static inline u8 get_streams(int mask)
 {
-	int order = BIT(nbits-1);
-	return (val ^ order) - order;
+	return !!(mask & BIT(0)) + !!(mask & BIT(1)) + !!(mask & BIT(2));
 }
 
 /* Initialization, Detach, Reset */
@@ -842,15 +1094,12 @@ void ath9k_hw_cfg_output(struct ath_hw *ah, u32 gpio,
 void ath9k_hw_set_gpio(struct ath_hw *ah, u32 gpio, u32 val);
 u32 ath9k_hw_getdefantenna(struct ath_hw *ah);
 void ath9k_hw_setantenna(struct ath_hw *ah, u32 antenna);
-void ath9k_hw_antdiv_comb_conf_get(struct ath_hw *ah,
-				   struct ath_hw_antcomb_conf *antconf);
-void ath9k_hw_antdiv_comb_conf_set(struct ath_hw *ah,
-				   struct ath_hw_antcomb_conf *antconf);
 
 /* General Operation */
 bool ath9k_hw_wait(struct ath_hw *ah, u32 reg, u32 mask, u32 val, u32 timeout);
+void ath9k_hw_write_array(struct ath_hw *ah, struct ar5416IniArray *array,
+			  int column, unsigned int *writecnt);
 u32 ath9k_hw_reverse_bits(u32 val, u32 n);
-bool ath9k_get_channel_edges(struct ath_hw *ah, u16 flags, u16 *low, u16 *high);
 u16 ath9k_hw_computetxtime(struct ath_hw *ah,
 			   u8 phy, int kbps,
 			   u32 frameLen, u16 rateix, bool shortPreamble);
@@ -861,16 +1110,17 @@ u32 ath9k_hw_getrxfilter(struct ath_hw *ah);
 void ath9k_hw_setrxfilter(struct ath_hw *ah, u32 bits);
 bool ath9k_hw_phy_disable(struct ath_hw *ah);
 bool ath9k_hw_disable(struct ath_hw *ah);
-void ath9k_hw_set_txpowerlimit(struct ath_hw *ah, u32 limit);
+void ath9k_hw_set_txpowerlimit(struct ath_hw *ah, u32 limit, bool test);
 void ath9k_hw_setopmode(struct ath_hw *ah);
 void ath9k_hw_setmcastfilter(struct ath_hw *ah, u32 filter0, u32 filter1);
-void ath9k_hw_setbssidmask(struct ath_hw *ah);
 void ath9k_hw_write_associd(struct ath_hw *ah);
+u32 ath9k_hw_gettsf32(struct ath_hw *ah);
 u64 ath9k_hw_gettsf64(struct ath_hw *ah);
 void ath9k_hw_settsf64(struct ath_hw *ah, u64 tsf64);
 void ath9k_hw_reset_tsf(struct ath_hw *ah);
 void ath9k_hw_set_tsfadjust(struct ath_hw *ah, u32 setting);
 void ath9k_hw_init_global_settings(struct ath_hw *ah);
+u32 ar9003_get_pll_sqsum_dvc(struct ath_hw *ah);
 void ath9k_hw_set11nmac2040(struct ath_hw *ah);
 void ath9k_hw_beaconinit(struct ath_hw *ah, u32 next_beacon, u32 beacon_period);
 void ath9k_hw_set_sta_beacon_timers(struct ath_hw *ah,
@@ -893,7 +1143,6 @@ void ath9k_hw_gen_timer_stop(struct ath_hw *ah, struct ath_gen_timer *timer);
 
 void ath_gen_timer_free(struct ath_hw *ah, struct ath_gen_timer *timer);
 void ath_gen_timer_isr(struct ath_hw *hw);
-u32 ath9k_hw_gettsf32(struct ath_hw *ah);
 
 void ath9k_hw_name(struct ath_hw *ah, char *hw_name, size_t len);
 
@@ -903,6 +1152,7 @@ void ath9k_hw_htc_resetinit(struct ath_hw *ah);
 /* PHY */
 void ath9k_hw_get_delta_slope_vals(struct ath_hw *ah, u32 coef_scaled,
 				   u32 *coef_mantissa, u32 *coef_exponent);
+void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan);
 
 /*
  * Code Specific to AR5008, AR9001 or AR9002,
@@ -911,8 +1161,6 @@ void ath9k_hw_get_delta_slope_vals(struct ath_hw *ah, u32 coef_scaled,
 void ar9002_hw_cck_chan14_spread(struct ath_hw *ah);
 int ar9002_hw_rf_claim(struct ath_hw *ah);
 void ar9002_hw_enable_async_fifo(struct ath_hw *ah);
-void ar9002_hw_update_async_fifo(struct ath_hw *ah);
-void ar9002_hw_enable_wep_aggregation(struct ath_hw *ah);
 
 /*
  * Code specific to AR9003, we stuff these here to avoid callbacks
@@ -921,6 +1169,7 @@ void ar9002_hw_enable_wep_aggregation(struct ath_hw *ah);
 void ar9003_hw_bb_watchdog_config(struct ath_hw *ah);
 void ar9003_hw_bb_watchdog_read(struct ath_hw *ah);
 void ar9003_hw_bb_watchdog_dbg_info(struct ath_hw *ah);
+void ar9003_hw_disable_phy_restart(struct ath_hw *ah);
 void ar9003_paprd_enable(struct ath_hw *ah, bool val);
 void ar9003_paprd_populate_single_table(struct ath_hw *ah,
 					struct ath9k_hw_cal_data *caldata,
@@ -956,9 +1205,41 @@ void ath9k_ani_reset(struct ath_hw *ah, bool is_scanning);
 void ath9k_hw_proc_mib_event(struct ath_hw *ah);
 void ath9k_hw_ani_monitor(struct ath_hw *ah, struct ath9k_channel *chan);
 
-#define ATH_PCIE_CAP_LINK_CTRL	0x70
-#define ATH_PCIE_CAP_LINK_L0S	1
-#define ATH_PCIE_CAP_LINK_L1	2
+bool ar9003_mci_send_message(struct ath_hw *ah, u8 header, u32 flag,
+			     u32 *payload, u8 len, bool wait_done,
+			     bool check_bt);
+void ar9003_mci_mute_bt(struct ath_hw *ah);
+u32 ar9003_mci_state(struct ath_hw *ah, u32 state_type, u32 *p_data);
+void ar9003_mci_setup(struct ath_hw *ah, u32 gpm_addr, void *gpm_buf,
+		      u16 len, u32 sched_addr);
+void ar9003_mci_cleanup(struct ath_hw *ah);
+void ar9003_mci_send_coex_halt_bt_gpm(struct ath_hw *ah, bool halt,
+				      bool wait_done);
+u32 ar9003_mci_wait_for_gpm(struct ath_hw *ah, u8 gpm_type,
+			    u8 gpm_opcode, int time_out);
+void ar9003_mci_2g5g_changed(struct ath_hw *ah, bool is_2g);
+void ar9003_mci_disable_interrupt(struct ath_hw *ah);
+void ar9003_mci_enable_interrupt(struct ath_hw *ah);
+void ar9003_mci_2g5g_switch(struct ath_hw *ah, bool wait_done);
+void ar9003_mci_reset(struct ath_hw *ah, bool en_int, bool is_2g,
+		      bool is_full_sleep);
+bool ar9003_mci_check_int(struct ath_hw *ah, u32 ints);
+void ar9003_mci_remote_reset(struct ath_hw *ah, bool wait_done);
+void ar9003_mci_send_sys_waking(struct ath_hw *ah, bool wait_done);
+void ar9003_mci_send_lna_transfer(struct ath_hw *ah, bool wait_done);
+void ar9003_mci_sync_bt_state(struct ath_hw *ah);
+void ar9003_mci_get_interrupt(struct ath_hw *ah, u32 *raw_intr,
+			      u32 *rx_msg_intr);
+
+#ifdef CONFIG_ATH9K_BTCOEX_SUPPORT
+static inline enum ath_btcoex_scheme
+ath9k_hw_get_btcoex_scheme(struct ath_hw *ah)
+{
+	return ah->btcoex_hw.scheme;
+}
+#else
+#define ath9k_hw_get_btcoex_scheme(...) ATH_BTCOEX_CFG_NONE
+#endif
 
 #define ATH9K_CLOCK_RATE_CCK		22
 #define ATH9K_CLOCK_RATE_5GHZ_OFDM	40

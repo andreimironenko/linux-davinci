@@ -560,14 +560,19 @@ static struct i2c_adapter mpc_ops = {
 	.timeout = HZ,
 };
 
-static int __devinit fsl_i2c_probe(struct platform_device *op,
-				   const struct of_device_id *match)
+static const struct of_device_id mpc_i2c_of_match[];
+static int __devinit fsl_i2c_probe(struct platform_device *op)
 {
+	const struct of_device_id *match;
 	struct mpc_i2c *i2c;
 	const u32 *prop;
 	u32 clock = MPC_I2C_CLOCK_LEGACY;
 	int result = 0;
 	int plen;
+
+	match = of_match_device(mpc_i2c_of_match, &op->dev);
+	if (!match)
+		return -EINVAL;
 
 	i2c = kzalloc(sizeof(*i2c), GFP_KERNEL);
 	if (!i2c)
@@ -700,7 +705,7 @@ static const struct of_device_id mpc_i2c_of_match[] = {
 MODULE_DEVICE_TABLE(of, mpc_i2c_of_match);
 
 /* Structure for a device driver */
-static struct of_platform_driver mpc_i2c_driver = {
+static struct platform_driver mpc_i2c_driver = {
 	.probe		= fsl_i2c_probe,
 	.remove		= __devexit_p(fsl_i2c_remove),
 	.driver = {
@@ -710,24 +715,7 @@ static struct of_platform_driver mpc_i2c_driver = {
 	},
 };
 
-static int __init fsl_i2c_init(void)
-{
-	int rv;
-
-	rv = of_register_platform_driver(&mpc_i2c_driver);
-	if (rv)
-		printk(KERN_ERR DRV_NAME
-		       " of_register_platform_driver failed (%i)\n", rv);
-	return rv;
-}
-
-static void __exit fsl_i2c_exit(void)
-{
-	of_unregister_platform_driver(&mpc_i2c_driver);
-}
-
-module_init(fsl_i2c_init);
-module_exit(fsl_i2c_exit);
+module_platform_driver(mpc_i2c_driver);
 
 MODULE_AUTHOR("Adrian Cox <adrian@humboldt.co.uk>");
 MODULE_DESCRIPTION("I2C-Bus adapter for MPC107 bridge and "

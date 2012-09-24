@@ -35,6 +35,7 @@
  */
 
 enum lm75_type {		/* keep sorted in alphabetical order */
+	adt75,
 	ds1775,
 	ds75,
 	lm75,
@@ -92,6 +93,10 @@ static ssize_t show_temp(struct device *dev, struct device_attribute *da,
 {
 	struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
 	struct lm75_data *data = lm75_update_device(dev);
+
+	if (IS_ERR(data))
+		return PTR_ERR(data);
+
 	return sprintf(buf, "%d\n",
 		       LM75_TEMP_FROM_REG(data->temp[attr->index]));
 }
@@ -106,7 +111,7 @@ static ssize_t set_temp(struct device *dev, struct device_attribute *da,
 	long temp;
 	int error;
 
-	error = strict_strtol(buf, 10, &temp);
+	error = kstrtol(buf, 10, &temp);
 	if (error)
 		return error;
 
@@ -213,6 +218,7 @@ static int lm75_remove(struct i2c_client *client)
 }
 
 static const struct i2c_device_id lm75_ids[] = {
+	{ "adt75", adt75, },
 	{ "ds1775", ds1775, },
 	{ "ds75", ds75, },
 	{ "lm75", lm75, },
@@ -232,55 +238,90 @@ static const struct i2c_device_id lm75_ids[] = {
 };
 MODULE_DEVICE_TABLE(i2c, lm75_ids);
 
+#define LM75A_ID 0xA1
+
 /* Return 0 if detection is successful, -ENODEV otherwise */
 static int lm75_detect(struct i2c_client *new_client,
 		       struct i2c_board_info *info)
 {
 	struct i2c_adapter *adapter = new_client->adapter;
 	int i;
-	int cur, conf, hyst, os;
+	int conf, hyst, os;
+	bool is_lm75a = 0;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA |
 				     I2C_FUNC_SMBUS_WORD_DATA))
 		return -ENODEV;
 
-	/* Now, we do the remaining detection. There is no identification-
-	   dedicated register so we have to rely on several tricks:
-	   unused bits, registers cycling over 8-address boundaries,
-	   addresses 0x04-0x07 returning the last read value.
-	   The cycling+unused addresses combination is not tested,
-	   since it would significantly slow the detection down and would
-	   hardly add any value. */
-
-	/* Unused addresses */
-	cur = i2c_smbus_read_word_data(new_client, 0);
-	conf = i2c_smbus_read_byte_data(new_client, 1);
-	hyst = i2c_smbus_read_word_data(new_client, 2);
-	if (i2c_smbus_read_word_data(new_client, 4) != hyst
-	 || i2c_smbus_read_word_data(new_client, 5) != hyst
-	 || i2c_smbus_read_word_data(new_client, 6) != hyst
-	 || i2c_smbus_read_word_data(new_client, 7) != hyst)
-		return -ENODEV;
-	os = i2c_smbus_read_word_data(new_client, 3);
-	if (i2c_smbus_read_word_data(new_client, 4) != os
-	 || i2c_smbus_read_word_data(new_client, 5) != os
-	 || i2c_smbus_read_word_data(new_client, 6) != os
-	 || i2c_smbus_read_word_data(new_client, 7) != os)
-		return -ENODEV;
+	/*
+	 * Now, we do the remaining detection. There is no identification-
+	 * dedicated register so we have to rely on several tricks:
+	 * unused bits, registers cycling over 8-address boundaries,
+	 * addresses 0x04-0x07 returning the last read value.
+	 * The cycling+unused addresses combination is not tested,
+	 * since it would significantly slow the detection down and would
+	 * hardly add any value.
+	 *
+	 * The National Semiconductor LM75A is different than earlier
+	 * LM75s.  It has an ID byte of 0xaX (where X is the chip
+	 * revision, with 1 being the only revision in existence) in
+	 * register 7, and unused registers return 0xff rather than the
+	 * last read value.
+	 *
+	 * Note that this function only detects the original National
+	 * Semiconductor LM75 and the LM75A. Clones from other vendors
+	 * aren't detected, on purpose, because they are typically never
+	 * found on PC hardware. They are found on embedded designs where
+	 * they can be instantiated explicitly so detection is not needed.
+	 * The absence of identification registers on all these clones
+	 * would make their exhaustive detection very difficult and weak,
+	 * and odds are that the driver would bind to unsupported devices.
+	 */
 
 	/* Unused bits */
+	conf = i2c_smbus_read_byte_data(new_client, 1);
 	if (conf & 0xe0)
 		return -ENODEV;
 
-	/* Addresses cycling */
-	for (i = 8; i < 0xff; i += 8) {
-		if (i2c_smbus_read_byte_data(new_client, i + 1) != conf
-		 || i2c_smbus_read_word_data(new_client, i + 2) != hyst
-		 || i2c_smbus_read_word_data(new_client, i + 3) != os)
+	/* First check for LM75A */
+	if (i2c_smbus_read_byte_data(new_client, 7) == LM75A_ID) {
+		/* LM75A returns 0xff on unused registers so
+		   just to be sure we check for that too. */
+		if (i2c_smbus_read_byte_data(new_client, 4) != 0xff
+		 || i2c_smbus_read_byte_data(new_client, 5) != 0xff
+		 || i2c_smbus_read_byte_data(new_client, 6) != 0xff)
+			return -ENODEV;
+		is_lm75a = 1;
+		hyst = i2c_smbus_read_byte_data(new_client, 2);
+		os = i2c_smbus_read_byte_data(new_client, 3);
+	} else { /* Traditional style LM75 detection */
+		/* Unused addresses */
+		hyst = i2c_smbus_read_byte_data(new_client, 2);
+		if (i2c_smbus_read_byte_data(new_client, 4) != hyst
+		 || i2c_smbus_read_byte_data(new_client, 5) != hyst
+		 || i2c_smbus_read_byte_data(new_client, 6) != hyst
+		 || i2c_smbus_read_byte_data(new_client, 7) != hyst)
+			return -ENODEV;
+		os = i2c_smbus_read_byte_data(new_client, 3);
+		if (i2c_smbus_read_byte_data(new_client, 4) != os
+		 || i2c_smbus_read_byte_data(new_client, 5) != os
+		 || i2c_smbus_read_byte_data(new_client, 6) != os
+		 || i2c_smbus_read_byte_data(new_client, 7) != os)
 			return -ENODEV;
 	}
 
-	strlcpy(info->type, "lm75", I2C_NAME_SIZE);
+	/* Addresses cycling */
+	for (i = 8; i <= 248; i += 40) {
+		if (i2c_smbus_read_byte_data(new_client, i + 1) != conf
+		 || i2c_smbus_read_byte_data(new_client, i + 2) != hyst
+		 || i2c_smbus_read_byte_data(new_client, i + 3) != os)
+			return -ENODEV;
+		if (is_lm75a && i2c_smbus_read_byte_data(new_client, i + 7)
+				!= LM75A_ID)
+			return -ENODEV;
+	}
+
+	strlcpy(info->type, is_lm75a ? "lm75a" : "lm75", I2C_NAME_SIZE);
 
 	return 0;
 }
@@ -347,13 +388,10 @@ static struct i2c_driver lm75_driver = {
  */
 static int lm75_read_value(struct i2c_client *client, u8 reg)
 {
-	int value;
-
 	if (reg == LM75_REG_CONF)
 		return i2c_smbus_read_byte_data(client, reg);
-
-	value = i2c_smbus_read_word_data(client, reg);
-	return (value < 0) ? value : swab16(value);
+	else
+		return i2c_smbus_read_word_swapped(client, reg);
 }
 
 static int lm75_write_value(struct i2c_client *client, u8 reg, u16 value)
@@ -361,13 +399,14 @@ static int lm75_write_value(struct i2c_client *client, u8 reg, u16 value)
 	if (reg == LM75_REG_CONF)
 		return i2c_smbus_write_byte_data(client, reg, value);
 	else
-		return i2c_smbus_write_word_data(client, reg, swab16(value));
+		return i2c_smbus_write_word_swapped(client, reg, value);
 }
 
 static struct lm75_data *lm75_update_device(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct lm75_data *data = i2c_get_clientdata(client);
+	struct lm75_data *ret = data;
 
 	mutex_lock(&data->update_lock);
 
@@ -380,19 +419,23 @@ static struct lm75_data *lm75_update_device(struct device *dev)
 			int status;
 
 			status = lm75_read_value(client, LM75_REG_TEMP[i]);
-			if (status < 0)
-				dev_dbg(&client->dev, "reg %d, err %d\n",
-						LM75_REG_TEMP[i], status);
-			else
-				data->temp[i] = status;
+			if (unlikely(status < 0)) {
+				dev_dbg(dev,
+					"LM75: Failed to read value: reg %d, error %d\n",
+					LM75_REG_TEMP[i], status);
+				ret = ERR_PTR(status);
+				data->valid = 0;
+				goto abort;
+			}
+			data->temp[i] = status;
 		}
 		data->last_updated = jiffies;
 		data->valid = 1;
 	}
 
+abort:
 	mutex_unlock(&data->update_lock);
-
-	return data;
+	return ret;
 }
 
 /*-----------------------------------------------------------------------*/

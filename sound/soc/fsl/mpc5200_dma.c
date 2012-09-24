@@ -299,10 +299,11 @@ static struct snd_pcm_ops psc_dma_ops = {
 };
 
 static u64 psc_dma_dmamask = 0xffffffff;
-static int psc_dma_new(struct snd_card *card, struct snd_soc_dai *dai,
-			   struct snd_pcm *pcm)
+static int psc_dma_new(struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_soc_pcm_runtime *rtd = pcm->private_data;
+	struct snd_card *card = rtd->card->snd_card;
+	struct snd_soc_dai *dai = rtd->cpu_dai;
+	struct snd_pcm *pcm = rtd->pcm;
 	struct psc_dma *psc_dma = snd_soc_dai_get_drvdata(rtd->cpu_dai);
 	size_t size = psc_dma_hardware.buffer_bytes_max;
 	int rc = 0;
@@ -368,8 +369,7 @@ static struct snd_soc_platform_driver mpc5200_audio_dma_platform = {
 	.pcm_free	= &psc_dma_free,
 };
 
-static int mpc5200_hpcd_probe(struct of_device *op,
-		const struct of_device_id *match)
+static int mpc5200_hpcd_probe(struct platform_device *op)
 {
 	phys_addr_t fifo;
 	struct psc_dma *psc_dma;
@@ -385,7 +385,7 @@ static int mpc5200_hpcd_probe(struct of_device *op,
 		dev_err(&op->dev, "Missing reg property\n");
 		return -ENODEV;
 	}
-	regs = ioremap(res.start, 1 + res.end - res.start);
+	regs = ioremap(res.start, resource_size(&res));
 	if (!regs) {
 		dev_err(&op->dev, "Could not map registers\n");
 		return -ENODEV;
@@ -487,7 +487,7 @@ out_unmap:
 	return ret;
 }
 
-static int mpc5200_hpcd_remove(struct of_device *op)
+static int mpc5200_hpcd_remove(struct platform_device *op)
 {
 	struct psc_dma *psc_dma = dev_get_drvdata(&op->dev);
 
@@ -511,33 +511,22 @@ static int mpc5200_hpcd_remove(struct of_device *op)
 }
 
 static struct of_device_id mpc5200_hpcd_match[] = {
-	{
-		.compatible = "fsl,mpc5200-pcm",
-	},
+	{ .compatible = "fsl,mpc5200-pcm", },
 	{}
 };
 MODULE_DEVICE_TABLE(of, mpc5200_hpcd_match);
 
-static struct of_platform_driver mpc5200_hpcd_of_driver = {
-	.owner		= THIS_MODULE,
-	.name		= "mpc5200-pcm-audio",
-	.match_table    = mpc5200_hpcd_match,
+static struct platform_driver mpc5200_hpcd_of_driver = {
 	.probe		= mpc5200_hpcd_probe,
 	.remove		= mpc5200_hpcd_remove,
+	.driver = {
+		.owner		= THIS_MODULE,
+		.name		= "mpc5200-pcm-audio",
+		.of_match_table    = mpc5200_hpcd_match,
+	}
 };
 
-static int __init mpc5200_hpcd_init(void)
-{
-	return of_register_platform_driver(&mpc5200_hpcd_of_driver);
-}
-
-static void __exit mpc5200_hpcd_exit(void)
-{
-	of_unregister_platform_driver(&mpc5200_hpcd_of_driver);
-}
-
-module_init(mpc5200_hpcd_init);
-module_exit(mpc5200_hpcd_exit);
+module_platform_driver(mpc5200_hpcd_of_driver);
 
 MODULE_AUTHOR("Grant Likely <grant.likely@secretlab.ca>");
 MODULE_DESCRIPTION("Freescale MPC5200 PSC in DMA mode ASoC Driver");

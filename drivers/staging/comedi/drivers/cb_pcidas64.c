@@ -104,7 +104,7 @@ TODO:
 #endif
 
 #define TIMER_BASE 25		/*  40MHz master clock */
-#define PRESCALED_TIMER_BASE	10000	/*  100kHz 'prescaled' clock for slow aquisition, maybe I'll support this someday */
+#define PRESCALED_TIMER_BASE	10000	/*  100kHz 'prescaled' clock for slow acquisition, maybe I'll support this someday */
 #define DMA_BUFFER_SIZE 0x1000
 
 #define PCI_VENDOR_ID_COMPUTERBOARDS	0x1307
@@ -136,7 +136,7 @@ enum write_only_registers {
 	ADC_DELAY_INTERVAL_UPPER_REG = 0x1c,	/*  upper 8 bits of delay interval counter */
 	ADC_COUNT_LOWER_REG = 0x1e,	/*  lower 16 bits of hardware conversion/scan counter */
 	ADC_COUNT_UPPER_REG = 0x20,	/*  upper 8 bits of hardware conversion/scan counter */
-	ADC_START_REG = 0x22,	/*  software trigger to start aquisition */
+	ADC_START_REG = 0x22,	/*  software trigger to start acquisition */
 	ADC_CONVERT_REG = 0x24,	/*  initiates single conversion */
 	ADC_QUEUE_CLEAR_REG = 0x26,	/*  clears adc queue */
 	ADC_QUEUE_LOAD_REG = 0x28,	/*  loads adc queue */
@@ -199,7 +199,7 @@ enum intr_enable_contents {
 	ADC_INTR_EOSCAN_BITS = 0x2,	/*  interrupt end of scan */
 	ADC_INTR_EOSEQ_BITS = 0x3,	/*  interrupt end of sequence (probably wont use this it's pretty fancy) */
 	EN_ADC_INTR_SRC_BIT = 0x4,	/*  enable adc interrupt source */
-	EN_ADC_DONE_INTR_BIT = 0x8,	/*  enable adc aquisition done interrupt */
+	EN_ADC_DONE_INTR_BIT = 0x8,	/*  enable adc acquisition done interrupt */
 	DAC_INTR_SRC_MASK = 0x30,
 	DAC_INTR_QEMPTY_BITS = 0x0,
 	DAC_INTR_HIGH_CHAN_BITS = 0x10,
@@ -1739,8 +1739,6 @@ static int attach(struct comedi_device *dev, struct comedi_devconfig *it)
 	uint32_t local_range, local_decode;
 	int retval;
 
-	printk("comedi%d: cb_pcidas64\n", dev->minor);
-
 /*
  * Allocate the private structure area.
  */
@@ -1781,12 +1779,11 @@ static int attach(struct comedi_device *dev, struct comedi_devconfig *it)
 		return -EIO;
 	}
 
-	printk("Found %s on bus %i, slot %i\n", board(dev)->name,
-	       pcidev->bus->number, PCI_SLOT(pcidev->devfn));
+	dev_dbg(dev->hw_dev, "Found %s on bus %i, slot %i\n", board(dev)->name,
+		pcidev->bus->number, PCI_SLOT(pcidev->devfn));
 
 	if (comedi_pci_enable(pcidev, driver_cb_pcidas.driver_name)) {
-		printk(KERN_WARNING
-		       " failed to enable PCI device and request regions\n");
+		dev_warn(dev->hw_dev, "failed to enable PCI device and request regions\n");
 		return -EIO;
 	}
 	pci_set_master(pcidev);
@@ -1814,7 +1811,7 @@ static int attach(struct comedi_device *dev, struct comedi_devconfig *it)
 
 	if (!priv(dev)->plx9080_iobase || !priv(dev)->main_iobase
 	    || !priv(dev)->dio_counter_iobase) {
-		printk(" failed to remap io memory\n");
+		dev_warn(dev->hw_dev, "failed to remap io memory\n");
 		return -ENOMEM;
 	}
 
@@ -1850,17 +1847,19 @@ static int attach(struct comedi_device *dev, struct comedi_devconfig *it)
 
 	priv(dev)->hw_revision =
 	    hw_revision(dev, readw(priv(dev)->main_iobase + HW_STATUS_REG));
-	printk(" stc hardware revision %i\n", priv(dev)->hw_revision);
+	dev_dbg(dev->hw_dev, "stc hardware revision %i\n",
+		priv(dev)->hw_revision);
 	init_plx9080(dev);
 	init_stc_registers(dev);
 	/*  get irq */
 	if (request_irq(pcidev->irq, handle_interrupt, IRQF_SHARED,
 			"cb_pcidas64", dev)) {
-		printk(" unable to allocate irq %u\n", pcidev->irq);
+		dev_dbg(dev->hw_dev, "unable to allocate irq %u\n",
+			pcidev->irq);
 		return -EINVAL;
 	}
 	dev->irq = pcidev->irq;
-	printk(" irq %u\n", dev->irq);
+	dev_dbg(dev->hw_dev, "irq %u\n", dev->irq);
 
 	retval = setup_subdevices(dev);
 	if (retval < 0)
@@ -1881,8 +1880,6 @@ static int attach(struct comedi_device *dev, struct comedi_devconfig *it)
 static int detach(struct comedi_device *dev)
 {
 	unsigned int i;
-
-	printk("comedi%d: cb_pcidas: remove\n", dev->minor);
 
 	if (dev->irq)
 		free_irq(dev->irq, dev);
@@ -2093,7 +2090,8 @@ static int ai_config_calibration_source(struct comedi_device *dev,
 	else
 		num_calibration_sources = 8;
 	if (source >= num_calibration_sources) {
-		printk("invalid calibration source: %i\n", source);
+		dev_dbg(dev->hw_dev, "invalid calibration source: %i\n",
+			source);
 		return -EINVAL;
 	}
 
@@ -2867,7 +2865,7 @@ static int ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 
 	spin_unlock_irqrestore(&dev->spinlock, flags);
 
-	/*  start aquisition */
+	/*  start acquisition */
 	if (cmd->start_src == TRIG_NOW) {
 		writew(0, priv(dev)->main_iobase + ADC_START_REG);
 		DEBUG_PRINT("soft trig\n");
@@ -2924,7 +2922,7 @@ static void pio_drain_ai_fifo_16(struct comedi_device *dev)
 		}
 
 		if (num_samples < 0) {
-			printk(" cb_pcidas64: bug! num_samples < 0\n");
+			dev_err(dev->hw_dev, "cb_pcidas64: bug! num_samples < 0\n");
 			break;
 		}
 
@@ -2942,7 +2940,7 @@ static void pio_drain_ai_fifo_16(struct comedi_device *dev)
 /* Read from 32 bit wide ai fifo of 4020 - deal with insane grey coding of pointers.
  * The pci-4020 hardware only supports
  * dma transfers (it only supports the use of pio for draining the last remaining
- * points from the fifo when a data aquisition operation has completed).
+ * points from the fifo when a data acquisition operation has completed).
  */
 static void pio_drain_ai_fifo_32(struct comedi_device *dev)
 {
@@ -3046,7 +3044,7 @@ static void handle_ai_interrupt(struct comedi_device *dev,
 		comedi_error(dev, "fifo overrun");
 		async->events |= COMEDI_CB_EOA | COMEDI_CB_ERROR;
 	}
-	/*  spin lock makes sure noone else changes plx dma control reg */
+	/*  spin lock makes sure no one else changes plx dma control reg */
 	spin_lock_irqsave(&dev->spinlock, flags);
 	dma1_status = readb(priv(dev)->plx9080_iobase + PLX_DMA1_CS_REG);
 	if (plx_status & ICS_DMA1_A) {	/*  dma chan 1 interrupt */
@@ -3170,7 +3168,7 @@ static void handle_ao_interrupt(struct comedi_device *dev,
 	async = s->async;
 	cmd = &async->cmd;
 
-	/*  spin lock makes sure noone else changes plx dma control reg */
+	/*  spin lock makes sure no one else changes plx dma control reg */
 	spin_lock_irqsave(&dev->spinlock, flags);
 	dma0_status = readb(priv(dev)->plx9080_iobase + PLX_DMA0_CS_REG);
 	if (plx_status & ICS_DMA0_A) {	/*  dma chan 0 interrupt */

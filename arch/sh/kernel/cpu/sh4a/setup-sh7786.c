@@ -1,7 +1,7 @@
 /*
  * SH7786 Setup
  *
- * Copyright (C) 2009 - 2010  Renesas Solutions Corp.
+ * Copyright (C) 2009 - 2011  Renesas Solutions Corp.
  * Kuninori Morimoto <morimoto.kuninori@renesas.com>
  * Paul Mundt <paul.mundt@renesas.com>
  *
@@ -29,8 +29,11 @@
 static struct plat_sci_port scif0_platform_data = {
 	.mapbase	= 0xffea0000,
 	.flags		= UPF_BOOT_AUTOCONF,
+	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scbrr_algo_id	= SCBRR_ALGO_1,
 	.type		= PORT_SCIF,
 	.irqs		= { 40, 41, 43, 42 },
+	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
 
 static struct platform_device scif0_device = {
@@ -47,8 +50,11 @@ static struct platform_device scif0_device = {
 static struct plat_sci_port scif1_platform_data = {
 	.mapbase	= 0xffeb0000,
 	.flags		= UPF_BOOT_AUTOCONF,
+	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scbrr_algo_id	= SCBRR_ALGO_1,
 	.type		= PORT_SCIF,
 	.irqs		= { 44, 44, 44, 44 },
+	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
 
 static struct platform_device scif1_device = {
@@ -62,8 +68,11 @@ static struct platform_device scif1_device = {
 static struct plat_sci_port scif2_platform_data = {
 	.mapbase	= 0xffec0000,
 	.flags		= UPF_BOOT_AUTOCONF,
+	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scbrr_algo_id	= SCBRR_ALGO_1,
 	.type		= PORT_SCIF,
 	.irqs		= { 50, 50, 50, 50 },
+	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
 
 static struct platform_device scif2_device = {
@@ -77,8 +86,11 @@ static struct platform_device scif2_device = {
 static struct plat_sci_port scif3_platform_data = {
 	.mapbase	= 0xffed0000,
 	.flags		= UPF_BOOT_AUTOCONF,
+	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scbrr_algo_id	= SCBRR_ALGO_1,
 	.type		= PORT_SCIF,
 	.irqs		= { 51, 51, 51, 51 },
+	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
 
 static struct platform_device scif3_device = {
@@ -92,8 +104,11 @@ static struct platform_device scif3_device = {
 static struct plat_sci_port scif4_platform_data = {
 	.mapbase	= 0xffee0000,
 	.flags		= UPF_BOOT_AUTOCONF,
+	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scbrr_algo_id	= SCBRR_ALGO_1,
 	.type		= PORT_SCIF,
 	.irqs		= { 52, 52, 52, 52 },
+	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
 
 static struct platform_device scif4_device = {
@@ -107,8 +122,11 @@ static struct platform_device scif4_device = {
 static struct plat_sci_port scif5_platform_data = {
 	.mapbase	= 0xffef0000,
 	.flags		= UPF_BOOT_AUTOCONF,
+	.scscr		= SCSCR_RE | SCSCR_TE | SCSCR_REIE | SCSCR_CKE1,
+	.scbrr_algo_id	= SCBRR_ALGO_1,
 	.type		= PORT_SCIF,
 	.irqs		= { 53, 53, 53, 53 },
+	.regtype	= SCIx_SH4_SCIF_FIFODATA_REGTYPE,
 };
 
 static struct platform_device scif5_device = {
@@ -500,7 +518,7 @@ static struct resource dmac0_resources[] = {
 		.end	= 0xfe00900b,
 		.flags	= IORESOURCE_MEM,
 	}, {
-		/* DMA error IRQ */
+		.name	= "error_irq",
 		.start	= evt2irq(0x5c0),
 		.end	= evt2irq(0x5c0),
 		.flags	= IORESOURCE_IRQ,
@@ -522,10 +540,13 @@ static struct platform_device dma0_device = {
 	},
 };
 
-static struct resource usb_ohci_resources[] = {
+#define USB_EHCI_START 0xffe70000
+#define USB_OHCI_START 0xffe70400
+
+static struct resource usb_ehci_resources[] = {
 	[0] = {
-		.start	= 0xffe70400,
-		.end	= 0xffe704ff,
+		.start	= USB_EHCI_START,
+		.end	= USB_EHCI_START + 0x3ff,
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
@@ -535,12 +556,35 @@ static struct resource usb_ohci_resources[] = {
 	},
 };
 
-static u64 usb_ohci_dma_mask = DMA_BIT_MASK(32);
+static struct platform_device usb_ehci_device = {
+	.name		= "sh_ehci",
+	.id		= -1,
+	.dev = {
+		.dma_mask		= &usb_ehci_device.dev.coherent_dma_mask,
+		.coherent_dma_mask	= DMA_BIT_MASK(32),
+	},
+	.num_resources	= ARRAY_SIZE(usb_ehci_resources),
+	.resource	= usb_ehci_resources,
+};
+
+static struct resource usb_ohci_resources[] = {
+	[0] = {
+		.start	= USB_OHCI_START,
+		.end	= USB_OHCI_START + 0x3ff,
+		.flags	= IORESOURCE_MEM,
+	},
+	[1] = {
+		.start	= 77,
+		.end	= 77,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
 static struct platform_device usb_ohci_device = {
 	.name		= "sh_ohci",
 	.id		= -1,
 	.dev = {
-		.dma_mask		= &usb_ohci_dma_mask,
+		.dma_mask		= &usb_ohci_device.dev.coherent_dma_mask,
 		.coherent_dma_mask	= DMA_BIT_MASK(32),
 	},
 	.num_resources	= ARRAY_SIZE(usb_ohci_resources),
@@ -570,6 +614,7 @@ static struct platform_device *sh7786_early_devices[] __initdata = {
 
 static struct platform_device *sh7786_devices[] __initdata = {
 	&dma0_device,
+	&usb_ehci_device,
 	&usb_ohci_device,
 };
 
@@ -609,7 +654,7 @@ static void __init sh7786_usb_setup(void)
 	 * The following settings are necessary
 	 * for using the USB modules.
 	 *
-	 * see "USB Inital Settings" for detail
+	 * see "USB Initial Settings" for detail
 	 */
 	__raw_writel(USBINITVAL1, USBINITREG1);
 	__raw_writel(USBINITVAL2, USBINITREG2);

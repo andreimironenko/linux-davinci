@@ -35,7 +35,7 @@
 #define CEPH_OPT_MYIP             (1<<2) /* specified my ip */
 #define CEPH_OPT_NOCRC            (1<<3) /* no data crc on writes */
 
-#define CEPH_OPT_DEFAULT   (0);
+#define CEPH_OPT_DEFAULT   (0)
 
 #define ceph_set_opt(client, opt) \
 	(client)->options->flags |= CEPH_OPT_##opt;
@@ -61,7 +61,7 @@ struct ceph_options {
 					      pointer type of args */
 	int num_mon;
 	char *name;
-	char *secret;
+	struct ceph_crypto_key *key;
 };
 
 /*
@@ -71,7 +71,6 @@ struct ceph_options {
 #define CEPH_OSD_TIMEOUT_DEFAULT    60  /* seconds */
 #define CEPH_OSD_KEEPALIVE_DEFAULT  5
 #define CEPH_OSD_IDLE_TTL_DEFAULT    60
-#define CEPH_MOUNT_RSIZE_DEFAULT    (512*1024) /* readahead */
 
 #define CEPH_MSG_MAX_FRONT_LEN	(16*1024*1024)
 #define CEPH_MSG_MAX_DATA_LEN	(16*1024*1024)
@@ -216,7 +215,9 @@ extern void ceph_destroy_options(struct ceph_options *opt);
 extern int ceph_compare_options(struct ceph_options *new_opt,
 				struct ceph_client *client);
 extern struct ceph_client *ceph_create_client(struct ceph_options *opt,
-					      void *private);
+					      void *private,
+					      unsigned supported_features,
+					      unsigned required_features);
 extern u64 ceph_client_id(struct ceph_client *client);
 extern void ceph_destroy_client(struct ceph_client *client);
 extern int __ceph_open_session(struct ceph_client *client,

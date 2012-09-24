@@ -17,7 +17,7 @@
 #include <linux/init.h>
 #include <linux/gpio.h>
 #include <linux/device.h>
-#include <linux/sysdev.h>
+#include <linux/syscore_ops.h>
 #include <linux/serial_core.h>
 #include <linux/clk.h>
 #include <linux/i2c.h>
@@ -53,6 +53,8 @@
 #include <plat/clock.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
+
+#include "common.h"
 
 /* onboard perihperal map */
 
@@ -100,21 +102,6 @@ static struct map_desc osiris_iodesc[] __initdata = {
 #define ULCON S3C2410_LCON_CS8 | S3C2410_LCON_PNONE | S3C2410_LCON_STOPB
 #define UFCON S3C2410_UFCON_RXTRIG8 | S3C2410_UFCON_FIFOMODE
 
-static struct s3c24xx_uart_clksrc osiris_serial_clocks[] = {
-	[0] = {
-		.name		= "uclk",
-		.divisor	= 1,
-		.min_baud	= 0,
-		.max_baud	= 0,
-	},
-	[1] = {
-		.name		= "pclk",
-		.divisor	= 1,
-		.min_baud	= 0,
-		.max_baud	= 0,
-	}
-};
-
 static struct s3c2410_uartcfg osiris_uartcfgs[] __initdata = {
 	[0] = {
 		.hwport	     = 0,
@@ -122,8 +109,7 @@ static struct s3c2410_uartcfg osiris_uartcfgs[] __initdata = {
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
-		.clocks	     = osiris_serial_clocks,
-		.clocks_size = ARRAY_SIZE(osiris_serial_clocks),
+		.clk_sel	= S3C2410_UCON_CLKSEL1 | S3C2410_UCON_CLKSEL2,
 	},
 	[1] = {
 		.hwport	     = 1,
@@ -131,8 +117,7 @@ static struct s3c2410_uartcfg osiris_uartcfgs[] __initdata = {
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
-		.clocks	     = osiris_serial_clocks,
-		.clocks_size = ARRAY_SIZE(osiris_serial_clocks),
+		.clk_sel	= S3C2410_UCON_CLKSEL1 | S3C2410_UCON_CLKSEL2,
 	},
 	[2] = {
 		.hwport	     = 2,
@@ -140,8 +125,7 @@ static struct s3c2410_uartcfg osiris_uartcfgs[] __initdata = {
 		.ucon	     = UCON,
 		.ulcon	     = ULCON,
 		.ufcon	     = UFCON,
-		.clocks	     = osiris_serial_clocks,
-		.clocks_size = ARRAY_SIZE(osiris_serial_clocks),
+		.clk_sel	= S3C2410_UCON_CLKSEL1 | S3C2410_UCON_CLKSEL2,
 	}
 };
 
@@ -284,7 +268,7 @@ static struct platform_device osiris_pcmcia = {
 #ifdef CONFIG_PM
 static unsigned char pm_osiris_ctrl0;
 
-static int osiris_pm_suspend(struct sys_device *sd, pm_message_t state)
+static int osiris_pm_suspend(void)
 {
 	unsigned int tmp;
 
@@ -304,7 +288,7 @@ static int osiris_pm_suspend(struct sys_device *sd, pm_message_t state)
 	return 0;
 }
 
-static int osiris_pm_resume(struct sys_device *sd)
+static void osiris_pm_resume(void)
 {
 	if (pm_osiris_ctrl0 & OSIRIS_CTRL0_FIX8)
 		__raw_writeb(OSIRIS_CTRL1_FIX8, OSIRIS_VA_CTRL1);
@@ -312,8 +296,6 @@ static int osiris_pm_resume(struct sys_device *sd)
 	__raw_writeb(pm_osiris_ctrl0, OSIRIS_VA_CTRL0);
 
 	s3c_gpio_cfgpin(S3C2410_GPA(21), S3C2410_GPA21_nRSTOUT);
-
-	return 0;
 }
 
 #else
@@ -321,14 +303,9 @@ static int osiris_pm_resume(struct sys_device *sd)
 #define osiris_pm_resume NULL
 #endif
 
-static struct sysdev_class osiris_pm_sysclass = {
-	.name		= "mach-osiris",
+static struct syscore_ops osiris_pm_syscore_ops = {
 	.suspend	= osiris_pm_suspend,
 	.resume		= osiris_pm_resume,
-};
-
-static struct sys_device osiris_pm_sysdev = {
-	.cls		= &osiris_pm_sysclass,
 };
 
 /* Link for DVS driver to TPS65011 */
@@ -439,8 +416,7 @@ static void __init osiris_map_io(void)
 
 static void __init osiris_init(void)
 {
-	sysdev_class_register(&osiris_pm_sysclass);
-	sysdev_register(&osiris_pm_sysdev);
+	register_syscore_ops(&osiris_pm_syscore_ops);
 
 	s3c_i2c0_set_platdata(NULL);
 	s3c_nand_set_platdata(&osiris_nand_info);
@@ -455,9 +431,10 @@ static void __init osiris_init(void)
 
 MACHINE_START(OSIRIS, "Simtec-OSIRIS")
 	/* Maintainer: Ben Dooks <ben@simtec.co.uk> */
-	.boot_params	= S3C2410_SDRAM_PA + 0x100,
+	.atag_offset	= 0x100,
 	.map_io		= osiris_map_io,
 	.init_irq	= s3c24xx_init_irq,
 	.init_machine	= osiris_init,
 	.timer		= &s3c24xx_timer,
+	.restart	= s3c244x_restart,
 MACHINE_END

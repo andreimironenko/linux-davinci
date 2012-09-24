@@ -27,7 +27,7 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  *
  */
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
@@ -396,7 +396,7 @@ static void vio_handleEvent(struct HvLpEvent *event)
 			viopathStatus[remoteLp].mTargetInst)) {
 			printk(VIOPATH_KERN_WARN
 			       "message from invalid partition. "
-			       "int msg rcvd, source inst (%d) doesnt match (%d)\n",
+			       "int msg rcvd, source inst (%d) doesn't match (%d)\n",
 			       viopathStatus[remoteLp].mTargetInst,
 			       event->xSourceInstanceId);
 			return;
@@ -407,7 +407,7 @@ static void vio_handleEvent(struct HvLpEvent *event)
 			viopathStatus[remoteLp].mSourceInst)) {
 			printk(VIOPATH_KERN_WARN
 			       "message from invalid partition. "
-			       "int msg rcvd, target inst (%d) doesnt match (%d)\n",
+			       "int msg rcvd, target inst (%d) doesn't match (%d)\n",
 			       viopathStatus[remoteLp].mSourceInst,
 			       event->xTargetInstanceId);
 			return;
@@ -418,7 +418,7 @@ static void vio_handleEvent(struct HvLpEvent *event)
 		    viopathStatus[remoteLp].mSourceInst) {
 			printk(VIOPATH_KERN_WARN
 			       "message from invalid partition. "
-			       "ack msg rcvd, source inst (%d) doesnt match (%d)\n",
+			       "ack msg rcvd, source inst (%d) doesn't match (%d)\n",
 			       viopathStatus[remoteLp].mSourceInst,
 			       event->xSourceInstanceId);
 			return;
@@ -428,7 +428,7 @@ static void vio_handleEvent(struct HvLpEvent *event)
 		    viopathStatus[remoteLp].mTargetInst) {
 			printk(VIOPATH_KERN_WARN
 			       "message from invalid partition. "
-			       "viopath: ack msg rcvd, target inst (%d) doesnt match (%d)\n",
+			       "viopath: ack msg rcvd, target inst (%d) doesn't match (%d)\n",
 			       viopathStatus[remoteLp].mTargetInst,
 			       event->xTargetInstanceId);
 			return;

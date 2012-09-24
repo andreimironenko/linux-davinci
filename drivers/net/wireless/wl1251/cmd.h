@@ -269,7 +269,7 @@ struct cmd_join {
 	u8 bss_type;
 	u8 channel;
 	u8 ssid_len;
-	u8 ssid[IW_ESSID_MAX_SIZE];
+	u8 ssid[IEEE80211_MAX_SSID_LEN];
 	u8 ctrl; /* JOIN_CMD_CTRL_* */
 	u8 tx_mgt_frame_rate; /* OBSOLETE */
 	u8 tx_mgt_frame_mod;  /* OBSOLETE */
@@ -313,8 +313,8 @@ struct wl1251_cmd_vbm_update {
 } __packed;
 
 enum wl1251_cmd_ps_mode {
-	STATION_ACTIVE_MODE,
-	STATION_POWER_SAVE_MODE
+	CHIP_ACTIVE_MODE,
+	CHIP_POWER_SAVE_MODE
 };
 
 struct wl1251_cmd_ps_params {

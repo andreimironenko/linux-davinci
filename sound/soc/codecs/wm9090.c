@@ -28,7 +28,6 @@
 #include <linux/slab.h>
 #include <sound/initval.h>
 #include <sound/soc.h>
-#include <sound/soc-dapm.h>
 #include <sound/tlv.h>
 #include <sound/wm9090.h>
 
@@ -140,12 +139,10 @@ static const u16 wm9090_reg_defaults[] = {
 
 /* This struct is used to save the context */
 struct wm9090_priv {
-	struct mutex mutex;
 	struct wm9090_platform_data pdata;
-	void *control_data;
 };
 
-static int wm9090_volatile(unsigned int reg)
+static int wm9090_volatile(struct snd_soc_codec *codec, unsigned int reg)
 {
 	switch (reg) {
 	case WM9090_SOFTWARE_RESET:
@@ -180,19 +177,19 @@ static void wait_for_dc_servo(struct snd_soc_codec *codec)
 }
 
 static const unsigned int in_tlv[] = {
-	TLV_DB_RANGE_HEAD(6),
+	TLV_DB_RANGE_HEAD(3),
 	0, 0, TLV_DB_SCALE_ITEM(-600, 0, 0),
 	1, 3, TLV_DB_SCALE_ITEM(-350, 350, 0),
 	4, 6, TLV_DB_SCALE_ITEM(600, 600, 0),
 };
 static const unsigned int mix_tlv[] = {
-	TLV_DB_RANGE_HEAD(4),
+	TLV_DB_RANGE_HEAD(2),
 	0, 2, TLV_DB_SCALE_ITEM(-1200, 300, 0),
 	3, 3, TLV_DB_SCALE_ITEM(0, 0, 0),
 };
 static const DECLARE_TLV_DB_SCALE(out_tlv, -5700, 100, 0);
 static const unsigned int spkboost_tlv[] = {
-	TLV_DB_RANGE_HEAD(7),
+	TLV_DB_RANGE_HEAD(2),
 	0, 6, TLV_DB_SCALE_ITEM(0, 150, 0),
 	7, 7, TLV_DB_SCALE_ITEM(1200, 0, 0),
 };
@@ -442,31 +439,32 @@ static const struct snd_soc_dapm_route audio_map_in2_diff[] = {
 static int wm9090_add_controls(struct snd_soc_codec *codec)
 {
 	struct wm9090_priv *wm9090 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
 	int i;
 
-	snd_soc_dapm_new_controls(codec, wm9090_dapm_widgets,
+	snd_soc_dapm_new_controls(dapm, wm9090_dapm_widgets,
 				  ARRAY_SIZE(wm9090_dapm_widgets));
 
-	snd_soc_dapm_add_routes(codec, audio_map, ARRAY_SIZE(audio_map));
+	snd_soc_dapm_add_routes(dapm, audio_map, ARRAY_SIZE(audio_map));
 
 	snd_soc_add_controls(codec, wm9090_controls,
 			     ARRAY_SIZE(wm9090_controls));
 
 	if (wm9090->pdata.lin1_diff) {
-		snd_soc_dapm_add_routes(codec, audio_map_in1_diff,
+		snd_soc_dapm_add_routes(dapm, audio_map_in1_diff,
 					ARRAY_SIZE(audio_map_in1_diff));
 	} else {
-		snd_soc_dapm_add_routes(codec, audio_map_in1_se,
+		snd_soc_dapm_add_routes(dapm, audio_map_in1_se,
 					ARRAY_SIZE(audio_map_in1_se));
 		snd_soc_add_controls(codec, wm9090_in1_se_controls,
 				     ARRAY_SIZE(wm9090_in1_se_controls));
 	}
 
 	if (wm9090->pdata.lin2_diff) {
-		snd_soc_dapm_add_routes(codec, audio_map_in2_diff,
+		snd_soc_dapm_add_routes(dapm, audio_map_in2_diff,
 					ARRAY_SIZE(audio_map_in2_diff));
 	} else {
-		snd_soc_dapm_add_routes(codec, audio_map_in2_se,
+		snd_soc_dapm_add_routes(dapm, audio_map_in2_se,
 					ARRAY_SIZE(audio_map_in2_se));
 		snd_soc_add_controls(codec, wm9090_in2_se_controls,
 				     ARRAY_SIZE(wm9090_in2_se_controls));
@@ -513,20 +511,9 @@ static int wm9090_set_bias_level(struct snd_soc_codec *codec,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (codec->bias_level == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			/* Restore the register cache */
-			for (i = 1; i < codec->driver->reg_cache_size; i++) {
-				if (reg_cache[i] == wm9090_reg_defaults[i])
-					continue;
-				if (wm9090_volatile(i))
-					continue;
-
-				ret = snd_soc_write(codec, i, reg_cache[i]);
-				if (ret != 0)
-					dev_warn(codec->dev,
-						 "Failed to restore register %d: %d\n",
-						 i, ret);
-			}
+			snd_soc_cache_sync(codec);
 		}
 
 		/* We keep VMID off during standby since the combination of
@@ -543,18 +530,15 @@ static int wm9090_set_bias_level(struct snd_soc_codec *codec,
 		break;
 	}
 
-	codec->bias_level = level;
+	codec->dapm.bias_level = level;
 
 	return 0;
 }
 
 static int wm9090_probe(struct snd_soc_codec *codec)
 {
-	struct wm9090_priv *wm9090 = snd_soc_codec_get_drvdata(codec);
-	u16 *reg_cache = codec->reg_cache;
 	int ret;
 
-	codec->control_data = wm9090->control_data;
 	ret = snd_soc_codec_set_cache_io(codec, 8, 16, SND_SOC_I2C);
 	if (ret != 0) {
 		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
@@ -576,22 +560,30 @@ static int wm9090_probe(struct snd_soc_codec *codec)
 	/* Configure some defaults; they will be written out when we
 	 * bring the bias up.
 	 */
-	reg_cache[WM9090_IN1_LINE_INPUT_A_VOLUME] |= WM9090_IN1_VU
-		| WM9090_IN1A_ZC;
-	reg_cache[WM9090_IN1_LINE_INPUT_B_VOLUME] |= WM9090_IN1_VU
-		| WM9090_IN1B_ZC;
-	reg_cache[WM9090_IN2_LINE_INPUT_A_VOLUME] |= WM9090_IN2_VU
-		| WM9090_IN2A_ZC;
-	reg_cache[WM9090_IN2_LINE_INPUT_B_VOLUME] |= WM9090_IN2_VU
-		| WM9090_IN2B_ZC;
-	reg_cache[WM9090_SPEAKER_VOLUME_LEFT] |=
-		WM9090_SPKOUT_VU | WM9090_SPKOUTL_ZC;
-	reg_cache[WM9090_LEFT_OUTPUT_VOLUME] |=
-		WM9090_HPOUT1_VU | WM9090_HPOUT1L_ZC;
-	reg_cache[WM9090_RIGHT_OUTPUT_VOLUME] |=
-		WM9090_HPOUT1_VU | WM9090_HPOUT1R_ZC;
+	snd_soc_update_bits(codec, WM9090_IN1_LINE_INPUT_A_VOLUME,
+			    WM9090_IN1_VU | WM9090_IN1A_ZC,
+			    WM9090_IN1_VU | WM9090_IN1A_ZC);
+	snd_soc_update_bits(codec, WM9090_IN1_LINE_INPUT_B_VOLUME,
+			    WM9090_IN1_VU | WM9090_IN1B_ZC,
+			    WM9090_IN1_VU | WM9090_IN1B_ZC);
+	snd_soc_update_bits(codec, WM9090_IN2_LINE_INPUT_A_VOLUME,
+			    WM9090_IN2_VU | WM9090_IN2A_ZC,
+			    WM9090_IN2_VU | WM9090_IN2A_ZC);
+	snd_soc_update_bits(codec, WM9090_IN2_LINE_INPUT_B_VOLUME,
+			    WM9090_IN2_VU | WM9090_IN2B_ZC,
+			    WM9090_IN2_VU | WM9090_IN2B_ZC);
+	snd_soc_update_bits(codec, WM9090_SPEAKER_VOLUME_LEFT,
+			    WM9090_SPKOUT_VU | WM9090_SPKOUTL_ZC,
+			    WM9090_SPKOUT_VU | WM9090_SPKOUTL_ZC);
+	snd_soc_update_bits(codec, WM9090_LEFT_OUTPUT_VOLUME,
+			    WM9090_HPOUT1_VU | WM9090_HPOUT1L_ZC,
+			    WM9090_HPOUT1_VU | WM9090_HPOUT1L_ZC);
+	snd_soc_update_bits(codec, WM9090_RIGHT_OUTPUT_VOLUME,
+			    WM9090_HPOUT1_VU | WM9090_HPOUT1R_ZC,
+			    WM9090_HPOUT1_VU | WM9090_HPOUT1R_ZC);
 
-	reg_cache[WM9090_CLOCKING_1] |= WM9090_TOCLK_ENA;
+	snd_soc_update_bits(codec, WM9090_CLOCKING_1,
+			    WM9090_TOCLK_ENA, WM9090_TOCLK_ENA);
 
 	wm9090_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
@@ -601,7 +593,7 @@ static int wm9090_probe(struct snd_soc_codec *codec)
 }
 
 #ifdef CONFIG_PM
-static int wm9090_suspend(struct snd_soc_codec *codec, pm_message_t state)
+static int wm9090_suspend(struct snd_soc_codec *codec)
 {
 	wm9090_set_bias_level(codec, SND_SOC_BIAS_OFF);
 
@@ -644,7 +636,7 @@ static int wm9090_i2c_probe(struct i2c_client *i2c,
 	struct wm9090_priv *wm9090;
 	int ret;
 
-	wm9090 = kzalloc(sizeof(*wm9090), GFP_KERNEL);
+	wm9090 = devm_kzalloc(&i2c->dev, sizeof(*wm9090), GFP_KERNEL);
 	if (wm9090 == NULL) {
 		dev_err(&i2c->dev, "Can not allocate memory\n");
 		return -ENOMEM;
@@ -655,13 +647,9 @@ static int wm9090_i2c_probe(struct i2c_client *i2c,
 		       sizeof(wm9090->pdata));
 
 	i2c_set_clientdata(i2c, wm9090);
-	wm9090->control_data = i2c;
-	mutex_init(&wm9090->mutex);
 
 	ret =  snd_soc_register_codec(&i2c->dev,
 			&soc_codec_dev_wm9090,  NULL, 0);
-	if (ret < 0)
-		kfree(wm9090);
 	return ret;
 }
 
@@ -670,20 +658,20 @@ static int __devexit wm9090_i2c_remove(struct i2c_client *i2c)
 	struct wm9090_priv *wm9090 = i2c_get_clientdata(i2c);
 
 	snd_soc_unregister_codec(&i2c->dev);
-	kfree(wm9090);
 
 	return 0;
 }
 
 static const struct i2c_device_id wm9090_id[] = {
 	{ "wm9090", 0 },
+	{ "wm9093", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm9090_id);
 
 static struct i2c_driver wm9090_i2c_driver = {
 	.driver = {
-		.name = "wm9090-codec",
+		.name = "wm9090",
 		.owner = THIS_MODULE,
 	},
 	.probe = wm9090_i2c_probe,

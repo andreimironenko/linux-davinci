@@ -26,6 +26,8 @@
     Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/ioport.h>
@@ -111,7 +113,7 @@ struct smsc47b397_data {
 	u8 temp[4];
 };
 
-static int smsc47b397_read_value(struct smsc47b397_data* data, u8 reg)
+static int smsc47b397_read_value(struct smsc47b397_data *data, u8 reg)
 {
 	int res;
 
@@ -263,7 +265,8 @@ static int __devinit smsc47b397_probe(struct platform_device *pdev)
 		return -EBUSY;
 	}
 
-	if (!(data = kzalloc(sizeof(struct smsc47b397_data), GFP_KERNEL))) {
+	data = kzalloc(sizeof(struct smsc47b397_data), GFP_KERNEL);
+	if (!data) {
 		err = -ENOMEM;
 		goto error_release;
 	}
@@ -274,7 +277,8 @@ static int __devinit smsc47b397_probe(struct platform_device *pdev)
 	mutex_init(&data->update_lock);
 	platform_set_drvdata(pdev, data);
 
-	if ((err = sysfs_create_group(&dev->kobj, &smsc47b397_group)))
+	err = sysfs_create_group(&dev->kobj, &smsc47b397_group);
+	if (err)
 		goto error_free;
 
 	data->hwmon_dev = hwmon_device_register(dev);
@@ -311,21 +315,19 @@ static int __init smsc47b397_device_add(unsigned short address)
 	pdev = platform_device_alloc(DRVNAME, address);
 	if (!pdev) {
 		err = -ENOMEM;
-		printk(KERN_ERR DRVNAME ": Device allocation failed\n");
+		pr_err("Device allocation failed\n");
 		goto exit;
 	}
 
 	err = platform_device_add_resources(pdev, &res, 1);
 	if (err) {
-		printk(KERN_ERR DRVNAME ": Device resource addition failed "
-		       "(%d)\n", err);
+		pr_err("Device resource addition failed (%d)\n", err);
 		goto exit_device_put;
 	}
 
 	err = platform_device_add(pdev);
 	if (err) {
-		printk(KERN_ERR DRVNAME ": Device addition failed (%d)\n",
-		       err);
+		pr_err("Device addition failed (%d)\n", err);
 		goto exit_device_put;
 	}
 
@@ -345,7 +347,7 @@ static int __init smsc47b397_find(unsigned short *addr)
 	superio_enter();
 	id = force_id ? force_id : superio_inb(SUPERIO_REG_DEVID);
 
-	switch(id) {
+	switch (id) {
 	case 0x81:
 		name = "SCH5307-NS";
 		break;
@@ -367,8 +369,7 @@ static int __init smsc47b397_find(unsigned short *addr)
 	*addr = (superio_inb(SUPERIO_REG_BASE_MSB) << 8)
 		 |  superio_inb(SUPERIO_REG_BASE_LSB);
 
-	printk(KERN_INFO DRVNAME ": found SMSC %s "
-		"(base address 0x%04x, revision %u)\n",
+	pr_info("found SMSC %s (base address 0x%04x, revision %u)\n",
 		name, *addr, rev);
 
 	superio_exit();
@@ -380,7 +381,8 @@ static int __init smsc47b397_init(void)
 	unsigned short address;
 	int ret;
 
-	if ((ret = smsc47b397_find(&address)))
+	ret = smsc47b397_find(&address);
+	if (ret)
 		return ret;
 
 	ret = platform_driver_register(&smsc47b397_driver);

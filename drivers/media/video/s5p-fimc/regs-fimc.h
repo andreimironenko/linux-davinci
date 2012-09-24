@@ -54,12 +54,14 @@
 #define S5P_CIGCTRL_IRQ_CLR		(1 << 19)
 #define S5P_CIGCTRL_IRQ_ENABLE		(1 << 16)
 #define S5P_CIGCTRL_SHDW_DISABLE	(1 << 12)
+#define S5P_CIGCTRL_CAM_JPEG		(1 << 8)
 #define S5P_CIGCTRL_SELCAM_MIPI_A	(1 << 7)
 #define S5P_CIGCTRL_CAMIF_SELWB		(1 << 6)
 /* 0 - ITU601; 1 - ITU709 */
 #define S5P_CIGCTRL_CSC_ITU601_709	(1 << 5)
 #define S5P_CIGCTRL_INVPOLHSYNC		(1 << 4)
 #define S5P_CIGCTRL_SELCAM_MIPI		(1 << 3)
+#define S5P_CIGCTRL_INVPOLFIELD		(1 << 1)
 #define S5P_CIGCTRL_INTERLACE		(1 << 0)
 
 /* Window offset 2 */
@@ -98,13 +100,18 @@
 #define S5P_CIOCTRL			0x4c
 #define S5P_CIOCTRL_ORDER422_MASK	(3 << 0)
 #define S5P_CIOCTRL_ORDER422_CRYCBY	(0 << 0)
-#define S5P_CIOCTRL_ORDER422_YCRYCB	(1 << 0)
-#define S5P_CIOCTRL_ORDER422_CBYCRY	(2 << 0)
+#define S5P_CIOCTRL_ORDER422_CBYCRY	(1 << 0)
+#define S5P_CIOCTRL_ORDER422_YCRYCB	(2 << 0)
 #define S5P_CIOCTRL_ORDER422_YCBYCR	(3 << 0)
 #define S5P_CIOCTRL_LASTIRQ_ENABLE	(1 << 2)
 #define S5P_CIOCTRL_YCBCR_3PLANE	(0 << 3)
 #define S5P_CIOCTRL_YCBCR_2PLANE	(1 << 3)
 #define S5P_CIOCTRL_YCBCR_PLANE_MASK	(1 << 3)
+#define S5P_CIOCTRL_ALPHA_OUT_MASK	(0xff << 4)
+#define S5P_CIOCTRL_RGB16FMT_MASK	(3 << 16)
+#define S5P_CIOCTRL_RGB565		(0 << 16)
+#define S5P_CIOCTRL_ARGB1555		(1 << 16)
+#define S5P_CIOCTRL_ARGB4444		(2 << 16)
 #define S5P_CIOCTRL_ORDER2P_SHIFT	(24)
 #define S5P_CIOCTRL_ORDER2P_MASK	(3 << 24)
 #define S5P_CIOCTRL_ORDER422_2P_LSB_CRCB (0 << 24)
@@ -139,8 +146,12 @@
 #define S5P_CISCCTRL_OUTRGB_FMT_MASK	(3 << 11)
 #define S5P_CISCCTRL_RGB_EXT		(1 << 10)
 #define S5P_CISCCTRL_ONE2ONE		(1 << 9)
-#define S5P_CISCCTRL_SC_HORRATIO(x)	((x) << 16)
-#define S5P_CISCCTRL_SC_VERRATIO(x)	((x) << 0)
+#define S5P_CISCCTRL_MHRATIO(x)		((x) << 16)
+#define S5P_CISCCTRL_MVRATIO(x)		((x) << 0)
+#define S5P_CISCCTRL_MHRATIO_MASK	(0x1ff << 16)
+#define S5P_CISCCTRL_MVRATIO_MASK	(0x1ff << 0)
+#define S5P_CISCCTRL_MHRATIO_EXT(x)	(((x) >> 6) << 16)
+#define S5P_CISCCTRL_MVRATIO_EXT(x)	(((x) >> 6) << 0)
 
 /* Target area */
 #define S5P_CITAREA			0x5c
@@ -180,7 +191,6 @@
 
 /* Image effect */
 #define S5P_CIIMGEFF			0xd0
-#define S5P_CIIMGEFF_IE_DISABLE		(0 << 30)
 #define S5P_CIIMGEFF_IE_ENABLE		(1 << 30)
 #define S5P_CIIMGEFF_IE_SC_BEFORE	(0 << 29)
 #define S5P_CIIMGEFF_IE_SC_AFTER	(1 << 29)
@@ -210,7 +220,7 @@
 
 /* Input DMA control */
 #define S5P_MSCTRL			0xfc
-#define S5P_MSCTRL_IN_BURST_COUNT_MASK	(3 << 24)
+#define S5P_MSCTRL_IN_BURST_COUNT_MASK	(0xF << 24)
 #define S5P_MSCTRL_2P_IN_ORDER_MASK	(3 << 16)
 #define S5P_MSCTRL_2P_IN_ORDER_SHIFT	16
 #define S5P_MSCTRL_C_INT_IN_3PLANE	(0 << 15)
@@ -222,11 +232,12 @@
 #define S5P_MSCTRL_FLIP_X_MIRROR	(1 << 13)
 #define S5P_MSCTRL_FLIP_Y_MIRROR	(2 << 13)
 #define S5P_MSCTRL_FLIP_180		(3 << 13)
+#define S5P_MSCTRL_FIFO_CTRL_FULL	(1 << 12)
 #define S5P_MSCTRL_ORDER422_SHIFT	4
-#define S5P_MSCTRL_ORDER422_CRYCBY	(0 << 4)
-#define S5P_MSCTRL_ORDER422_YCRYCB	(1 << 4)
-#define S5P_MSCTRL_ORDER422_CBYCRY	(2 << 4)
-#define S5P_MSCTRL_ORDER422_YCBYCR	(3 << 4)
+#define S5P_MSCTRL_ORDER422_YCBYCR	(0 << 4)
+#define S5P_MSCTRL_ORDER422_CBYCRY	(1 << 4)
+#define S5P_MSCTRL_ORDER422_YCRYCB	(2 << 4)
+#define S5P_MSCTRL_ORDER422_CRYCBY	(3 << 4)
 #define S5P_MSCTRL_ORDER422_MASK	(3 << 4)
 #define S5P_MSCTRL_INPUT_EXTCAM		(0 << 3)
 #define S5P_MSCTRL_INPUT_MEMORY		(1 << 3)
@@ -237,7 +248,7 @@
 #define S5P_MSCTRL_INFORMAT_RGB		(3 << 1)
 #define S5P_MSCTRL_INFORMAT_MASK	(3 << 1)
 #define S5P_MSCTRL_ENVID		(1 << 0)
-#define S5P_MSCTRL_FRAME_COUNT(x)	((x) << 24)
+#define S5P_MSCTRL_IN_BURST_COUNT(x)	((x) << 24)
 
 /* Output DMA Y/Cb/Cr offset */
 #define S5P_CIOYOFF			0x168
@@ -263,6 +274,10 @@
 
 /* Real output DMA image size (extension register) */
 #define S5P_CIEXTEN			0x188
+#define S5P_CIEXTEN_MHRATIO_EXT(x)	(((x) & 0x3f) << 10)
+#define S5P_CIEXTEN_MVRATIO_EXT(x)	((x) & 0x3f)
+#define S5P_CIEXTEN_MHRATIO_EXT_MASK	(0x3f << 10)
+#define S5P_CIEXTEN_MVRATIO_EXT_MASK	0x3f
 
 #define S5P_CIDMAPARAM			0x18c
 #define S5P_CIDMAPARAM_R_LINEAR		(0 << 29)
@@ -277,10 +292,8 @@
 #define S5P_CSIIMGFMT_RAW8		0x2a
 #define S5P_CSIIMGFMT_RAW10		0x2b
 #define S5P_CSIIMGFMT_RAW12		0x2c
-#define S5P_CSIIMGFMT_USER1		0x30
-#define S5P_CSIIMGFMT_USER2		0x31
-#define S5P_CSIIMGFMT_USER3		0x32
-#define S5P_CSIIMGFMT_USER4		0x33
+/* User defined formats. x = 0...16. */
+#define S5P_CSIIMGFMT_USER(x)		(0x30 + x - 1)
 
 /* Output frame buffer sequence mask */
 #define S5P_CIFCNTSEQ			0x1FC

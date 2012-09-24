@@ -150,7 +150,7 @@
 #define DA8XX_LPSC0_SCR0_SS		10
 #define DA8XX_LPSC0_SCR1_SS		11
 #define DA8XX_LPSC0_SCR2_SS		12
-#define DA8XX_LPSC0_DMAX		13
+#define DA8XX_LPSC0_PRUSS		13
 #define DA8XX_LPSC0_ARM			14
 #define DA8XX_LPSC0_GEM			15
 
@@ -236,7 +236,7 @@
 #define PTCMD		0x120
 #define PTSTAT		0x128
 #define PDSTAT		0x200
-#define PDCTL1		0x304
+#define PDCTL		0x300
 #define MDSTAT		0x800
 #define MDCTL		0xA00
 
@@ -246,14 +246,17 @@
 #define PSC_STATE_DISABLE	2
 #define PSC_STATE_ENABLE	3
 
-#define MDSTAT_STATE_MASK	0x1f
+#define MDSTAT_STATE_MASK	0x3f
+#define PDSTAT_STATE_MASK	0x1f
 #define MDCTL_FORCE		BIT(31)
+#define PDCTL_NEXT		BIT(1)
+#define PDCTL_EPCGOOD		BIT(8)
 
 #ifndef __ASSEMBLER__
 
 extern int davinci_psc_is_clk_active(unsigned int ctlr, unsigned int id);
 extern void davinci_psc_config(unsigned int domain, unsigned int ctlr,
-		unsigned int id, u32 next_state, bool force);
+		unsigned int id, bool enable, u32 flags);
 
 #endif
 

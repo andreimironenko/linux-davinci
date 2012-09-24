@@ -16,6 +16,7 @@
 #include <linux/serial_8250.h>
 #include <linux/ahci_platform.h>
 #include <linux/clk.h>
+#include <linux/export.h>
 
 #include <mach/cputype.h>
 #include <mach/common.h>
@@ -26,27 +27,43 @@
 #include "clock.h"
 
 #define DA8XX_TPCC_BASE			0x01c00000
-#define DA850_MMCSD1_BASE		0x01e1b000
-#define DA850_TPCC1_BASE		0x01e30000
 #define DA8XX_TPTC0_BASE		0x01c08000
 #define DA8XX_TPTC1_BASE		0x01c08400
-#define DA850_TPTC2_BASE		0x01e38000
 #define DA8XX_WDOG_BASE			0x01c21000 /* DA8XX_TIMER64P1_BASE */
 #define DA8XX_I2C0_BASE			0x01c22000
-#define DA8XX_RTC_BASE			0x01C23000
+#define DA8XX_RTC_BASE			0x01c23000
+#define DA8XX_MMCSD0_BASE		0x01c40000
+#define DA8XX_SPI0_BASE			0x01c41000
+#define DA830_SPI1_BASE			0x01e12000
+#define DA8XX_LCD_CNTRL_BASE		0x01e13000
+#define DA850_SATA_BASE			0x01e18000
+#define DA850_MMCSD1_BASE		0x01e1b000
 #define DA8XX_EMAC_CPPI_PORT_BASE	0x01e20000
 #define DA8XX_EMAC_CPGMACSS_BASE	0x01e22000
 #define DA8XX_EMAC_CPGMAC_BASE		0x01e23000
 #define DA8XX_EMAC_MDIO_BASE		0x01e24000
-#define DA8XX_GPIO_BASE			0x01e26000
 #define DA8XX_I2C1_BASE			0x01e28000
+#define DA850_TPCC1_BASE		0x01e30000
+#define DA850_TPTC2_BASE		0x01e38000
+#define DA850_SPI1_BASE			0x01f0e000
+#define DA8XX_DDR2_CTL_BASE		0xb0000000
 
 #define DA8XX_EMAC_CTRL_REG_OFFSET	0x3000
 #define DA8XX_EMAC_MOD_REG_OFFSET	0x2000
 #define DA8XX_EMAC_RAM_OFFSET		0x0000
 #define DA8XX_EMAC_CTRL_RAM_SIZE	SZ_8K
 
+#define DA8XX_DMA_SPI0_RX	EDMA_CTLR_CHAN(0, 14)
+#define DA8XX_DMA_SPI0_TX	EDMA_CTLR_CHAN(0, 15)
+#define DA8XX_DMA_MMCSD0_RX	EDMA_CTLR_CHAN(0, 16)
+#define DA8XX_DMA_MMCSD0_TX	EDMA_CTLR_CHAN(0, 17)
+#define DA8XX_DMA_SPI1_RX	EDMA_CTLR_CHAN(0, 18)
+#define DA8XX_DMA_SPI1_TX	EDMA_CTLR_CHAN(0, 19)
+#define DA850_DMA_MMCSD1_RX	EDMA_CTLR_CHAN(1, 28)
+#define DA850_DMA_MMCSD1_TX	EDMA_CTLR_CHAN(1, 29)
+
 void __iomem *da8xx_syscfg0_base;
+EXPORT_SYMBOL(da8xx_syscfg0_base);
 void __iomem *da8xx_syscfg1_base;
 
 static struct plat_serial8250_port da8xx_serial_pdata[] = {
@@ -124,6 +141,7 @@ static struct edma_soc_info da830_edma_cc0_info = {
 	.n_cc			= 1,
 	.queue_tc_mapping	= da8xx_queue_tc_mapping,
 	.queue_priority_mapping	= da8xx_queue_priority_mapping,
+	.default_queue		= EVENTQ_1,
 };
 
 static struct edma_soc_info *da830_edma_info[EDMA_MAX_CC] = {
@@ -139,6 +157,7 @@ static struct edma_soc_info da850_edma_cc_info[] = {
 		.n_cc			= 1,
 		.queue_tc_mapping	= da8xx_queue_tc_mapping,
 		.queue_priority_mapping	= da8xx_queue_priority_mapping,
+		.default_queue		= EVENTQ_1,
 	},
 	{
 		.n_channel		= 32,
@@ -148,6 +167,7 @@ static struct edma_soc_info da850_edma_cc_info[] = {
 		.n_cc			= 1,
 		.queue_tc_mapping	= da850_queue_tc_mapping,
 		.queue_priority_mapping	= da850_queue_priority_mapping,
+		.default_queue		= EVENTQ_0,
 	},
 };
 
@@ -262,14 +282,16 @@ static struct platform_device da850_edma_device = {
 
 int __init da830_register_edma(struct edma_rsv_info *rsv)
 {
-	da830_edma_cc0_info.rsv = rsv;
+	/* Reserve channels and slots for DSP */
+	if (!cpu_is_davinci_da8xx_arm_only())	
+		da830_edma_cc0_info.rsv = rsv;
 
 	return platform_device_register(&da830_edma_device);
 }
 
 int __init da850_register_edma(struct edma_rsv_info *rsv[2])
 {
-	if (rsv) {
+	if (rsv && !cpu_is_davinci_da8xx_arm_only()) {
 		da850_edma_cc_info[0].rsv = rsv[0];
 		da850_edma_cc_info[1].rsv = rsv[1];
 	}
@@ -347,6 +369,11 @@ struct platform_device da8xx_wdt_device = {
 	.num_resources	= ARRAY_SIZE(da8xx_watchdog_resources),
 	.resource	= da8xx_watchdog_resources,
 };
+
+void da8xx_restart(char mode, const char *cmd)
+{
+	davinci_watchdog_reset(&da8xx_wdt_device);
+}
 
 int __init da8xx_register_watchdog(void)
 {
@@ -485,7 +512,7 @@ static struct platform_device da850_mcasp_device = {
 	.resource	= da850_mcasp_resources,
 };
 
-struct platform_device davinci_pcm_device = {
+static struct platform_device davinci_pcm_device = {
 	.name	= "davinci-pcm-audio",
 	.id	= -1,
 };
@@ -502,6 +529,72 @@ void __init da8xx_register_mcasp(int id, struct snd_platform_data *pdata)
 		da850_mcasp_device.dev.platform_data = pdata;
 		platform_device_register(&da850_mcasp_device);
 	}
+}
+
+#define DA8XX_PRUSS_MEM_BASE		0x01C30000
+
+static struct resource da8xx_pruss_resources[] = {
+	{
+		.start	= DA8XX_PRUSS_MEM_BASE,
+		.end	= DA8XX_PRUSS_MEM_BASE + 0xFFFF,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= IRQ_DA8XX_EVTOUT0,
+		.end	= IRQ_DA8XX_EVTOUT0,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= IRQ_DA8XX_EVTOUT1,
+		.end	= IRQ_DA8XX_EVTOUT1,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= IRQ_DA8XX_EVTOUT2,
+		.end	= IRQ_DA8XX_EVTOUT2,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= IRQ_DA8XX_EVTOUT3,
+		.end	= IRQ_DA8XX_EVTOUT3,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= IRQ_DA8XX_EVTOUT4,
+		.end	= IRQ_DA8XX_EVTOUT4,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= IRQ_DA8XX_EVTOUT5,
+		.end	= IRQ_DA8XX_EVTOUT5,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= IRQ_DA8XX_EVTOUT6,
+		.end	= IRQ_DA8XX_EVTOUT6,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= IRQ_DA8XX_EVTOUT7,
+		.end	= IRQ_DA8XX_EVTOUT7,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+static struct platform_device da8xx_pruss_uio_dev = {
+	.name		= "pruss_uio",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(da8xx_pruss_resources),
+	.resource	= da8xx_pruss_resources,
+	.dev	 =	{
+		.coherent_dma_mask = 0xffffffff,
+	}
+};
+
+int __init da8xx_register_pruss_uio(struct uio_pruss_pdata *config)
+{
+	da8xx_pruss_uio_dev.dev.platform_data = config;
+	return platform_device_register(&da8xx_pruss_uio_dev);
 }
 
 static const struct display_panel disp_panel = {
@@ -589,13 +682,13 @@ static struct resource da8xx_mmcsd0_resources[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 	{		/* DMA RX */
-		.start	= EDMA_CTLR_CHAN(0, 16),
-		.end	= EDMA_CTLR_CHAN(0, 16),
+		.start	= DA8XX_DMA_MMCSD0_RX,
+		.end	= DA8XX_DMA_MMCSD0_RX,
 		.flags	= IORESOURCE_DMA,
 	},
 	{		/* DMA TX */
-		.start	= EDMA_CTLR_CHAN(0, 17),
-		.end	= EDMA_CTLR_CHAN(0, 17),
+		.start	= DA8XX_DMA_MMCSD0_TX,
+		.end	= DA8XX_DMA_MMCSD0_TX,
 		.flags	= IORESOURCE_DMA,
 	},
 };
@@ -626,13 +719,13 @@ static struct resource da850_mmcsd1_resources[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 	{		/* DMA RX */
-		.start	= EDMA_CTLR_CHAN(1, 28),
-		.end	= EDMA_CTLR_CHAN(1, 28),
+		.start	= DA850_DMA_MMCSD1_RX,
+		.end	= DA850_DMA_MMCSD1_RX,
 		.flags	= IORESOURCE_DMA,
 	},
 	{		/* DMA TX */
-		.start	= EDMA_CTLR_CHAN(1, 29),
-		.end	= EDMA_CTLR_CHAN(1, 29),
+		.start	= DA850_DMA_MMCSD1_TX,
+		.end	= DA850_DMA_MMCSD1_TX,
 		.flags	= IORESOURCE_DMA,
 	},
 };
@@ -674,6 +767,9 @@ static struct platform_device da8xx_rtc_device = {
 	.id             = -1,
 	.num_resources	= ARRAY_SIZE(da8xx_rtc_resources),
 	.resource	= da8xx_rtc_resources,
+	.dev = {
+		.platform_data = (void *)true,
+	},
 };
 
 int da8xx_register_rtc(void)
@@ -692,10 +788,6 @@ int da8xx_register_rtc(void)
 	iounmap(base);
 
 	ret = platform_device_register(&da8xx_rtc_device);
-	if (!ret)
-		/* Atleast on DA850, RTC is a wakeup source */
-		device_init_wakeup(&da8xx_rtc_device.dev, true);
-
 	return ret;
 }
 
@@ -744,217 +836,129 @@ int __init da8xx_register_cpuidle(void)
 
 static struct resource da8xx_spi0_resources[] = {
 	[0] = {
-		.start = 0x01c41000,
-		.end   = 0x01c41fff,
-		.flags = IORESOURCE_MEM,
+		.start	= DA8XX_SPI0_BASE,
+		.end	= DA8XX_SPI0_BASE + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start = IRQ_DA8XX_SPINT0,
-		.end = IRQ_DA8XX_SPINT0,
-		.flags = IORESOURCE_IRQ,
+		.start	= IRQ_DA8XX_SPINT0,
+		.end	= IRQ_DA8XX_SPINT0,
+		.flags	= IORESOURCE_IRQ,
 	},
 	[2] = {
-		.start = EDMA_CTLR_CHAN(0, 14),
-		.end = EDMA_CTLR_CHAN(0, 14),
-		.flags = IORESOURCE_DMA,
+		.start	= DA8XX_DMA_SPI0_RX,
+		.end	= DA8XX_DMA_SPI0_RX,
+		.flags	= IORESOURCE_DMA,
 	},
 	[3] = {
-		.start = EDMA_CTLR_CHAN(0, 15),
-		.end = EDMA_CTLR_CHAN(0, 15),
-		.flags = IORESOURCE_DMA,
-	},
-	[4] = {
-		.start = 0,
-		.end = 0,
-		.flags = IORESOURCE_DMA,
+		.start	= DA8XX_DMA_SPI0_TX,
+		.end	= DA8XX_DMA_SPI0_TX,
+		.flags	= IORESOURCE_DMA,
 	},
 };
 
 static struct resource da8xx_spi1_resources[] = {
 	[0] = {
-		.start = 0x01f0e000,
-		.end   = 0x01f0efff,
-		.flags = IORESOURCE_MEM,
+		.start	= DA830_SPI1_BASE,
+		.end	= DA830_SPI1_BASE + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start = IRQ_DA8XX_SPINT1,
-		.end = IRQ_DA8XX_SPINT1,
-		.flags = IORESOURCE_IRQ,
+		.start	= IRQ_DA8XX_SPINT1,
+		.end	= IRQ_DA8XX_SPINT1,
+		.flags	= IORESOURCE_IRQ,
 	},
 	[2] = {
-		.start = EDMA_CTLR_CHAN(0, 18),
-		.end = EDMA_CTLR_CHAN(0, 18),
-		.flags = IORESOURCE_DMA,
+		.start	= DA8XX_DMA_SPI1_RX,
+		.end	= DA8XX_DMA_SPI1_RX,
+		.flags	= IORESOURCE_DMA,
 	},
 	[3] = {
-		.start = EDMA_CTLR_CHAN(0, 19),
-		.end = EDMA_CTLR_CHAN(0, 19),
-		.flags = IORESOURCE_DMA,
+		.start	= DA8XX_DMA_SPI1_TX,
+		.end	= DA8XX_DMA_SPI1_TX,
+		.flags	= IORESOURCE_DMA,
 	},
-	[4] = {
-		.start = 0,
-		.end = 0,
-		.flags = IORESOURCE_DMA,
+};
+
+struct davinci_spi_platform_data da8xx_spi_pdata[] = {
+	[0] = {
+		.version	= SPI_VERSION_2,
+		.intr_line	= 1,
+		.dma_event_q	= EVENTQ_0,
+	},
+	[1] = {
+		.version	= SPI_VERSION_2,
+		.intr_line	= 1,
+		.dma_event_q	= EVENTQ_0,
 	},
 };
 
 static struct platform_device da8xx_spi_device[] = {
 	[0] = {
-		.name = "spi_davinci",
-		.id = 0,
-		.num_resources = ARRAY_SIZE(da8xx_spi0_resources),
-		.resource = da8xx_spi0_resources,
+		.name		= "spi_davinci",
+		.id		= 0,
+		.num_resources	= ARRAY_SIZE(da8xx_spi0_resources),
+		.resource	= da8xx_spi0_resources,
+		.dev		= {
+			.platform_data = &da8xx_spi_pdata[0],
+		},
 	},
 	[1] = {
-		.name = "spi_davinci",
-		.id = 1,
-		.num_resources = ARRAY_SIZE(da8xx_spi1_resources),
-		.resource = da8xx_spi1_resources,
+		.name		= "spi_davinci",
+		.id		= 1,
+		.num_resources	= ARRAY_SIZE(da8xx_spi1_resources),
+		.resource	= da8xx_spi1_resources,
+		.dev		= {
+			.platform_data = &da8xx_spi_pdata[1],
+		},
 	},
 };
 
-int __init da8xx_register_spi(int instance,
-			      struct davinci_spi_platform_data *pdata)
+int __init da8xx_register_spi(int instance, struct spi_board_info *info,
+			      unsigned len)
 {
-	struct platform_device *pdev;
+	int ret;
 
-	if (instance == 0)
-		pdev = &da8xx_spi_device[0];
-	else if (instance == 1)
-		pdev = &da8xx_spi_device[1];
-	else
+	if (instance < 0 || instance > 1)
 		return -EINVAL;
 
-	pdev->dev.platform_data = pdata;
+	ret = spi_register_board_info(info, len);
+	if (ret)
+		pr_warning("%s: failed to register board info for spi %d :"
+			   " %d\n", __func__, instance, ret);
 
-	return platform_device_register(pdev);
-}
+	da8xx_spi_pdata[instance].num_chipselect = len;
 
-static struct resource da850_mcbsp0_resources[] = {
-	{
-		.start	= 0x01D10000,
-		.end	= 0x01D10FFF,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= 0x01F10000,
-		.end	= 0x01F10FFF,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= IRQ_DA850_MCBSP0RINT,
-		.end	= IRQ_DA850_MCBSP0RINT,
-		.flags	= IORESOURCE_IRQ,
-	},
-	{
-		.start	= IRQ_DA850_MCBSP0XINT,
-		.end	= IRQ_DA850_MCBSP0XINT,
-		.flags	= IORESOURCE_IRQ,
-	},
-	/* first RX, then TX */
-	{
-		.start	= 2,
-		.end	= 2,
-		.flags	= IORESOURCE_DMA,
-	},
-	{
-		.start	= 3,
-		.end	= 3,
-		.flags	= IORESOURCE_DMA,
-	},
-};
-
-static struct resource da850_mcbsp1_resources[] = {
-	{
-		.start	= 0x01D11000,
-		.end	= 0x01D11FFF,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= 0x01F11000,
-		.end	= 0x01F11FFF,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.start	= IRQ_DA850_MCBSP1RINT,
-		.end	= IRQ_DA850_MCBSP1RINT,
-		.flags	= IORESOURCE_IRQ,
-	},
-	{
-		.start	= IRQ_DA850_MCBSP1XINT,
-		.end	= IRQ_DA850_MCBSP1XINT,
-		.flags	= IORESOURCE_IRQ,
-	},
-	{
-		.start	= 4,
-		.end	= 4,
-		.flags	= IORESOURCE_DMA,
-	},
-	{
-		.start	= 5,
-		.end	= 5,
-		.flags	= IORESOURCE_DMA,
-	},
-};
-static struct platform_device da850_mcbsp0_device = {
-	.name		= "davinci-mcbsp",
-	.id		= 0,
-	.num_resources	= ARRAY_SIZE(da850_mcbsp0_resources),
-	.resource	= da850_mcbsp0_resources,
-};
-
-static struct platform_device da850_mcbsp1_device = {
-	.name		= "davinci-mcbsp",
-	.id		= 1,
-	.num_resources	= ARRAY_SIZE(da850_mcbsp1_resources),
-	.resource	= da850_mcbsp1_resources,
-};
-
-int
-__init da850_init_mcbsp(struct davinci_mcbsp_platform_data *pdata)
-{
-	struct platform_device *pdev;
-
-	if (!pdata->inst) {
-		pdev = &da850_mcbsp0_device;
-	} else if (pdata->inst == 1) {
-		pdev = &da850_mcbsp1_device;
-	} else {
-		printk(KERN_ERR "Cannot initialize McBSP device, Invalid id\n");
-		return -EINVAL;
+	if (instance == 1 && cpu_is_davinci_da850()) {
+		da8xx_spi1_resources[0].start = DA850_SPI1_BASE;
+		da8xx_spi1_resources[0].end = DA850_SPI1_BASE + SZ_4K - 1;
 	}
 
-	pdev->dev.platform_data = pdata;
-	return platform_device_register(pdev);
+	return platform_device_register(&da8xx_spi_device[instance]);
 }
- 
+
+#ifdef CONFIG_ARCH_DAVINCI_DA850
+
 static struct resource da850_sata_resources[] = {
-{
-	.start	= DA850_SATA_BASE,
-	.end	= DA850_SATA_BASE + 0x1fff,
-	.flags	= IORESOURCE_MEM,
-},
-{
-	.start	= IRQ_DA850_SATAINT,
- 	.flags	= IORESOURCE_IRQ,
-},
+	{
+		.start	= DA850_SATA_BASE,
+		.end	= DA850_SATA_BASE + 0x1fff,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= IRQ_DA850_SATAINT,
+		.flags	= IORESOURCE_IRQ,
+	},
 };
 
 /* SATA PHY Control Register offset from AHCI base */
 #define SATA_P0PHYCR_REG	0x178
 
 #define SATA_PHY_MPY(x)		((x) << 0)
-#define SATA_PHY_LB(x)		((x) << 4)
 #define SATA_PHY_LOS(x)		((x) << 6)
-#define SATA_PHY_RXINVPAIR(x)	((x) << 7)
-#define SATA_PHY_RXTERM(x)	((x) << 8)
 #define SATA_PHY_RXCDR(x)	((x) << 10)
 #define SATA_PHY_RXEQ(x)	((x) << 13)
-#define SATA_PHY_TXINVPAIR(x)	((x) << 17)
-#define SATA_PHY_TXCM(x)	((x) << 18)
 #define SATA_PHY_TXSWING(x)	((x) << 19)
-#define SATA_PHY_TXDE(x)	((x) << 22)
-#define SATA_PHY_OVERRIDE(x)	((x) << 30)
 #define SATA_PHY_ENPLL(x)	((x) << 31)
 
 static struct clk *da850_sata_clk;
@@ -994,29 +998,20 @@ static int da850_sata_init(struct device *dev, void __iomem *addr)
 	__raw_writel(val, DA8XX_SYSCFG1_VIRT(DA8XX_PWRDN_REG));
 
 	/* Get the multiplier needed for 1.5GHz PLL output */
-	for (i = 0; i < ARRAY_SIZE(da850_sata_xtal); i++) {
+	for (i = 0; i < ARRAY_SIZE(da850_sata_xtal); i++)
 		if (da850_sata_xtal[i] == da850_sata_refclkpn)
 			break;
-	}
 
 	if (i == ARRAY_SIZE(da850_sata_xtal)) {
 		ret = -EINVAL;
 		goto err1;
-	} else {
-		val = SATA_PHY_MPY(i + 1);
 	}
 
-	val |= SATA_PHY_LB(0) |
+	val = SATA_PHY_MPY(i + 1) |
 		SATA_PHY_LOS(1) |
-		SATA_PHY_RXINVPAIR(0) |
-		SATA_PHY_RXTERM(0) |
 		SATA_PHY_RXCDR(4) |
 		SATA_PHY_RXEQ(1) |
-		SATA_PHY_TXINVPAIR(0) |
-		SATA_PHY_TXCM(0) |
 		SATA_PHY_TXSWING(3) |
-		SATA_PHY_TXDE(0) |
-		SATA_PHY_OVERRIDE(0) |
 		SATA_PHY_ENPLL(1);
 
 	__raw_writel(val, addr + SATA_P0PHYCR_REG);
@@ -1063,3 +1058,4 @@ int __init da850_register_sata(unsigned long refclkpn)
 
 	return platform_device_register(&da850_sata_device);
 }
+#endif

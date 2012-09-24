@@ -11,6 +11,7 @@
 
 #include <linux/clk.h>
 #include <linux/errno.h>
+#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/debugfs.h>
@@ -22,17 +23,15 @@
 
 #include <mach/hardware.h>
 #include <mach/at91_pio.h>
-#include <mach/gpio.h>
-
-#include <asm/gpio.h>
 
 #include "generic.h"
 
 struct at91_gpio_chip {
 	struct gpio_chip	chip;
 	struct at91_gpio_chip	*next;		/* Bank sharing same clock */
-	struct at91_gpio_bank	*bank;		/* Bank definition */
+	int			id;		/* ID of register bank */
 	void __iomem		*regbase;	/* Base of register bank */
+	struct clk		*clock;		/* associated clock */
 };
 
 #define to_at91_gpio_chip(c) container_of(c, struct at91_gpio_chip, chip)
@@ -60,18 +59,17 @@ static int at91_gpiolib_direction_input(struct gpio_chip *chip,
 	}
 
 static struct at91_gpio_chip gpio_chip[] = {
-	AT91_GPIO_CHIP("A", 0x00 + PIN_BASE, 32),
-	AT91_GPIO_CHIP("B", 0x20 + PIN_BASE, 32),
-	AT91_GPIO_CHIP("C", 0x40 + PIN_BASE, 32),
-	AT91_GPIO_CHIP("D", 0x60 + PIN_BASE, 32),
-	AT91_GPIO_CHIP("E", 0x80 + PIN_BASE, 32),
+	AT91_GPIO_CHIP("pioA", 0x00, 32),
+	AT91_GPIO_CHIP("pioB", 0x20, 32),
+	AT91_GPIO_CHIP("pioC", 0x40, 32),
+	AT91_GPIO_CHIP("pioD", 0x60, 32),
+	AT91_GPIO_CHIP("pioE", 0x80, 32),
 };
 
 static int gpio_banks;
 
 static inline void __iomem *pin_to_controller(unsigned pin)
 {
-	pin -= PIN_BASE;
 	pin /= 32;
 	if (likely(pin < gpio_banks))
 		return gpio_chip[pin].regbase;
@@ -81,7 +79,6 @@ static inline void __iomem *pin_to_controller(unsigned pin)
 
 static inline unsigned pin_to_mask(unsigned pin)
 {
-	pin -= PIN_BASE;
 	return 1 << (pin % 32);
 }
 
@@ -274,10 +271,11 @@ EXPORT_SYMBOL(at91_get_gpio_value);
 static u32 wakeups[MAX_GPIO_BANKS];
 static u32 backups[MAX_GPIO_BANKS];
 
-static int gpio_irq_set_wake(unsigned pin, unsigned state)
+static int gpio_irq_set_wake(struct irq_data *d, unsigned state)
 {
+	unsigned	pin = irq_to_gpio(d->irq);
 	unsigned	mask = pin_to_mask(pin);
-	unsigned	bank = (pin - PIN_BASE) / 32;
+	unsigned	bank = pin / 32;
 
 	if (unlikely(bank >= MAX_GPIO_BANKS))
 		return -EINVAL;
@@ -287,7 +285,7 @@ static int gpio_irq_set_wake(unsigned pin, unsigned state)
 	else
 		wakeups[bank] &= ~mask;
 
-	set_irq_wake(gpio_chip[bank].bank->id, state);
+	irq_set_irq_wake(gpio_chip[bank].id, state);
 
 	return 0;
 }
@@ -304,7 +302,7 @@ void at91_gpio_suspend(void)
 		__raw_writel(wakeups[i], pio + PIO_IER);
 
 		if (!wakeups[i])
-			clk_disable(gpio_chip[i].bank->clock);
+			clk_disable(gpio_chip[i].clock);
 		else {
 #ifdef CONFIG_PM_DEBUG
 			printk(KERN_DEBUG "GPIO-%c may wake for %08x\n", 'A'+i, wakeups[i]);
@@ -321,7 +319,7 @@ void at91_gpio_resume(void)
 		void __iomem	*pio = gpio_chip[i].regbase;
 
 		if (!wakeups[i])
-			clk_enable(gpio_chip[i].bank->clock);
+			clk_enable(gpio_chip[i].clock);
 
 		__raw_writel(wakeups[i], pio + PIO_IDR);
 		__raw_writel(backups[i], pio + PIO_IER);
@@ -344,8 +342,9 @@ void at91_gpio_resume(void)
  * IRQ0..IRQ6 should be configurable, e.g. level vs edge triggering.
  */
 
-static void gpio_irq_mask(unsigned pin)
+static void gpio_irq_mask(struct irq_data *d)
 {
+	unsigned	pin = irq_to_gpio(d->irq);
 	void __iomem	*pio = pin_to_controller(pin);
 	unsigned	mask = pin_to_mask(pin);
 
@@ -353,8 +352,9 @@ static void gpio_irq_mask(unsigned pin)
 		__raw_writel(mask, pio + PIO_IDR);
 }
 
-static void gpio_irq_unmask(unsigned pin)
+static void gpio_irq_unmask(struct irq_data *d)
 {
+	unsigned	pin = irq_to_gpio(d->irq);
 	void __iomem	*pio = pin_to_controller(pin);
 	unsigned	mask = pin_to_mask(pin);
 
@@ -362,7 +362,7 @@ static void gpio_irq_unmask(unsigned pin)
 		__raw_writel(mask, pio + PIO_IER);
 }
 
-static int gpio_irq_type(unsigned pin, unsigned type)
+static int gpio_irq_type(struct irq_data *d, unsigned type)
 {
 	switch (type) {
 	case IRQ_TYPE_NONE:
@@ -375,25 +375,24 @@ static int gpio_irq_type(unsigned pin, unsigned type)
 
 static struct irq_chip gpio_irqchip = {
 	.name		= "GPIO",
-	.mask		= gpio_irq_mask,
-	.unmask		= gpio_irq_unmask,
-	.set_type	= gpio_irq_type,
-	.set_wake	= gpio_irq_set_wake,
+	.irq_disable	= gpio_irq_mask,
+	.irq_mask	= gpio_irq_mask,
+	.irq_unmask	= gpio_irq_unmask,
+	.irq_set_type	= gpio_irq_type,
+	.irq_set_wake	= gpio_irq_set_wake,
 };
 
 static void gpio_irq_handler(unsigned irq, struct irq_desc *desc)
 {
-	unsigned	pin;
-	struct irq_desc	*gpio;
-	struct at91_gpio_chip *at91_gpio;
-	void __iomem	*pio;
+	unsigned	irq_pin;
+	struct irq_data *idata = irq_desc_get_irq_data(desc);
+	struct irq_chip *chip = irq_data_get_irq_chip(idata);
+	struct at91_gpio_chip *at91_gpio = irq_data_get_irq_chip_data(idata);
+	void __iomem	*pio = at91_gpio->regbase;
 	u32		isr;
 
-	at91_gpio = get_irq_chip_data(irq);
-	pio = at91_gpio->regbase;
-
 	/* temporarily mask (level sensitive) parent IRQ */
-	desc->chip->ack(irq);
+	chip->irq_ack(idata);
 	for (;;) {
 		/* Reading ISR acks pending (edge triggered) GPIO interrupts.
 		 * When there none are pending, we're finished unless we need
@@ -408,28 +407,16 @@ static void gpio_irq_handler(unsigned irq, struct irq_desc *desc)
 			continue;
 		}
 
-		pin = at91_gpio->chip.base;
-		gpio = &irq_desc[pin];
+		irq_pin = gpio_to_irq(at91_gpio->chip.base);
 
 		while (isr) {
-			if (isr & 1) {
-				if (unlikely(gpio->depth)) {
-					/*
-					 * The core ARM interrupt handler lazily disables IRQs so
-					 * another IRQ must be generated before it actually gets
-					 * here to be disabled on the GPIO controller.
-					 */
-					gpio_irq_mask(pin);
-				}
-				else
-					generic_handle_irq(pin);
-			}
-			pin++;
-			gpio++;
+			if (isr & 1)
+				generic_handle_irq(irq_pin);
+			irq_pin++;
 			isr >>= 1;
 		}
 	}
-	desc->chip->unmask(irq);
+	chip->irq_unmask(idata);
 	/* now it may re-trigger */
 }
 
@@ -453,7 +440,7 @@ static int at91_gpio_show(struct seq_file *s, void *unused)
 		seq_printf(s, "%i:\t", j);
 
 		for (bank = 0; bank < gpio_banks; bank++) {
-			unsigned	pin  = PIN_BASE + (32 * bank) + j;
+			unsigned	pin  = (32 * bank) + j;
 			void __iomem	*pio = pin_to_controller(pin);
 			unsigned	mask = pin_to_mask(pin);
 
@@ -506,27 +493,28 @@ static struct lock_class_key gpio_lock_class;
  */
 void __init at91_gpio_irq_setup(void)
 {
-	unsigned		pioc, pin;
+	unsigned		pioc, irq = gpio_to_irq(0);
 	struct at91_gpio_chip	*this, *prev;
 
-	for (pioc = 0, pin = PIN_BASE, this = gpio_chip, prev = NULL;
+	for (pioc = 0, this = gpio_chip, prev = NULL;
 			pioc++ < gpio_banks;
 			prev = this, this++) {
-		unsigned	id = this->bank->id;
+		unsigned	id = this->id;
 		unsigned	i;
 
 		__raw_writel(~0, this->regbase + PIO_IDR);
 
-		for (i = 0, pin = this->chip.base; i < 32; i++, pin++) {
-			lockdep_set_class(&irq_desc[pin].lock, &gpio_lock_class);
+		for (i = 0, irq = gpio_to_irq(this->chip.base); i < 32;
+		     i++, irq++) {
+			irq_set_lockdep_class(irq, &gpio_lock_class);
 
 			/*
 			 * Can use the "simple" and not "edge" handler since it's
 			 * shorter, and the AIC handles interrupts sanely.
 			 */
-			set_irq_chip(pin, &gpio_irqchip);
-			set_irq_handler(pin, handle_simple_irq);
-			set_irq_flags(pin, IRQF_VALID);
+			irq_set_chip_and_handler(irq, &gpio_irqchip,
+						 handle_simple_irq);
+			set_irq_flags(irq, IRQF_VALID);
 		}
 
 		/* The toplevel handler handles one bank of GPIOs, except
@@ -536,10 +524,10 @@ void __init at91_gpio_irq_setup(void)
 		if (prev && prev->next == this)
 			continue;
 
-		set_irq_chip_data(id, this);
-		set_irq_chained_handler(id, gpio_irq_handler);
+		irq_set_chip_data(id, this);
+		irq_set_chained_handler(id, gpio_irq_handler);
 	}
-	pr_info("AT91: %d gpio irqs in %d banks\n", pin - PIN_BASE, gpio_banks);
+	pr_info("AT91: %d gpio irqs in %d banks\n", irq - gpio_to_irq(0), gpio_banks);
 }
 
 /* gpiolib support */
@@ -627,16 +615,26 @@ void __init at91_gpio_init(struct at91_gpio_bank *data, int nr_banks)
 	for (i = 0; i < nr_banks; i++) {
 		at91_gpio = &gpio_chip[i];
 
-		at91_gpio->bank = &data[i];
-		at91_gpio->chip.base = PIN_BASE + i * 32;
-		at91_gpio->regbase = at91_gpio->bank->offset +
-			(void __iomem *)AT91_VA_BASE_SYS;
+		at91_gpio->id = data[i].id;
+		at91_gpio->chip.base = i * 32;
+
+		at91_gpio->regbase = ioremap(data[i].regbase, 512);
+		if (!at91_gpio->regbase) {
+			pr_err("at91_gpio.%d, failed to map registers, ignoring.\n", i);
+			continue;
+		}
+
+		at91_gpio->clock = clk_get_sys(NULL, at91_gpio->chip.label);
+		if (!at91_gpio->clock) {
+			pr_err("at91_gpio.%d, failed to get clock, ignoring.\n", i);
+			continue;
+		}
 
 		/* enable PIO controller's clock */
-		clk_enable(at91_gpio->bank->clock);
+		clk_enable(at91_gpio->clock);
 
 		/* AT91SAM9263_ID_PIOCDE groups PIOC, PIOD, PIOE */
-		if (last && last->bank->id == at91_gpio->bank->id)
+		if (last && last->id == at91_gpio->id)
 			last->next = at91_gpio;
 		last = at91_gpio;
 

@@ -63,6 +63,7 @@
 #define OMAP_RTC_COMP_LSB_REG		0x4c
 #define OMAP_RTC_COMP_MSB_REG		0x50
 #define OMAP_RTC_OSC_REG		0x54
+#define OMAP_RTC_SCRATCH0_REG		0x60
 
 /* OMAP_RTC_CTRL_REG bit fields: */
 #define OMAP_RTC_CTRL_SPLIT		(1<<7)
@@ -87,6 +88,12 @@
 /* OMAP_RTC_INTERRUPTS_REG bit fields: */
 #define OMAP_RTC_INTERRUPTS_IT_ALARM    (1<<3)
 #define OMAP_RTC_INTERRUPTS_IT_TIMER    (1<<2)
+
+/* OMAP_RTC_OSC_REG bit fields */
+#define OMAP_RTC_OSC_SWRESET		(1<<5)
+#define OMAP_RTC_OSC_RESERVED		(0x7)
+
+#define OMAP_RTC_SCRATCH0_PATTERN	0xaa
 
 static void __iomem	*rtc_base;
 
@@ -135,52 +142,23 @@ static irqreturn_t rtc_irq(int irq, void *rtc)
 	return IRQ_HANDLED;
 }
 
-#ifdef	CONFIG_RTC_INTF_DEV
-
-static int
-omap_rtc_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
+static int omap_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
 {
 	u8 reg;
-
-	switch (cmd) {
-	case RTC_AIE_OFF:
-	case RTC_AIE_ON:
-	case RTC_UIE_OFF:
-	case RTC_UIE_ON:
-		break;
-	default:
-		return -ENOIOCTLCMD;
-	}
 
 	local_irq_disable();
 	rtc_wait_not_busy();
 	reg = rtc_read(OMAP_RTC_INTERRUPTS_REG);
-	switch (cmd) {
-	/* AIE = Alarm Interrupt Enable */
-	case RTC_AIE_OFF:
-		reg &= ~OMAP_RTC_INTERRUPTS_IT_ALARM;
-		break;
-	case RTC_AIE_ON:
+	if (enabled)
 		reg |= OMAP_RTC_INTERRUPTS_IT_ALARM;
-		break;
-	/* UIE = Update Interrupt Enable (1/second) */
-	case RTC_UIE_OFF:
-		reg &= ~OMAP_RTC_INTERRUPTS_IT_TIMER;
-		break;
-	case RTC_UIE_ON:
-		reg |= OMAP_RTC_INTERRUPTS_IT_TIMER;
-		break;
-	}
+	else
+		reg &= ~OMAP_RTC_INTERRUPTS_IT_ALARM;
 	rtc_wait_not_busy();
 	rtc_write(reg, OMAP_RTC_INTERRUPTS_REG);
 	local_irq_enable();
 
 	return 0;
 }
-
-#else
-#define	omap_rtc_ioctl	NULL
-#endif
 
 /* this hardware doesn't support "don't care" alarm fields */
 static int tm2bcd(struct rtc_time *tm)
@@ -240,6 +218,20 @@ static int omap_rtc_set_time(struct device *dev, struct rtc_time *tm)
 		return -EINVAL;
 	local_irq_disable();
 	rtc_wait_not_busy();
+
+	/* do a dummy write to scratch register */
+	rtc_write(OMAP_RTC_SCRATCH0_PATTERN, OMAP_RTC_SCRATCH0_REG);
+
+	/* reset RTC */
+	rtc_write(OMAP_RTC_OSC_SWRESET | OMAP_RTC_OSC_RESERVED,
+			OMAP_RTC_OSC_REG);
+
+	/* resume RTC counter */
+	rtc_write(OMAP_RTC_CTRL_SPLIT | OMAP_RTC_CTRL_STOP,
+			OMAP_RTC_CTRL_REG);
+
+	/* wait for three 32-kHz reference periods after reset */
+	udelay(100);
 
 	rtc_write(tm->tm_year, OMAP_RTC_YEARS_REG);
 	rtc_write(tm->tm_mon, OMAP_RTC_MONTHS_REG);
@@ -304,11 +296,11 @@ static int omap_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alm)
 }
 
 static struct rtc_class_ops omap_rtc_ops = {
-	.ioctl		= omap_rtc_ioctl,
 	.read_time	= omap_rtc_read_time,
 	.set_time	= omap_rtc_set_time,
 	.read_alarm	= omap_rtc_read_alarm,
 	.set_alarm	= omap_rtc_set_alarm,
+	.alarm_irq_enable = omap_rtc_alarm_irq_enable,
 };
 
 static int omap_rtc_alarm;
@@ -397,7 +389,7 @@ static int __init omap_rtc_probe(struct platform_device *pdev)
 		pr_info("%s: already running\n", pdev->name);
 
 	/* force to 24 hour mode */
-	new_ctrl = reg & ~(OMAP_RTC_CTRL_SPLIT|OMAP_RTC_CTRL_AUTO_COMP);
+	new_ctrl = reg & (OMAP_RTC_CTRL_SPLIT|OMAP_RTC_CTRL_AUTO_COMP);
 	new_ctrl |= OMAP_RTC_CTRL_STOP;
 
 	/* BOARD-SPECIFIC CUSTOMIZATION CAN GO HERE:
@@ -420,24 +412,29 @@ static int __init omap_rtc_probe(struct platform_device *pdev)
 	if (reg != new_ctrl)
 		rtc_write(new_ctrl, OMAP_RTC_CTRL_REG);
 
+	if ((unsigned int)pdev->dev.platform_data == true)
+		device_init_wakeup(&pdev->dev, 1);
+
 	return 0;
 
 fail2:
-	free_irq(omap_rtc_timer, NULL);
+	free_irq(omap_rtc_timer, rtc);
 fail1:
 	rtc_device_unregister(rtc);
 fail0:
 	iounmap(rtc_base);
 fail:
-	release_resource(mem);
+	release_mem_region(mem->start, resource_size(mem));
 	return -EIO;
 }
 
 static int __exit omap_rtc_remove(struct platform_device *pdev)
 {
 	struct rtc_device	*rtc = platform_get_drvdata(pdev);
+	struct resource		*mem = dev_get_drvdata(&rtc->dev);
 
-	device_init_wakeup(&pdev->dev, 0);
+	if ((unsigned int)pdev->dev.platform_data == true)
+		device_init_wakeup(&pdev->dev, 0);
 
 	/* leave rtc running, but disable irqs */
 	rtc_write(0, OMAP_RTC_INTERRUPTS_REG);
@@ -447,8 +444,10 @@ static int __exit omap_rtc_remove(struct platform_device *pdev)
 	if (omap_rtc_timer != omap_rtc_alarm)
 		free_irq(omap_rtc_alarm, rtc);
 
-	release_resource(dev_get_drvdata(&rtc->dev));
 	rtc_device_unregister(rtc);
+	iounmap(rtc_base);
+	release_mem_region(mem->start, resource_size(mem));
+	platform_set_drvdata(pdev, NULL);
 	return 0;
 }
 

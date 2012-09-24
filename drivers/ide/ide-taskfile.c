@@ -11,6 +11,7 @@
 #include <linux/types.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
+#include <linux/export.h>
 #include <linux/sched.h>
 #include <linux/interrupt.h>
 #include <linux/errno.h>
@@ -201,7 +202,7 @@ static u8 wait_drive_not_busy(ide_drive_t *drive)
 	u8 stat;
 
 	/*
-	 * Last sector was transfered, wait until device is ready.  This can
+	 * Last sector was transferred, wait until device is ready.  This can
 	 * take up to 6 ms on some ATAPI devices, so we will wait max 10 ms.
 	 */
 	for (retries = 0; retries < 1000; retries++) {

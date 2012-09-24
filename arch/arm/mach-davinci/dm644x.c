@@ -12,11 +12,9 @@
 #include <linux/clk.h>
 #include <linux/serial_8250.h>
 #include <linux/platform_device.h>
-#include <linux/gpio.h>
 
 #include <asm/mach/map.h>
 
-#include <mach/dm644x.h>
 #include <mach/cputype.h>
 #include <mach/edma.h>
 #include <mach/irqs.h>
@@ -26,7 +24,9 @@
 #include <mach/serial.h>
 #include <mach/common.h>
 #include <mach/asp.h>
+#include <mach/gpio-davinci.h>
 
+#include "davinci.h"
 #include "clock.h"
 #include "mux.h"
 
@@ -34,6 +34,13 @@
  * Device specific clocks
  */
 #define DM644X_REF_FREQ		27000000
+
+#define DM644X_EMAC_BASE		0x01c80000
+#define DM644X_EMAC_MDIO_BASE		(DM644X_EMAC_BASE + 0x4000)
+#define DM644X_EMAC_CNTRL_OFFSET	0x0000
+#define DM644X_EMAC_CNTRL_MOD_OFFSET	0x1000
+#define DM644X_EMAC_CNTRL_RAM_OFFSET	0x2000
+#define DM644X_EMAC_CNTRL_RAM_SIZE	0x2000
 
 static struct pll_data pll1_data = {
 	.num       = 1,
@@ -130,7 +137,7 @@ static struct clk dsp_clk = {
 	.name = "dsp",
 	.parent = &pll1_sysclk1,
 	.lpsc = DAVINCI_LPSC_GEM,
-	.flags = PSC_DSP,
+	.domain = DAVINCI_GPSC_DSPDOMAIN,
 	.usecount = 1,			/* REVISIT how to disable? */
 };
 
@@ -145,7 +152,7 @@ static struct clk vicp_clk = {
 	.name = "vicp",
 	.parent = &pll1_sysclk2,
 	.lpsc = DAVINCI_LPSC_IMCOP,
-	.flags = PSC_DSP,
+	.domain = DAVINCI_GPSC_DSPDOMAIN,
 	.usecount = 1,			/* REVISIT how to disable? */
 };
 
@@ -274,7 +281,7 @@ static struct clk timer2_clk = {
 	.name = "timer2",
 	.parent = &pll1_aux_clk,
 	.lpsc = DAVINCI_LPSC_TIMER2,
-	.usecount = 1,              /* REVISIT: why cant' this be disabled? */
+	.usecount = 1,              /* REVISIT: why can't this be disabled? */
 };
 
 static struct clk_lookup dm644x_clks[] = {
@@ -514,6 +521,7 @@ static struct edma_soc_info edma_cc0_info = {
 	.n_cc			= 1,
 	.queue_tc_mapping	= queue_tc_mapping,
 	.queue_priority_mapping	= queue_priority_mapping,
+	.default_queue		= EVENTQ_1,
 };
 
 static struct edma_soc_info *dm644x_edma_info[EDMA_MAX_CC] = {
@@ -586,14 +594,14 @@ static struct platform_device dm644x_asp_device = {
 	.resource	= dm644x_asp_resources,
 };
 
-#define DM644X_VPSS_REG_BASE		0x01c73400
+#define DM644X_VPSS_BASE	0x01c73400
 
 static struct resource dm644x_vpss_resources[] = {
 	{
 		/* VPSS Base address */
 		.name		= "vpss",
-		.start		= DM644X_VPSS_REG_BASE,
-		.end		= DM644X_VPSS_REG_BASE + 0xff,
+		.start		= DM644X_VPSS_BASE,
+		.end		= DM644X_VPSS_BASE + 0xff,
 		.flags		= IORESOURCE_MEM,
 	},
 };
@@ -606,7 +614,7 @@ static struct platform_device dm644x_vpss_device = {
 	.resource		= dm644x_vpss_resources,
 };
 
-static struct resource vpfe_resources[] = {
+static struct resource dm644x_vpfe_resources[] = {
 	{
 		.start          = IRQ_VDINT0,
 		.end            = IRQ_VDINT0,
@@ -641,244 +649,16 @@ static struct platform_device dm644x_ccdc_dev = {
 	},
 };
 
-static struct platform_device vpfe_capture_dev = {
+static struct platform_device dm644x_vpfe_dev = {
 	.name		= CAPTURE_DRV_NAME,
 	.id		= -1,
-	.num_resources	= ARRAY_SIZE(vpfe_resources),
-	.resource	= vpfe_resources,
+	.num_resources	= ARRAY_SIZE(dm644x_vpfe_resources),
+	.resource	= dm644x_vpfe_resources,
 	.dev = {
 		.dma_mask		= &dm644x_video_dma_mask,
 		.coherent_dma_mask	= DMA_BIT_MASK(32),
 	},
 };
-
-void dm644x_set_vpfe_config(struct vpfe_config *cfg)
-{
-	vpfe_capture_dev.dev.platform_data = cfg;
-}
-
-#define DM644X_OSD_REG_BASE		0x01C72600
-
-static struct resource dm644x_osd_resources[] = {
-	{
-		.start	= DM644X_OSD_REG_BASE,
-		.end	= DM644X_OSD_REG_BASE + 0x1ff,
-		.flags	= IORESOURCE_MEM,
-	},
-};
-
-static struct osd_platform_data dm644x_osd_data = {
-	.vpbe_type     = DM644X_VPBE,
-};
-
-static struct platform_device dm644x_osd_dev = {
-	.name		= VPBE_OSD_SUBDEV_NAME,
-	.id		= -1,
-	.num_resources	= ARRAY_SIZE(dm644x_osd_resources),
-	.resource	= dm644x_osd_resources,
-	.dev		= {
-		.dma_mask		= &dm644x_video_dma_mask,
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-		.platform_data		= &dm644x_osd_data,
-	},
-};
-
-#define DM644X_VENC_REG_BASE		0x01C72400
-
-static struct resource dm644x_venc_resources[] = {
-	{
-		.start	= DM644X_VENC_REG_BASE,
-		.end	= DM644X_VENC_REG_BASE + 0x17f,
-		.flags	= IORESOURCE_MEM,
-	},
-};
-
-static inline u32 dm644x_reg_modify(void *reg, u32 val, u32 mask)
-{
-	u32 new_val = (__raw_readl(reg) & ~mask) | (val & mask);
-	__raw_writel(new_val, reg);
-	return new_val;
-}
-
-static void __iomem *venc_vmod_reg;
-static void __iomem *venc_ycctl_reg;
-
-static int dm644x_set_if_config(enum v4l2_mbus_pixelcode pixcode)
-{
-	unsigned int val = 0;
-	int ret = 0;
-
-	switch (pixcode) {
-	case V4L2_MBUS_FMT_FIXED:
-		/* Analog out.do nothing */
-		break;
-	case V4L2_MBUS_FMT_YUYV8_2X8:
-		/* BT656 */
-		val = (1<<12);
-		/* set VDMD in VMOD */
-		dm644x_reg_modify(venc_vmod_reg, val, (7 << 12));
-		/* Set YCCTL */
-		dm644x_reg_modify(venc_ycctl_reg, 1, 1);
-		break;
-	case V4L2_MBUS_FMT_YUYV10_1X20:
-		/*
-		 * This was VPBE_DIGITAL_IF_YCC16.BT656. Replace
-		 * the enum accordingly when the right one gets
-		 * into open source
-		 */
-		val = 0 << 12;
-		dm644x_reg_modify(venc_vmod_reg, val, (7 << 12));
-		dm644x_reg_modify(venc_ycctl_reg, 1, 1);
-		break;
-	case V4L2_MBUS_FMT_SGRBG8_1X8:
-		/*
-		 * This was VPBE_DIGITAL_IF_PRGB/SRGB. Replace
-		 * the enum accordingly when the right one gets
-		 * into open source
-		 */
-	val = 2 << 12;
-		dm644x_reg_modify(venc_vmod_reg, val, (7 << 12));
-		break;
-	default:
-		ret = -EINVAL;
-		break;
-	}
-	return ret;
-}
-
-static int dm644x_vpbe_setup_pinmux(enum v4l2_mbus_pixelcode if_type,
-				    int field)
-{
-	int ret = 0;
-
-	switch (if_type) {
-	case V4L2_MBUS_FMT_SGRBG8_1X8:
-		/*
-		 * This was VPBE_DIGITAL_IF_PRGB. Replace the enum accordingly
-		 * when the right one gets into open source
-		 */
-		davinci_cfg_reg(DM644X_GPIO46_47);
-		davinci_cfg_reg(DM644X_GPIO0);
-		davinci_cfg_reg(DM644X_RGB666);
-		davinci_cfg_reg(DM644X_LOEEN);
-		davinci_cfg_reg(DM644X_GPIO3);
-		break;
-	case V4L2_MBUS_FMT_YUYV10_1X20:
-		/*
-		 * This was VPBE_DIGITAL_IF_YCC16. Replace the enum accordingly
-		 * when the right one gets into open source
-		 */
-		if (field)
-			davinci_cfg_reg(DM644X_LFLDEN);
-		else
-			davinci_cfg_reg(DM644X_GPIO3);
-		davinci_cfg_reg(DM644X_LOEEN);
-		break;
-	default:
-		ret = -EINVAL;
-	}
-
-	return ret;
-}
-
-static int dm644x_venc_setup_clock(enum vpbe_enc_timings_type type, __u64 mode)
-{
-	int ret = 0;
-	void __iomem *vpss_clkctl_reg;
-
-	vpss_clkctl_reg = DAVINCI_SYSMODULE_VIRT(0x44);
-
-	switch (type) {
-	case VPBE_ENC_STD:
-		writel(0x18, vpss_clkctl_reg);
-		break;
-	case VPBE_ENC_DV_PRESET:
-		switch ((unsigned int)mode) {
-		case V4L2_DV_480P59_94:
-		case V4L2_DV_576P50:
-			writel(0x19, vpss_clkctl_reg);
-			break;
-		case V4L2_DV_720P60:
-		case V4L2_DV_1080I60:
-		case V4L2_DV_1080P30:
-		case V4L2_DV_1080I30:
-			/*
-			 * For HD, use external clock source since
-			 * HD requires higher clock rate
-			 */
-			writel(0xa, vpss_clkctl_reg);
-			break;
-		default:
-			ret = -EINVAL;
-			break;
-		}
-		break;
-	default:
-		ret  = -EINVAL;
-	}
-	return ret;
-}
-
-static struct resource dm644x_v4l2_disp_resources[] = {
-	{
-		.start	= IRQ_VENCINT,
-		.end	= IRQ_VENCINT,
-		.flags	= IORESOURCE_IRQ,
-	},
-};
-
-static struct platform_device dm644x_vpbe_display = {
-	.name		= "vpbe-v4l2",
-	.id		= -1,
-	.num_resources	= ARRAY_SIZE(dm644x_v4l2_disp_resources),
-	.resource	= dm644x_v4l2_disp_resources,
-	.dev		= {
-		.dma_mask		= &dm644x_video_dma_mask,
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-	},
-};
-
-static struct platform_device dm644x_vpbe_fb_display = {
-	.name		= "vpbe-fb",
-	.id		= -1,
-	.dev		= {
-		.dma_mask		= &dm644x_video_dma_mask,
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-	},
-};
-
-struct venc_platform_data dm644x_venc_pdata = {
-	.venc_type		= DM644X_VPBE,
-	.setup_pinmux		= dm644x_vpbe_setup_pinmux,
-	.setup_clock		= dm644x_venc_setup_clock,
-	.setup_if_config	= dm644x_set_if_config,
-};
-
-static struct platform_device dm644x_venc_dev = {
-	.name		= VPBE_VENC_SUBDEV_NAME,
-	.id		= -1,
-	.num_resources	= ARRAY_SIZE(dm644x_venc_resources),
-	.resource	= dm644x_venc_resources,
-	.dev		= {
-		.dma_mask		= &dm644x_video_dma_mask,
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-		.platform_data		= &dm644x_venc_pdata,
-	},
-};
-
-static struct platform_device dm644x_vpbe_dev = {
-	.name		= "vpbe_controller",
-	.id		= -1,
-	.dev		= {
-		.dma_mask		= &dm644x_video_dma_mask,
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-	},
-};
-
-void dm644x_set_vpbe_display_config(struct vpbe_display_config *cfg)
-{
-	dm644x_vpbe_dev.dev.platform_data = cfg;
-}
 
 /*----------------------------------------------------------------------*/
 
@@ -990,9 +770,8 @@ static struct davinci_soc_info davinci_soc_info_dm644x = {
 	.gpio_irq		= IRQ_GPIOBNK0,
 	.serial_dev		= &dm644x_serial_device,
 	.emac_pdata		= &dm644x_emac_pdata,
-	.sram_dma		= 0x00008000,
+	.sram_phys		= 0x00008000,
 	.sram_len		= SZ_16K,
-	.reset_device		= &davinci_wdt_device,
 };
 
 void __init dm644x_init_asp(struct snd_platform_data *pdata)
@@ -1005,28 +784,21 @@ void __init dm644x_init_asp(struct snd_platform_data *pdata)
 void __init dm644x_init(void)
 {
 	davinci_common_init(&davinci_soc_info_dm644x);
-	davinci_sysmodbase = ioremap_nocache(DAVINCI_SYSTEM_MODULE_BASE, 0x800);
-	WARN_ON(!davinci_sysmodbase);
+	davinci_map_sysmod();
 }
 
-static struct platform_device *dm644x_video_devices[] __initdata = {
-	&dm644x_vpss_device,
-	&dm644x_ccdc_dev,
-	&vpfe_capture_dev,
-	&dm644x_osd_dev,
-	&dm644x_venc_dev,
-	&dm644x_vpbe_dev,
-	&dm644x_vpbe_display,
-	&dm644x_vpbe_fb_display,
-};
-
-static int __init dm644x_init_video(void)
+int __init dm644x_init_video(struct vpfe_config *vpfe_cfg)
 {
+	dm644x_vpfe_dev.dev.platform_data = vpfe_cfg;
+
 	/* Add ccdc clock aliases */
 	clk_add_alias("master", dm644x_ccdc_dev.name, "vpss_master", NULL);
 	clk_add_alias("slave", dm644x_ccdc_dev.name, "vpss_slave", NULL);
-	platform_add_devices(dm644x_video_devices,
-				ARRAY_SIZE(dm644x_video_devices));
+
+	platform_device_register(&dm644x_vpss_device);
+	platform_device_register(&dm644x_ccdc_dev);
+	platform_device_register(&dm644x_vpfe_dev);
+
 	return 0;
 }
 
@@ -1042,7 +814,6 @@ static int __init dm644x_init_devices(void)
 	clk_add_alias(NULL, dev_name(&dm644x_mdio_device.dev),
 		      NULL, &dm644x_emac_device.dev);
 
-	dm644x_init_video();
 	return 0;
 }
 postcore_initcall(dm644x_init_devices);

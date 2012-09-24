@@ -23,6 +23,8 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <linux/module.h>
+
 #include "drmP.h"
 #include "savage_drm.h"
 #include "savage_drv.h"
@@ -31,6 +33,17 @@
 
 static struct pci_device_id pciidlist[] = {
 	savage_PCI_IDS
+};
+
+static const struct file_operations savage_driver_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_open,
+	.release = drm_release,
+	.unlocked_ioctl = drm_ioctl,
+	.mmap = drm_mmap,
+	.poll = drm_poll,
+	.fasync = drm_fasync,
+	.llseek = noop_llseek,
 };
 
 static struct drm_driver driver = {
@@ -44,22 +57,7 @@ static struct drm_driver driver = {
 	.reclaim_buffers = savage_reclaim_buffers,
 	.ioctls = savage_ioctls,
 	.dma_ioctl = savage_bci_buffers,
-	.fops = {
-		 .owner = THIS_MODULE,
-		 .open = drm_open,
-		 .release = drm_release,
-		 .unlocked_ioctl = drm_ioctl,
-		 .mmap = drm_mmap,
-		 .poll = drm_poll,
-		 .fasync = drm_fasync,
-		 .llseek = noop_llseek,
-	},
-
-	.pci_driver = {
-		 .name = DRIVER_NAME,
-		 .id_table = pciidlist,
-	},
-
+	.fops = &savage_driver_fops,
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
 	.date = DRIVER_DATE,
@@ -68,15 +66,20 @@ static struct drm_driver driver = {
 	.patchlevel = DRIVER_PATCHLEVEL,
 };
 
+static struct pci_driver savage_pci_driver = {
+	.name = DRIVER_NAME,
+	.id_table = pciidlist,
+};
+
 static int __init savage_init(void)
 {
 	driver.num_ioctls = savage_max_ioctl;
-	return drm_init(&driver);
+	return drm_pci_init(&driver, &savage_pci_driver);
 }
 
 static void __exit savage_exit(void)
 {
-	drm_exit(&driver);
+	drm_pci_exit(&driver, &savage_pci_driver);
 }
 
 module_init(savage_init);

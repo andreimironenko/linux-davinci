@@ -112,6 +112,7 @@ static int __devinit pcf50633_bl_probe(struct platform_device *pdev)
 	if (!pcf_bl)
 		return -ENOMEM;
 
+	bl_props.type = BACKLIGHT_RAW;
 	bl_props.max_brightness = 0x3f;
 	bl_props.power = FB_BLANK_UNBLANK;
 
@@ -172,17 +173,7 @@ static struct platform_driver pcf50633_bl_driver = {
 	},
 };
 
-static int __init pcf50633_bl_init(void)
-{
-	return platform_driver_register(&pcf50633_bl_driver);
-}
-module_init(pcf50633_bl_init);
-
-static void __exit pcf50633_bl_exit(void)
-{
-	platform_driver_unregister(&pcf50633_bl_driver);
-}
-module_exit(pcf50633_bl_exit);
+module_platform_driver(pcf50633_bl_driver);
 
 MODULE_AUTHOR("Lars-Peter Clausen <lars@metafoo.de>");
 MODULE_DESCRIPTION("PCF50633 backlight driver");

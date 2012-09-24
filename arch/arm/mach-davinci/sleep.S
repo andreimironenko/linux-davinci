@@ -22,7 +22,7 @@
 #include <linux/linkage.h>
 #include <asm/assembler.h>
 #include <mach/psc.h>
-#include <mach/memory.h>
+#include <mach/ddr2.h>
 
 #include "clock.h"
 
@@ -49,6 +49,7 @@
  * 	r3: contains virtual base DDR2 PLL controller
  * 	r4: contains virtual address of the DEEPSLEEP register
  */
+	.align 3
 ENTRY(davinci_cpu_suspend)
 	stmfd	sp!, {r0-r12, lr}		@ save registers on stack
 
@@ -217,7 +218,11 @@ ddr2clk_stop_done:
 ENDPROC(davinci_ddr_psc_config)
 
 CACHE_FLUSH:
-	.word	arm926_flush_kern_cache_all
+#ifdef CONFIG_CPU_V6
+	.word	v6_flush_kern_cache_all
+#else
+	.word   arm926_flush_kern_cache_all
+#endif
 
 ENTRY(davinci_cpu_suspend_sz)
 	.word	. - davinci_cpu_suspend

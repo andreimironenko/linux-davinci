@@ -27,6 +27,7 @@
  */
 
 #include <linux/init.h>
+#include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
@@ -77,7 +78,7 @@
 #define DA8XX_INTR_RX_MASK	(DA8XX_USB_RX_EP_MASK << DA8XX_INTR_RX_SHIFT)
 #define DA8XX_INTR_TX_SHIFT	0
 #define DA8XX_INTR_TX_MASK	(DA8XX_USB_TX_EP_MASK << DA8XX_INTR_TX_SHIFT)
-
+#define A_WAIT_BCON_TIMEOUT     1100            /* in ms */
 #define DA8XX_MENTOR_CORE_OFFSET 0x400
 
 #define CFGCHIP2	IO_ADDRESS(DA8XX_SYSCFG0_BASE + DA8XX_CFGCHIP2_REG)
@@ -89,6 +90,7 @@ struct da8xx_glue {
 };
 
 #ifdef CONFIG_USB_TI_CPPI41_DMA
+#define CPPI41_QMGR_REG0SIZE	0x3fff
 /*
  * CPPI 4.1 resources used for USB OTG controller module:
  *
@@ -105,19 +107,8 @@ struct da8xx_glue {
  * ---------------------------------
  */
 
-static const u16 tx_comp_q[] = { 24, 24, 24, 24 };
-static const u16 rx_comp_q[] = { 26, 26, 26, 26 };
-
-struct usb_cppi41_info usb_cppi41_info = {
-	.dma_block	= 0,
-	.ep_dma_ch	= { 0, 1, 2, 3 },
-	.q_mgr		= 0,
-	.num_tx_comp_q	= 2,
-	.num_rx_comp_q	= 2,
-	.tx_comp_q	= tx_comp_q,
-	.rx_comp_q	= rx_comp_q
-};
-EXPORT_SYMBOL(usb_cppi41_info);
+static u16 tx_comp_q[] = { 24, 24, 24, 24 };
+static u16 rx_comp_q[] = { 26, 26, 26, 26 };
 
 /* DMA block configuration */
 static const struct cppi41_tx_ch tx_ch_info[] = {
@@ -144,66 +135,79 @@ static const struct cppi41_tx_ch tx_ch_info[] = {
 };
 
 #define DA8XX_USB0_CFG_BASE IO_ADDRESS(DA8XX_USB0_BASE)
-struct cppi41_dma_block cppi41_dma_block[CPPI41_NUM_DMA_BLOCK] = {
-	[0] = {
-		.global_ctrl_base  = DA8XX_USB0_CFG_BASE + 0x1000,
-		.ch_ctrl_stat_base = DA8XX_USB0_CFG_BASE + 0x1800,
-		.sched_ctrl_base  = DA8XX_USB0_CFG_BASE + 0x2000,
-		.sched_table_base = DA8XX_USB0_CFG_BASE + 0x2800,
-		.num_tx_ch        = 4,
-		.num_rx_ch        = 4,
-		.tx_ch_info       = tx_ch_info
-	}
-};
-EXPORT_SYMBOL(cppi41_dma_block);
 
 /* Queues 0 to 27 are pre-assigned, others are spare */
 static const u32 assigned_queues[] = { 0x0fffffff, 0 };
-
-
-/* Queue manager information */
-struct cppi41_queue_mgr cppi41_queue_mgr[CPPI41_NUM_QUEUE_MGR] = {
-	[0] = {
-		.q_mgr_rgn_base    = DA8XX_USB0_CFG_BASE + 0x4000,
-		.desc_mem_rgn_base = DA8XX_USB0_CFG_BASE + 0x5000,
-		.q_mgmt_rgn_base   = DA8XX_USB0_CFG_BASE + 0x6000,
-		.q_stat_rgn_base   = DA8XX_USB0_CFG_BASE + 0x6800,
-
-		.num_queue       = 64,
-		.queue_types     = CPPI41_FREE_DESC_BUF_QUEUE |
-					CPPI41_UNASSIGNED_QUEUE,
-		.base_fdbq_num    = 0,
-		.assigned       = assigned_queues
-	}
-};
-EXPORT_SYMBOL(cppi41_queue_mgr);
 
 /* Fair scheduling */
 u32 dma_sched_table[] = {
 	0x81018000, 0x83038202,
 };
 
-int cppi41_init(void)
+int __devinit cppi41_init(struct musb *musb)
 {
-	u16 order;
-	u8 q_mgr, dma_num = 0, numch;
+	struct usb_cppi41_info *cppi_info = &usb_cppi41_info[0];
+	u16 numch, blknum, order, i;
 
-	for (q_mgr = 0; q_mgr < CPPI41_NUM_QUEUE_MGR; ++q_mgr) {
-		/* Initialize Queue Manager 0, alloc for region 0 */
-		cppi41_queue_mgr_init(q_mgr, 0,
-				USB_CPPI41_QMGR_REG0_ALLOC_SIZE);
+	/* init cppi info structure  */
+	cppi_info->dma_block = 0;
+	for (i = 0 ; i < USB_CPPI41_NUM_CH ; i++)
+		cppi_info->ep_dma_ch[i] = i;
 
-		numch =  USB_CPPI41_NUM_CH * 2;
-		order = get_count_order(numch);
+	cppi_info->q_mgr = 0;
+	cppi_info->num_tx_comp_q = 2;
+	cppi_info->num_rx_comp_q = 2;
+	cppi_info->tx_comp_q = tx_comp_q;
+	cppi_info->rx_comp_q = rx_comp_q;
+#ifdef CONFIG_USB_TI_CPPI41_IN_TRANSPARENT
+	cppi_info->grndis_for_host_rx  = 0;
+#else
+	cppi_info->grndis_for_host_rx  = 1;
+#endif
+	//cppi_info->bd_intr_ctrl = 0; /* am35x dont support bd interrupt */
 
-		if (order < 5)
-			order = 5;
+	blknum = cppi_info->dma_block;
 
-		cppi41_dma_block_init(dma_num, q_mgr, order,
+	/* Queue manager information */
+	cppi41_queue_mgr[0].num_queue = 64;
+	cppi41_queue_mgr[0].queue_types = CPPI41_FREE_DESC_BUF_QUEUE |
+						CPPI41_UNASSIGNED_QUEUE;
+	cppi41_queue_mgr[0].base_fdbq_num = 0;
+	cppi41_queue_mgr[0].assigned = assigned_queues;
+
+	/* init mappings */
+	cppi41_queue_mgr[0].q_mgr_rgn_base = DA8XX_USB0_CFG_BASE + 0x4000;
+	cppi41_queue_mgr[0].desc_mem_rgn_base = DA8XX_USB0_CFG_BASE + 0x5000;
+	cppi41_queue_mgr[0].q_mgmt_rgn_base = DA8XX_USB0_CFG_BASE + 0x6000;
+	cppi41_queue_mgr[0].q_stat_rgn_base = DA8XX_USB0_CFG_BASE + 0x6800;
+
+	/* init DMA block */
+	cppi41_dma_block[0].num_tx_ch = 4;
+	cppi41_dma_block[0].num_rx_ch = 4;
+	cppi41_dma_block[0].tx_ch_info = tx_ch_info;
+
+	cppi41_dma_block[0].global_ctrl_base = DA8XX_USB0_CFG_BASE + 0x1000;
+	cppi41_dma_block[0].ch_ctrl_stat_base = DA8XX_USB0_CFG_BASE + 0x1800;
+	cppi41_dma_block[0].sched_ctrl_base = DA8XX_USB0_CFG_BASE + 0x2000;
+	cppi41_dma_block[0].sched_table_base = DA8XX_USB0_CFG_BASE + 0x2800;
+
+	/* Initialize for Linking RAM region 0 alone */
+	cppi41_queue_mgr_init(cppi_info->q_mgr, 0,
+			USB_CPPI41_QMGR_REG0_ALLOC_SIZE);
+
+	numch =  USB_CPPI41_NUM_CH * 2;
+	order = get_count_order(numch);
+	cppi41_dma_block[0].num_max_ch = numch;
+
+	/* TODO: check two teardown desc per channel (5 or 7 ?)*/
+	if (order < 5)
+		order = 5;
+
+	cppi41_dma_block_init(blknum, cppi_info->q_mgr, order,
 			dma_sched_table, numch);
-	}
 	return 0;
 }
+
 EXPORT_SYMBOL(cppi41_init);
 #endif /* CONFIG_USB_TI_CPPI41_DMA */
 
@@ -216,23 +220,23 @@ EXPORT_SYMBOL(cppi41_init);
 
 static inline void phy_on(void)
 {
-	u32 cfgchip2 = __raw_readl(CFGCHIP2);
+	u32 cfgchip2 = readl(CFGCHIP2);
 
 	/*
 	 * Start the on-chip PHY and its PLL.
 	 */
 	cfgchip2 &= ~(CFGCHIP2_RESET | CFGCHIP2_PHYPWRDN | CFGCHIP2_OTGPWRDN);
 	cfgchip2 |= CFGCHIP2_PHY_PLLON;
-	__raw_writel(cfgchip2, CFGCHIP2);
+	writel(cfgchip2, CFGCHIP2);
 
 	pr_info("Waiting for USB PHY clock good...\n");
-	while (!(__raw_readl(CFGCHIP2) & CFGCHIP2_PHYCLKGD))
+	while (!(readl(CFGCHIP2) & CFGCHIP2_PHYCLKGD))
 		cpu_relax();
 }
 
 static inline void phy_off(void)
 {
-	u32 cfgchip2 = __raw_readl(CFGCHIP2);
+	u32 cfgchip2 = readl(CFGCHIP2);
 
 	/*
 	 * Ensure that USB 1.1 reference clock is not being sourced from
@@ -249,7 +253,7 @@ static inline void phy_off(void)
 	 * Power down the on-chip PHY.
 	 */
 	cfgchip2 |= CFGCHIP2_PHYPWRDN | CFGCHIP2_OTGPWRDN;
-	__raw_writel(cfgchip2, CFGCHIP2);
+	writel(cfgchip2, CFGCHIP2);
 }
 
 /*
@@ -274,9 +278,10 @@ static void da8xx_musb_enable(struct musb *musb)
 	musb_writel(reg_base, DA8XX_USB_INTR_MASK_SET_REG, mask);
 
 	/* Force the DRVVBUS IRQ so we can start polling for ID change. */
-	if (is_otg_enabled(musb))
+	if (is_otg_enabled(musb)) {
 		musb_writel(reg_base, DA8XX_USB_INTR_SRC_SET_REG,
 			    DA8XX_INTR_DRVVBUS << DA8XX_INTR_USB_SHIFT);
+	}
 }
 
 /**
@@ -293,15 +298,11 @@ static void da8xx_musb_disable(struct musb *musb)
 	musb_writel(reg_base, DA8XX_USB_END_OF_INTR_REG, 0);
 }
 
-#ifdef CONFIG_USB_MUSB_HDRC_HCD
-#define portstate(stmt) 	stmt
-#else
-#define portstate(stmt)
-#endif
+#define portstate(stmt)		stmt
 
 static void da8xx_musb_set_vbus(struct musb *musb, int is_on)
 {
-	WARN_ON(is_on && is_peripheral_active(musb));
+	WARN_ON(is_on && is_peripheral_enabled(musb));
 }
 
 #define	POLL_SECONDS	2
@@ -320,7 +321,8 @@ static void otg_timer(unsigned long _musb)
 	 * status change events (from the transceiver) otherwise.
 	 */
 	devctl = musb_readb(mregs, MUSB_DEVCTL);
-	DBG(7, "Poll devctl %02x (%s)\n", devctl, otg_state_string(musb));
+	dev_dbg(musb->controller, "Poll devctl %02x (%s)\n", devctl,
+		otg_state_string(musb->xceiv->state));
 
 	spin_lock_irqsave(&musb->lock, flags);
 	switch (musb->xceiv->state) {
@@ -394,20 +396,22 @@ static void da8xx_musb_try_idle(struct musb *musb, unsigned long timeout)
 	/* Never idle if active, or when VBUS timeout is not set as host */
 	if (musb->is_active || (musb->a_wait_bcon == 0 &&
 				musb->xceiv->state == OTG_STATE_A_WAIT_BCON)) {
-		DBG(4, "%s active, deleting timer\n", otg_state_string(musb));
+		dev_dbg(musb->controller, "%s active, deleting timer\n",
+			otg_state_string(musb->xceiv->state));
 		del_timer(&otg_workaround);
 		last_timer = jiffies;
 		return;
 	}
 
 	if (time_after(last_timer, timeout) && timer_pending(&otg_workaround)) {
-		DBG(4, "Longer idle timer already pending, ignoring...\n");
+		dev_dbg(musb->controller, "Longer idle timer already pending, ignoring...\n");
 		return;
 	}
 	last_timer = timeout;
 
-	DBG(4, "%s inactive, starting idle timer for %u ms\n",
-	    otg_state_string(musb), jiffies_to_msecs(timeout - jiffies));
+	dev_dbg(musb->controller, "%s inactive, starting idle timer for %u ms\n",
+		otg_state_string(musb->xceiv->state),
+		jiffies_to_msecs(timeout - jiffies));
 	mod_timer(&otg_workaround, timeout);
 }
 
@@ -436,7 +440,7 @@ static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 			u32 tx = (pend0 >> 24) & 0x3;
 			u32 rx = (pend0 >> 26) & 0x3;
 
-			DBG(4, "CPPI 4.1 IRQ: Tx %x, Rx %x\n", tx, rx);
+			pr_debug("CPPI 4.1 IRQ: Tx %x, Rx %x\n", tx, rx);
 			cppi41_completion(musb, rx, tx);
 			ret = IRQ_HANDLED;
 		}
@@ -453,7 +457,7 @@ static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 		goto eoi;
 
 	musb_writel(reg_base, DA8XX_USB_INTR_SRC_CLEAR_REG, status);
-	DBG(4, "USB IRQ %08x\n", status);
+	dev_dbg(musb->controller, "USB IRQ %08x\n", status);
 
 	musb->int_rx = (status & DA8XX_INTR_RX_MASK) >> DA8XX_INTR_RX_SHIFT;
 	musb->int_tx = (status & DA8XX_INTR_TX_MASK) >> DA8XX_INTR_TX_SHIFT;
@@ -492,6 +496,7 @@ static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 			mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
 			WARNING("VBUS error workaround (delay coming)\n");
 		} else if (is_host_enabled(musb) && drvvbus) {
+			musb->is_active = 1;
 			MUSB_HST_MODE(musb);
 			musb->xceiv->default_a = 1;
 			musb->xceiv->state = OTG_STATE_A_WAIT_VRISE;
@@ -505,9 +510,9 @@ static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 			portstate(musb->port1_status &= ~USB_PORT_STAT_POWER);
 		}
 
-		DBG(2, "VBUS %s (%s)%s, devctl %02x\n",
+		dev_dbg(musb->controller, "VBUS %s (%s)%s, devctl %02x\n",
 				drvvbus ? "on" : "off",
-				otg_state_string(musb),
+				otg_state_string(musb->xceiv->state),
 				err ? " ERROR" : "",
 				devctl);
 		ret = IRQ_HANDLED;
@@ -532,34 +537,28 @@ static irqreturn_t da8xx_musb_interrupt(int irq, void *hci)
 
 static int da8xx_musb_set_mode(struct musb *musb, u8 musb_mode)
 {
-	u32 cfgchip2 = __raw_readl(CFGCHIP2);
+	u32 cfgchip2 = readl(CFGCHIP2);
 
 	cfgchip2 &= ~CFGCHIP2_OTGMODE;
 	switch (musb_mode) {
-#ifdef	CONFIG_USB_MUSB_HDRC_HCD
 	case MUSB_HOST:		/* Force VBUS valid, ID = 0 */
 		cfgchip2 |= CFGCHIP2_FORCE_HOST;
 		break;
-#endif
-#ifdef	CONFIG_USB_GADGET_MUSB_HDRC
 	case MUSB_PERIPHERAL:	/* Force VBUS valid, ID = 1 */
 		cfgchip2 |= CFGCHIP2_FORCE_DEVICE;
 		break;
-#endif
-#ifdef	CONFIG_USB_MUSB_OTG
 	case MUSB_OTG:		/* Don't override the VBUS/ID comparators */
 		cfgchip2 |= CFGCHIP2_NO_OVERRIDE;
 		break;
-#endif
 	default:
-		DBG(2, "Trying to set unsupported mode %u\n", musb_mode);
+		dev_dbg(musb->controller, "Trying to set unsupported mode %u\n", musb_mode);
 	}
 
-	__raw_writel(cfgchip2, CFGCHIP2);
+	writel(cfgchip2, CFGCHIP2);
 	return 0;
 }
 
-static int da8xx_musb_init(struct musb *musb)
+static int __devinit da8xx_musb_init(struct musb *musb)
 {
 	void __iomem *reg_base = musb->ctrl_base;
 	u32 rev;
@@ -571,10 +570,12 @@ static int da8xx_musb_init(struct musb *musb)
 	if (!rev)
 		goto fail;
 
-	usb_nop_xceiv_register();
-	musb->xceiv = otg_get_transceiver();
+	usb_nop_xceiv_register(0);
+	musb->xceiv = otg_get_transceiver(0);
 	if (!musb->xceiv)
 		goto fail;
+
+        pr_info("MUSB%d controller's USBSS revision = %08x\n", musb->id, rev);
 
 	if (is_host_enabled(musb))
 		setup_timer(&otg_workaround, otg_timer, (unsigned long)musb);
@@ -588,19 +589,36 @@ static int da8xx_musb_init(struct musb *musb)
 	msleep(5);
 
 #ifdef CONFIG_USB_TI_CPPI41_DMA
-	cppi41_init();
+	cppi41_init(musb);
 #endif
 
 	/* NOTE: IRQs are in mixed mode, not bypass to pure MUSB */
 	pr_debug("DA8xx OTG revision %08x, PHY %03x, control %02x\n",
-		 rev, __raw_readl(CFGCHIP2),
+		 rev, readl(CFGCHIP2),
 		 musb_readb(reg_base, DA8XX_USB_CTRL_REG));
 
+	musb->a_wait_bcon = A_WAIT_BCON_TIMEOUT;
 	musb->isr = da8xx_musb_interrupt;
 	return 0;
 fail:
 	return -ENODEV;
 }
+
+#ifdef CONFIG_USB_TI_CPPI41_DMA
+void cppi41_free(void)
+{
+	u32 numch, blknum, order;
+	struct usb_cppi41_info *cppi_info = &usb_cppi41_info[0];
+
+	numch =  USB_CPPI41_NUM_CH * 2;
+	order = get_count_order(numch);
+	blknum = cppi_info->dma_block;
+
+	cppi41_dma_block_uninit(blknum, cppi_info->q_mgr, order,
+			dma_sched_table, numch);
+	cppi41_queue_mgr_uninit(cppi_info->q_mgr);
+}
+#endif
 
 static int da8xx_musb_exit(struct musb *musb)
 {
@@ -610,10 +628,10 @@ static int da8xx_musb_exit(struct musb *musb)
 	phy_off();
 
 	otg_put_transceiver(musb->xceiv);
-	usb_nop_xceiv_unregister();
+	usb_nop_xceiv_unregister(0);
 
 #ifdef CONFIG_USB_TI_CPPI41_DMA
-	cppi41_exit();
+	cppi41_free();
 #endif
 	return 0;
 }
@@ -688,6 +706,8 @@ static int __init da8xx_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, glue);
 
+	pdev->resource->parent = NULL;
+
 	ret = platform_device_add_resources(musb, pdev->resource,
 			pdev->num_resources);
 	if (ret) {
@@ -730,7 +750,7 @@ static int __exit da8xx_remove(struct platform_device *pdev)
 	struct da8xx_glue		*glue = platform_get_drvdata(pdev);
 
 	platform_device_del(glue->musb);
-	platform_device_put(glue->musb);
+	/*platform_device_put(glue->musb);*/
 	clk_disable(glue->clk);
 	clk_put(glue->clk);
 	kfree(glue);

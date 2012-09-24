@@ -58,11 +58,13 @@ enum port_dev_state {
  * @read_urb: pointer to the bulk in struct urb for this port.
  * @bulk_in_endpointAddress: endpoint address for the bulk in pipe for this
  *	port.
+ * @bulk_in_buffers: pointers to the bulk in buffers for this port
+ * @read_urbs: pointers to the bulk in urbs for this port
+ * @read_urbs_free: status bitmap the for bulk in urbs
  * @bulk_out_buffer: pointer to the bulk out buffer for this port.
  * @bulk_out_size: the size of the bulk_out_buffer, in bytes.
  * @write_urb: pointer to the bulk out struct urb for this port.
  * @write_fifo: kfifo used to buffer outgoing data
- * @write_urb_busy: port`s writing status
  * @bulk_out_buffers: pointers to the bulk out buffers for this port
  * @write_urbs: pointers to the bulk out urbs for this port
  * @write_urbs_free: status bitmap the for bulk out urbs
@@ -99,11 +101,14 @@ struct usb_serial_port {
 	struct urb		*read_urb;
 	__u8			bulk_in_endpointAddress;
 
+	unsigned char		*bulk_in_buffers[2];
+	struct urb		*read_urbs[2];
+	unsigned long		read_urbs_free;
+
 	unsigned char		*bulk_out_buffer;
 	int			bulk_out_size;
 	struct urb		*write_urb;
 	struct kfifo		write_fifo;
-	int			write_urb_busy;
 
 	unsigned char		*bulk_out_buffers[2];
 	struct urb		*write_urbs[2];
@@ -191,7 +196,8 @@ static inline void usb_set_serial_data(struct usb_serial *serial, void *data)
  * @id_table: pointer to a list of usb_device_id structures that define all
  *	of the devices this structure can support.
  * @num_ports: the number of different ports this device will have.
- * @bulk_in_size: bytes to allocate for bulk-in buffer (0 = end-point size)
+ * @bulk_in_size: minimum number of bytes to allocate for bulk-in buffer
+ *	(0 = end-point size)
  * @bulk_out_size: bytes to allocate for bulk-out buffer (0 = end-point size)
  * @calc_num_ports: pointer to a function to determine how many ports this
  *	device has dynamically.  It will be called after the probe()
@@ -260,7 +266,7 @@ struct usb_serial_driver {
 			const unsigned char *buf, int count);
 	/* Called only by the tty layer */
 	int  (*write_room)(struct tty_struct *tty);
-	int  (*ioctl)(struct tty_struct *tty, struct file *file,
+	int  (*ioctl)(struct tty_struct *tty,
 		      unsigned int cmd, unsigned long arg);
 	void (*set_termios)(struct tty_struct *tty,
 			struct usb_serial_port *port, struct ktermios *old);
@@ -268,8 +274,8 @@ struct usb_serial_driver {
 	int  (*chars_in_buffer)(struct tty_struct *tty);
 	void (*throttle)(struct tty_struct *tty);
 	void (*unthrottle)(struct tty_struct *tty);
-	int  (*tiocmget)(struct tty_struct *tty, struct file *file);
-	int  (*tiocmset)(struct tty_struct *tty, struct file *file,
+	int  (*tiocmget)(struct tty_struct *tty);
+	int  (*tiocmset)(struct tty_struct *tty,
 			 unsigned int set, unsigned int clear);
 	int  (*get_icount)(struct tty_struct *tty,
 			struct serial_icounter_struct *icount);
@@ -339,7 +345,7 @@ extern void usb_serial_generic_disconnect(struct usb_serial *serial);
 extern void usb_serial_generic_release(struct usb_serial *serial);
 extern int usb_serial_generic_register(int debug);
 extern void usb_serial_generic_deregister(void);
-extern int usb_serial_generic_submit_read_urb(struct usb_serial_port *port,
+extern int usb_serial_generic_submit_read_urbs(struct usb_serial_port *port,
 						 gfp_t mem_flags);
 extern void usb_serial_generic_process_read_urb(struct urb *urb);
 extern int usb_serial_generic_prepare_write_buffer(struct usb_serial_port *port,
@@ -347,6 +353,9 @@ extern int usb_serial_generic_prepare_write_buffer(struct usb_serial_port *port,
 extern int usb_serial_handle_sysrq_char(struct usb_serial_port *port,
 					unsigned int ch);
 extern int usb_serial_handle_break(struct usb_serial_port *port);
+extern void usb_serial_handle_dcd_change(struct usb_serial_port *usb_port,
+					 struct tty_struct *tty,
+					 unsigned int status);
 
 
 extern int usb_serial_bus_register(struct usb_serial_driver *device);

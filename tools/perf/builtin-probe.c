@@ -20,7 +20,6 @@
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
  *
  */
-#define _GNU_SOURCE
 #include <sys/utsname.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -31,11 +30,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#undef _GNU_SOURCE
 #include "perf.h"
 #include "builtin.h"
 #include "util/util.h"
 #include "util/strlist.h"
+#include "util/strfilter.h"
 #include "util/symbol.h"
 #include "util/debug.h"
 #include "util/debugfs.h"
@@ -43,7 +42,8 @@
 #include "util/probe-finder.h"
 #include "util/probe-event.h"
 
-#define MAX_PATH_LEN 256
+#define DEFAULT_VAR_FILTER "!__k???tab_* & !__crc_*"
+#define DEFAULT_FUNC_FILTER "!_*"
 
 /* Session management structure */
 static struct {
@@ -52,6 +52,7 @@ static struct {
 	bool show_lines;
 	bool show_vars;
 	bool show_ext_vars;
+	bool show_funcs;
 	bool mod_events;
 	int nevents;
 	struct perf_probe_event events[MAX_PROBES];
@@ -59,6 +60,7 @@ static struct {
 	struct line_range line_range;
 	const char *target_module;
 	int max_probe_points;
+	struct strfilter *filter;
 } params;
 
 /* Parse an event definition. Note that any error must die. */
@@ -129,10 +131,18 @@ static int opt_show_lines(const struct option *opt __used,
 {
 	int ret = 0;
 
-	if (str)
-		ret = parse_line_range_desc(str, &params.line_range);
-	INIT_LIST_HEAD(&params.line_range.line_list);
+	if (!str)
+		return 0;
+
+	if (params.show_lines) {
+		pr_warning("Warning: more than one --line options are"
+			   " detected. Only the first one is valid.\n");
+		return 0;
+	}
+
 	params.show_lines = true;
+	ret = parse_line_range_desc(str, &params.line_range);
+	INIT_LIST_HEAD(&params.line_range.line_list);
 
 	return ret;
 }
@@ -156,6 +166,27 @@ static int opt_show_vars(const struct option *opt __used,
 	return ret;
 }
 #endif
+
+static int opt_set_filter(const struct option *opt __used,
+			  const char *str, int unset __used)
+{
+	const char *err;
+
+	if (str) {
+		pr_debug2("Set filter: %s\n", str);
+		if (params.filter)
+			strfilter__delete(params.filter);
+		params.filter = strfilter__new(str, &err);
+		if (!params.filter) {
+			pr_err("Filter parse error at %td.\n", err - str + 1);
+			pr_err("Source: \"%s\"\n", str);
+			pr_err("         %*c\n", (int)(err - str + 1), '^');
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
 
 static const char * const probe_usage[] = {
 	"perf probe [<options>] 'PROBEDEF' ['PROBEDEF' ...]",
@@ -216,11 +247,19 @@ static const struct option options[] = {
 	OPT_STRING('s', "source", &symbol_conf.source_prefix,
 		   "directory", "path to kernel source"),
 	OPT_STRING('m', "module", &params.target_module,
-		   "modname", "target module name"),
+		   "modname|path",
+		   "target module name (for online) or path (for offline)"),
 #endif
 	OPT__DRY_RUN(&probe_event_dry_run),
 	OPT_INTEGER('\0', "max-probes", &params.max_probe_points,
 		 "Set how many probe points can be found for a probe."),
+	OPT_BOOLEAN('F', "funcs", &params.show_funcs,
+		    "Show potential probe-able functions."),
+	OPT_CALLBACK('\0', "filter", NULL,
+		     "[!]FILTER", "Set a filter (with --vars/funcs only)\n"
+		     "\t\t\t(default: \"" DEFAULT_VAR_FILTER "\" for --vars,\n"
+		     "\t\t\t \"" DEFAULT_FUNC_FILTER "\" for --funcs)",
+		     opt_set_filter),
 	OPT_END()
 };
 
@@ -246,7 +285,7 @@ int cmd_probe(int argc, const char **argv, const char *prefix __used)
 		params.max_probe_points = MAX_PROBES;
 
 	if ((!params.nevents && !params.dellist && !params.list_events &&
-	     !params.show_lines))
+	     !params.show_lines && !params.show_funcs))
 		usage_with_options(probe_usage, options);
 
 	/*
@@ -267,10 +306,39 @@ int cmd_probe(int argc, const char **argv, const char *prefix __used)
 			pr_err(" Error: Don't use --list with --vars.\n");
 			usage_with_options(probe_usage, options);
 		}
+		if (params.show_funcs) {
+			pr_err("  Error: Don't use --list with --funcs.\n");
+			usage_with_options(probe_usage, options);
+		}
 		ret = show_perf_probe_events();
 		if (ret < 0)
 			pr_err("  Error: Failed to show event list. (%d)\n",
 			       ret);
+		return ret;
+	}
+	if (params.show_funcs) {
+		if (params.nevents != 0 || params.dellist) {
+			pr_err("  Error: Don't use --funcs with"
+			       " --add/--del.\n");
+			usage_with_options(probe_usage, options);
+		}
+		if (params.show_lines) {
+			pr_err("  Error: Don't use --funcs with --line.\n");
+			usage_with_options(probe_usage, options);
+		}
+		if (params.show_vars) {
+			pr_err("  Error: Don't use --funcs with --vars.\n");
+			usage_with_options(probe_usage, options);
+		}
+		if (!params.filter)
+			params.filter = strfilter__new(DEFAULT_FUNC_FILTER,
+						       NULL);
+		ret = show_available_funcs(params.target_module,
+					   params.filter);
+		strfilter__delete(params.filter);
+		if (ret < 0)
+			pr_err("  Error: Failed to show functions."
+			       " (%d)\n", ret);
 		return ret;
 	}
 
@@ -297,10 +365,16 @@ int cmd_probe(int argc, const char **argv, const char *prefix __used)
 			       " --add/--del.\n");
 			usage_with_options(probe_usage, options);
 		}
+		if (!params.filter)
+			params.filter = strfilter__new(DEFAULT_VAR_FILTER,
+						       NULL);
+
 		ret = show_available_vars(params.events, params.nevents,
 					  params.max_probe_points,
 					  params.target_module,
+					  params.filter,
 					  params.show_ext_vars);
+		strfilter__delete(params.filter);
 		if (ret < 0)
 			pr_err("  Error: Failed to show vars. (%d)\n", ret);
 		return ret;

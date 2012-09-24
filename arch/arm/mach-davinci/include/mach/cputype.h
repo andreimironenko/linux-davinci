@@ -4,7 +4,7 @@
  * Author: Kevin Hilman, Deep Root Systems, LLC
  *
  * Defines the cpu_is_*() macros for runtime detection of DaVinci
- * device type.  In addtion, if support for a given device is not
+ * device type.  In addition, if support for a given device is not
  * compiled in to the kernel, the macros return 0 so that
  * resulting code can be optimized out.
  *
@@ -95,6 +95,9 @@ IS_DAVINCI_CPU_CPLD_VER(dm368, DAVINCI_CPU_ID_DM365, 0x21)
 #else
 #define cpu_is_davinci_da850() 0
 #endif
+
+#define cpu_is_davinci_da8xx() (cpu_is_davinci_da850() || \
+					cpu_is_davinci_da830())
 
 #ifdef CONFIG_ARCH_DAVINCI_TNETV107X
 #define cpu_is_davinci_tnetv107x() is_davinci_tnetv107x()

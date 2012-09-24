@@ -13,6 +13,7 @@
 #include <linux/bio.h>
 #include <linux/slab.h>
 #include <linux/blkdev.h>
+#include <linux/module.h>
 #include <linux/mtd/mtd.h>
 #include <linux/statfs.h>
 #include <linux/buffer_head.h>
@@ -88,28 +89,6 @@ static void dump_segfile(struct super_block *sb)
 void logfs_crash_dump(struct super_block *sb)
 {
 	dump_segfile(sb);
-}
-
-/*
- * TODO: move to lib/string.c
- */
-/**
- * memchr_inv - Find a character in an area of memory.
- * @s: The memory area
- * @c: The byte to search for
- * @n: The size of the area.
- *
- * returns the address of the first character other than @c, or %NULL
- * if the whole buffer contains just @c.
- */
-void *memchr_inv(const void *s, int c, size_t n)
-{
-	const unsigned char *p = s;
-	while (n-- != 0)
-		if ((unsigned char)c != *p++)
-			return (void *)(p - 1);
-
-	return NULL;
 }
 
 /*
@@ -480,10 +459,6 @@ static int logfs_read_sb(struct super_block *sb, int read_only)
 			!read_only)
 		return -EIO;
 
-	mutex_init(&super->s_dirop_mutex);
-	mutex_init(&super->s_object_alias_mutex);
-	INIT_LIST_HEAD(&super->s_freeing_list);
-
 	ret = logfs_init_rw(sb);
 	if (ret)
 		return ret;
@@ -511,14 +486,15 @@ static void logfs_kill_sb(struct super_block *sb)
 	/* Alias entries slow down mount, so evict as many as possible */
 	sync_filesystem(sb);
 	logfs_write_anchor(sb);
+	free_areas(sb);
 
 	/*
 	 * From this point on alias entries are simply dropped - and any
 	 * writes to the object store are considered bugs.
 	 */
-	super->s_flags |= LOGFS_SB_FLAG_SHUTDOWN;
 	log_super("LogFS: Now in shutdown\n");
 	generic_shutdown_super(sb);
+	super->s_flags |= LOGFS_SB_FLAG_SHUTDOWN;
 
 	BUG_ON(super->s_dirty_used_bytes || super->s_dirty_free_bytes);
 
@@ -600,6 +576,10 @@ static struct dentry *logfs_mount(struct file_system_type *type, int flags,
 	super = kzalloc(sizeof(*super), GFP_KERNEL);
 	if (!super)
 		return ERR_PTR(-ENOMEM);
+
+	mutex_init(&super->s_dirop_mutex);
+	mutex_init(&super->s_object_alias_mutex);
+	INIT_LIST_HEAD(&super->s_freeing_list);
 
 	if (!devname)
 		err = logfs_get_sb_bdev(super, type, devname);

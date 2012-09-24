@@ -296,25 +296,25 @@ static struct pci_port_ops dino_port_ops = {
 	.outl	= dino_out32
 };
 
-static void dino_mask_irq(unsigned int irq)
+static void dino_mask_irq(struct irq_data *d)
 {
-	struct dino_device *dino_dev = get_irq_chip_data(irq);
-	int local_irq = gsc_find_local_irq(irq, dino_dev->global_irq, DINO_LOCAL_IRQS);
+	struct dino_device *dino_dev = irq_data_get_irq_chip_data(d);
+	int local_irq = gsc_find_local_irq(d->irq, dino_dev->global_irq, DINO_LOCAL_IRQS);
 
-	DBG(KERN_WARNING "%s(0x%p, %d)\n", __func__, dino_dev, irq);
+	DBG(KERN_WARNING "%s(0x%p, %d)\n", __func__, dino_dev, d->irq);
 
 	/* Clear the matching bit in the IMR register */
 	dino_dev->imr &= ~(DINO_MASK_IRQ(local_irq));
 	__raw_writel(dino_dev->imr, dino_dev->hba.base_addr+DINO_IMR);
 }
 
-static void dino_unmask_irq(unsigned int irq)
+static void dino_unmask_irq(struct irq_data *d)
 {
-	struct dino_device *dino_dev = get_irq_chip_data(irq);
-	int local_irq = gsc_find_local_irq(irq, dino_dev->global_irq, DINO_LOCAL_IRQS);
+	struct dino_device *dino_dev = irq_data_get_irq_chip_data(d);
+	int local_irq = gsc_find_local_irq(d->irq, dino_dev->global_irq, DINO_LOCAL_IRQS);
 	u32 tmp;
 
-	DBG(KERN_WARNING "%s(0x%p, %d)\n", __func__, dino_dev, irq);
+	DBG(KERN_WARNING "%s(0x%p, %d)\n", __func__, dino_dev, d->irq);
 
 	/*
 	** clear pending IRQ bits
@@ -346,9 +346,9 @@ static void dino_unmask_irq(unsigned int irq)
 }
 
 static struct irq_chip dino_interrupt_type = {
-	.name	= "GSC-PCI",
-	.unmask	= dino_unmask_irq,
-	.mask	= dino_mask_irq,
+	.name		= "GSC-PCI",
+	.irq_unmask	= dino_unmask_irq,
+	.irq_mask	= dino_mask_irq,
 };
 
 
@@ -562,19 +562,6 @@ dino_fixup_bus(struct pci_bus *bus)
 	/* Firmware doesn't set up card-mode dino, so we have to */
 	if (is_card_dino(&dino_dev->hba.dev->id)) {
 		dino_card_setup(bus, dino_dev->hba.base_addr);
-	} else if(bus->parent == NULL) {
-		/* must have a dino above it, reparent the resources
-		 * into the dino window */
-		int i;
-		struct resource *res = &dino_dev->hba.lmmio_space;
-
-		bus->resource[0] = &(dino_dev->hba.io_space);
-		for(i = 0; i < DINO_MAX_LMMIO_RESOURCES; i++) {
-			if(res[i].flags == 0)
-				break;
-			bus->resource[i+1] = &res[i];
-		}
-
 	} else if (bus->parent) {
 		int i;
 
@@ -927,6 +914,7 @@ static int __init dino_probe(struct parisc_device *dev)
 	const char *version = "unknown";
 	char *name;
 	int is_cujo = 0;
+	LIST_HEAD(resources);
 	struct pci_bus *bus;
 	unsigned long hpa = dev->hpa.start;
 
@@ -1003,26 +991,37 @@ static int __init dino_probe(struct parisc_device *dev)
 
 	dev->dev.platform_data = dino_dev;
 
+	pci_add_resource(&resources, &dino_dev->hba.io_space);
+	if (dino_dev->hba.lmmio_space.flags)
+		pci_add_resource(&resources, &dino_dev->hba.lmmio_space);
+	if (dino_dev->hba.elmmio_space.flags)
+		pci_add_resource(&resources, &dino_dev->hba.elmmio_space);
+	if (dino_dev->hba.gmmio_space.flags)
+		pci_add_resource(&resources, &dino_dev->hba.gmmio_space);
+
 	/*
 	** It's not used to avoid chicken/egg problems
 	** with configuration accessor functions.
 	*/
-	dino_dev->hba.hba_bus = bus = pci_scan_bus_parented(&dev->dev,
-			 dino_current_bus, &dino_cfg_ops, NULL);
-
-	if(bus) {
-		/* This code *depends* on scanning being single threaded
-		 * if it isn't, this global bus number count will fail
-		 */
-		dino_current_bus = bus->subordinate + 1;
-		pci_bus_assign_resources(bus);
-		pci_bus_add_devices(bus);
-	} else {
+	dino_dev->hba.hba_bus = bus = pci_create_root_bus(&dev->dev,
+			 dino_current_bus, &dino_cfg_ops, NULL, &resources);
+	if (!bus) {
 		printk(KERN_ERR "ERROR: failed to scan PCI bus on %s (duplicate bus number %d?)\n",
 		       dev_name(&dev->dev), dino_current_bus);
+		pci_free_resource_list(&resources);
 		/* increment the bus number in case of duplicates */
 		dino_current_bus++;
+		return 0;
 	}
+
+	bus->subordinate = pci_scan_child_bus(bus);
+
+	/* This code *depends* on scanning being single threaded
+	 * if it isn't, this global bus number count will fail
+	 */
+	dino_current_bus = bus->subordinate + 1;
+	pci_bus_assign_resources(bus);
+	pci_bus_add_devices(bus);
 	return 0;
 }
 

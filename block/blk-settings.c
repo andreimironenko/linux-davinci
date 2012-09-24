@@ -104,9 +104,7 @@ EXPORT_SYMBOL_GPL(blk_queue_lld_busy);
  * @lim:  the queue_limits structure to reset
  *
  * Description:
- *   Returns a queue_limit struct to its default state.  Can be used by
- *   stacking drivers like DM that stage table swaps and reuse an
- *   existing device queue.
+ *   Returns a queue_limit struct to its default state.
  */
 void blk_set_default_limits(struct queue_limits *lim)
 {
@@ -114,13 +112,12 @@ void blk_set_default_limits(struct queue_limits *lim)
 	lim->max_integrity_segments = 0;
 	lim->seg_boundary_mask = BLK_SEG_BOUNDARY_MASK;
 	lim->max_segment_size = BLK_MAX_SEGMENT_SIZE;
-	lim->max_sectors = BLK_DEF_MAX_SECTORS;
-	lim->max_hw_sectors = INT_MAX;
+	lim->max_sectors = lim->max_hw_sectors = BLK_SAFE_MAX_SECTORS;
 	lim->max_discard_sectors = 0;
 	lim->discard_granularity = 0;
 	lim->discard_alignment = 0;
 	lim->discard_misaligned = 0;
-	lim->discard_zeroes_data = -1;
+	lim->discard_zeroes_data = 0;
 	lim->logical_block_size = lim->physical_block_size = lim->io_min = 512;
 	lim->bounce_pfn = (unsigned long)(BLK_BOUNCE_ANY >> PAGE_SHIFT);
 	lim->alignment_offset = 0;
@@ -129,6 +126,27 @@ void blk_set_default_limits(struct queue_limits *lim)
 	lim->cluster = 1;
 }
 EXPORT_SYMBOL(blk_set_default_limits);
+
+/**
+ * blk_set_stacking_limits - set default limits for stacking devices
+ * @lim:  the queue_limits structure to reset
+ *
+ * Description:
+ *   Returns a queue_limit struct to its default state. Should be used
+ *   by stacking drivers like DM that have no internal limits.
+ */
+void blk_set_stacking_limits(struct queue_limits *lim)
+{
+	blk_set_default_limits(lim);
+
+	/* Inherit limits from component devices */
+	lim->discard_zeroes_data = 1;
+	lim->max_segments = USHRT_MAX;
+	lim->max_hw_sectors = UINT_MAX;
+
+	lim->max_sectors = BLK_DEF_MAX_SECTORS;
+}
+EXPORT_SYMBOL(blk_set_stacking_limits);
 
 /**
  * blk_queue_make_request - define an alternate make_request function for a device
@@ -164,23 +182,7 @@ void blk_queue_make_request(struct request_queue *q, make_request_fn *mfn)
 	blk_queue_congestion_threshold(q);
 	q->nr_batching = BLK_BATCH_REQ;
 
-	q->unplug_thresh = 4;		/* hmm */
-	q->unplug_delay = msecs_to_jiffies(3);	/* 3 milliseconds */
-	if (q->unplug_delay == 0)
-		q->unplug_delay = 1;
-
-	q->unplug_timer.function = blk_unplug_timeout;
-	q->unplug_timer.data = (unsigned long)q;
-
 	blk_set_default_limits(&q->limits);
-	blk_queue_max_hw_sectors(q, BLK_SAFE_MAX_SECTORS);
-
-	/*
-	 * If the caller didn't supply a lock, fall back to our embedded
-	 * per-queue locks
-	 */
-	if (!q->queue_lock)
-		q->queue_lock = &q->__queue_lock;
 
 	/*
 	 * by default assume old behaviour and bounce for any highmem page
@@ -804,6 +806,12 @@ void blk_queue_flush(struct request_queue *q, unsigned int flush)
 	q->flush_flags = flush & (REQ_FLUSH | REQ_FUA);
 }
 EXPORT_SYMBOL_GPL(blk_queue_flush);
+
+void blk_queue_flush_queueable(struct request_queue *q, bool queueable)
+{
+	q->flush_not_queueable = !queueable;
+}
+EXPORT_SYMBOL_GPL(blk_queue_flush_queueable);
 
 static int __init blk_settings_init(void)
 {

@@ -54,7 +54,6 @@
 
 /* This really should be 8, but not for our firmware */
 #define MAX_SUPPORTED_RATES 32
-#define COUNTRY_STRING_LEN 3
 #define MAX_COUNTRY_TRIPLETS 32
 
 /* Headers */
@@ -77,7 +76,7 @@ struct wl12xx_ie_header {
 
 struct wl12xx_ie_ssid {
 	struct wl12xx_ie_header header;
-	char ssid[IW_ESSID_MAX_SIZE];
+	char ssid[IEEE80211_MAX_SSID_LEN];
 } __packed;
 
 struct wl12xx_ie_rates {
@@ -98,7 +97,7 @@ struct country_triplet {
 
 struct wl12xx_ie_country {
 	struct wl12xx_ie_header header;
-	u8 country_string[COUNTRY_STRING_LEN];
+	u8 country_string[IEEE80211_COUNTRY_STRING_LEN];
 	struct country_triplet triplets[MAX_COUNTRY_TRIPLETS];
 } __packed;
 

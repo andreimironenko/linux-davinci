@@ -23,13 +23,13 @@
 #include <linux/phy.h>
 #include <linux/clk.h>
 #include <linux/videodev2.h>
+#include <linux/export.h>
 
 #include <media/tvp514x.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 
-#include <mach/dm644x.h>
 #include <mach/common.h>
 #include <mach/i2c.h>
 #include <mach/serial.h>
@@ -37,67 +37,29 @@
 #include <mach/nand.h>
 #include <mach/mmc.h>
 #include <mach/usb.h>
-#include <mach/aemif.h>
+#include <linux/mfd/davinci_aemif.h>
 
-#define DM644X_EVM_PHY_ID		"0:01"
+#include "davinci.h"
+
+#define DM644X_EVM_PHY_ID		"davinci_mdio-0:01"
 #define LXT971_PHY_ID	(0x001378e2)
 #define LXT971_PHY_MASK	(0xfffffff0)
 
-static struct mtd_partition davinci_evm_norflash_partitions[] = {
-	/* bootloader (UBL, U-Boot, etc) in first 5 sectors */
-	{
-		.name		= "bootloader",
-		.offset		= 0,
-		.size		= 5 * SZ_64K,
-		.mask_flags	= MTD_WRITEABLE, /* force read-only */
-	},
-	/* bootloader params in the next 1 sectors */
-	{
-		.name		= "params",
-		.offset		= MTDPART_OFS_APPEND,
-		.size		= SZ_64K,
-		.mask_flags	= 0,
-	},
-	/* kernel */
-	{
-		.name		= "kernel",
-		.offset		= MTDPART_OFS_APPEND,
-		.size		= SZ_2M,
-		.mask_flags	= 0
-	},
-	/* file system */
-	{
-		.name		= "filesystem",
-		.offset		= MTDPART_OFS_APPEND,
-		.size		= MTDPART_SIZ_FULL,
-		.mask_flags	= 0
-	}
-};
+#if defined(CONFIG_MTD_PHYSMAP) || \
+	defined(CONFIG_MTD_PHYSMAP_MODULE)
+#define HAS_NOR 1
+#else
+#define HAS_NOR 0
+#endif
 
-static struct physmap_flash_data davinci_evm_norflash_data = {
-	.width		= 2,
-	.parts		= davinci_evm_norflash_partitions,
-	.nr_parts	= ARRAY_SIZE(davinci_evm_norflash_partitions),
-};
+#if defined(CONFIG_MTD_NAND_DAVINCI) || \
+	defined(CONFIG_MTD_NAND_DAVINCI_MODULE)
+#define HAS_NAND 1
+#else
+#define HAS_NAND 0
+#endif
 
-/* NOTE: CFI probe will correctly detect flash part as 32M, but EMIF
- * limits addresses to 16M, so using addresses past 16M will wrap */
-static struct resource davinci_evm_norflash_resource = {
-	.start		= DM644X_ASYNC_EMIF_DATA_CE0_BASE,
-	.end		= DM644X_ASYNC_EMIF_DATA_CE0_BASE + SZ_16M - 1,
-	.flags		= IORESOURCE_MEM,
-};
-
-static struct platform_device davinci_evm_norflash_device = {
-	.name		= "physmap-flash",
-	.id		= 0,
-	.dev		= {
-		.platform_data	= &davinci_evm_norflash_data,
-	},
-	.num_resources	= 1,
-	.resource	= &davinci_evm_norflash_resource,
-};
-
+#if (HAS_NAND == 1)
 /* DM644x EVM includes a 64 MByte small-page NAND flash (16K blocks).
  * It may used instead of the (default) NOR chip to boot, using TI's
  * tools to install the secondary boot loader (UBL) and U-Boot.
@@ -150,7 +112,7 @@ static struct davinci_nand_pdata davinci_evm_nandflash_data = {
 	.parts		= davinci_evm_nandflash_partition,
 	.nr_parts	= ARRAY_SIZE(davinci_evm_nandflash_partition),
 	.ecc_mode	= NAND_ECC_HW,
-	.options	= NAND_USE_FLASH_BBT,
+	.bbt_options	= NAND_BBT_USE_FLASH,
 	.timing		= &davinci_evm_nandflash_timing,
 };
 
@@ -165,15 +127,79 @@ static struct resource davinci_evm_nandflash_resource[] = {
 		.flags		= IORESOURCE_MEM,
 	},
 };
-
-static struct platform_device davinci_evm_nandflash_device = {
-	.name		= "davinci_nand",
-	.id		= 0,
-	.dev		= {
-		.platform_data	= &davinci_evm_nandflash_data,
+#elif (HAS_NOR == 1)
+static struct mtd_partition davinci_evm_norflash_partitions[] = {
+	/* bootloader (UBL, U-Boot, etc) in first 5 sectors */
+	{
+		.name		= "bootloader",
+		.offset		= 0,
+		.size		= 5 * SZ_64K,
+		.mask_flags	= MTD_WRITEABLE, /* force read-only */
 	},
-	.num_resources	= ARRAY_SIZE(davinci_evm_nandflash_resource),
-	.resource	= davinci_evm_nandflash_resource,
+	/* bootloader params in the next 1 sectors */
+	{
+		.name		= "params",
+		.offset		= MTDPART_OFS_APPEND,
+		.size		= SZ_64K,
+		.mask_flags	= 0,
+	},
+	/* kernel */
+	{
+		.name		= "kernel",
+		.offset		= MTDPART_OFS_APPEND,
+		.size		= SZ_2M,
+		.mask_flags	= 0
+	},
+	/* file system */
+	{
+		.name		= "filesystem",
+		.offset		= MTDPART_OFS_APPEND,
+		.size		= MTDPART_SIZ_FULL,
+		.mask_flags	= 0
+	}
+};
+
+static struct physmap_flash_data davinci_evm_norflash_data = {
+	.width		= 2,
+	.parts		= davinci_evm_norflash_partitions,
+	.nr_parts	= ARRAY_SIZE(davinci_evm_norflash_partitions),
+};
+
+/* NOTE: CFI probe will correctly detect flash part as 32M, but EMIF
+ * limits addresses to 16M, so using addresses past 16M will wrap */
+static struct resource davinci_evm_norflash_resource[] = {
+	{
+		.start		= DM644X_ASYNC_EMIF_DATA_CE0_BASE,
+		.end		= DM644X_ASYNC_EMIF_DATA_CE0_BASE + SZ_16M - 1,
+		.flags		= IORESOURCE_MEM,
+	},
+};
+#endif
+
+static struct platform_device dm644x_emif_devices[] __initdata = {
+#if (HAS_NAND == 1)
+	{
+		.name		= "davinci_nand",
+		.id		= 0,
+		.resource		= davinci_evm_nandflash_resource,
+		.num_resources		=
+			ARRAY_SIZE(davinci_evm_nandflash_resource),
+		.dev		= {
+			.platform_data	= &davinci_evm_nandflash_data,
+		},
+	},
+#elif (HAS_NOR == 1)
+	{
+		.name		= "physmap-flash",
+		.id		= 0,
+		.resource		= davinci_evm_norflash_resource,
+		.num_resources		=
+			ARRAY_SIZE(davinci_evm_norflash_resource),
+		.dev		= {
+			.platform_data	= &davinci_evm_norflash_data,
+		},
+	},
+#endif
 };
 
 static u64 davinci_fb_dma_mask = DMA_BIT_MASK(32);
@@ -188,7 +214,7 @@ static struct platform_device davinci_fb_device = {
 	.num_resources = 0,
 };
 
-static struct tvp514x_platform_data tvp5146_pdata = {
+static struct tvp514x_platform_data dm644xevm_tvp5146_pdata = {
 	.clk_polarity = 0,
 	.hs_polarity = 1,
 	.vs_polarity = 1
@@ -196,7 +222,7 @@ static struct tvp514x_platform_data tvp5146_pdata = {
 
 #define TVP514X_STD_ALL	(V4L2_STD_NTSC | V4L2_STD_PAL)
 /* Inputs available at the TVP5146 */
-static struct v4l2_input tvp5146_inputs[] = {
+static struct v4l2_input dm644xevm_tvp5146_inputs[] = {
 	{
 		.index = 0,
 		.name = "Composite",
@@ -216,7 +242,7 @@ static struct v4l2_input tvp5146_inputs[] = {
  * ouput that goes to vpfe. There is a one to one correspondence
  * with tvp5146_inputs
  */
-static struct vpfe_route tvp5146_routes[] = {
+static struct vpfe_route dm644xevm_tvp5146_routes[] = {
 	{
 		.input = INPUT_CVBS_VI2B,
 		.output = OUTPUT_10BIT_422_EMBEDDED_SYNC,
@@ -227,13 +253,13 @@ static struct vpfe_route tvp5146_routes[] = {
 	},
 };
 
-static struct vpfe_subdev_info vpfe_sub_devs[] = {
+static struct vpfe_subdev_info dm644xevm_vpfe_sub_devs[] = {
 	{
 		.name = "tvp5146",
 		.grp_id = 0,
-		.num_inputs = ARRAY_SIZE(tvp5146_inputs),
-		.inputs = tvp5146_inputs,
-		.routes = tvp5146_routes,
+		.num_inputs = ARRAY_SIZE(dm644xevm_tvp5146_inputs),
+		.inputs = dm644xevm_tvp5146_inputs,
+		.routes = dm644xevm_tvp5146_routes,
 		.can_route = 1,
 		.ccdc_if_params = {
 			.if_type = VPFE_BT656,
@@ -242,15 +268,15 @@ static struct vpfe_subdev_info vpfe_sub_devs[] = {
 		},
 		.board_info = {
 			I2C_BOARD_INFO("tvp5146", 0x5d),
-			.platform_data = &tvp5146_pdata,
+			.platform_data = &dm644xevm_tvp5146_pdata,
 		},
 	},
 };
 
-static struct vpfe_config vpfe_cfg = {
-	.num_subdevs = ARRAY_SIZE(vpfe_sub_devs),
+static struct vpfe_config dm644xevm_capture_cfg = {
+	.num_subdevs = ARRAY_SIZE(dm644xevm_vpfe_sub_devs),
 	.i2c_adapter_id = 1,
-	.sub_devs = vpfe_sub_devs,
+	.sub_devs = dm644xevm_vpfe_sub_devs,
 	.card_name = "DM6446 EVM",
 	.ccdc = "DM6446 CCDC",
 };
@@ -439,11 +465,6 @@ evm_u35_setup(struct i2c_client *client, int gpio, unsigned ngpio, void *c)
 	/* p7 = nCF_SEL (initial: deselect) */
 	gpio_request(gpio + 7, "nCF_SEL");
 	gpio_direction_output(gpio + 7, 1);
-
-	/* irlml6401 switches over 1A, in under 8 msec;
-	 * now it can be managed by nDRV_VBUS ...
-	 */
-	davinci_setup_usb(1000, 8);
 
 	return 0;
 }
@@ -736,11 +757,6 @@ static struct davinci_uart_config uart_config __initdata = {
 static void __init
 davinci_evm_map_io(void)
 {
-	/* setup input configuration for VPFE input devices */
-	dm644x_set_vpfe_config(&vpfe_cfg);
-
-	/* setup configuration for vpbe devices */
-	dm644x_set_vpbe_display_config(&dm644xevm_display_cfg);
 	dm644x_init();
 }
 
@@ -764,19 +780,19 @@ static int davinci_phy_fixup(struct phy_device *phydev)
 #define HAS_ATA 0
 #endif
 
-#if defined(CONFIG_MTD_PHYSMAP) || \
-    defined(CONFIG_MTD_PHYSMAP_MODULE)
-#define HAS_NOR 1
-#else
-#define HAS_NOR 0
-#endif
+static struct davinci_aemif_devices davinci_emif_devices = {
+	.devices	= dm644x_emif_devices,
+	.num_devices	= ARRAY_SIZE(dm644x_emif_devices),
+};
 
-#if defined(CONFIG_MTD_NAND_DAVINCI) || \
-    defined(CONFIG_MTD_NAND_DAVINCI_MODULE)
-#define HAS_NAND 1
-#else
-#define HAS_NAND 0
-#endif
+static struct platform_device davinci_emif_device = {
+	.name	= "davinci_aemif",
+	.id	= -1,
+	.dev	= {
+		.platform_data	= &davinci_emif_devices,
+	},
+};
+
 
 static __init void davinci_evm_init(void)
 {
@@ -798,13 +814,12 @@ static __init void davinci_evm_init(void)
 
 		/* only one device will be jumpered and detected */
 		if (HAS_NAND) {
-			platform_device_register(&davinci_evm_nandflash_device);
 			evm_leds[7].default_trigger = "nand-disk";
 			if (HAS_NOR)
 				pr_warning("WARNING: both NAND and NOR flash "
 					"are enabled; disable one of them.\n");
-		} else if (HAS_NOR)
-			platform_device_register(&davinci_evm_norflash_device);
+		}
+		platform_device_register(&davinci_emif_device);
 	}
 
 	platform_add_devices(davinci_evm_devices,
@@ -812,9 +827,13 @@ static __init void davinci_evm_init(void)
 	evm_init_i2c();
 
 	davinci_setup_mmc(0, &dm6446evm_mmc_config);
+	dm644x_init_video(&dm644xevm_capture_cfg);
 
 	davinci_serial_init(&uart_config);
 	dm644x_init_asp(&dm644x_evm_snd_data);
+
+	/* irlml6401 switches over 1A, in under 8 msec */
+	davinci_setup_usb(1000, 8);
 
 	soc_info->emac_pdata->phy_id = DM644X_EVM_PHY_ID;
 	/* Register the fixup for PHY on DaVinci */
@@ -825,9 +844,11 @@ static __init void davinci_evm_init(void)
 
 MACHINE_START(DAVINCI_EVM, "DaVinci DM644x EVM")
 	/* Maintainer: MontaVista Software <source@mvista.com> */
-	.boot_params  = (DAVINCI_DDR_BASE + 0x100),
+	.atag_offset  = 0x100,
 	.map_io	      = davinci_evm_map_io,
 	.init_irq     = davinci_irq_init,
 	.timer	      = &davinci_timer,
 	.init_machine = davinci_evm_init,
+	.dma_zone_size	= SZ_128M,
+	.restart	= davinci_restart,
 MACHINE_END

@@ -37,7 +37,10 @@
 #include <linux/platform_device.h>
 #include <linux/uaccess.h>
 #include <linux/videodev2.h>
-#include <mach/mux.h>
+#include <linux/clk.h>
+#include <linux/err.h>
+#include <linux/module.h>
+
 #include <media/davinci/dm355_ccdc.h>
 #include <media/davinci/vpss.h>
 #include "dm355_ccdc_regs.h"
@@ -1008,4 +1011,16 @@ void dm355_ccdc_remove(struct platform_device *pdev)
 	if (res)
 		release_mem_region(res->start, res->end - res->start + 1);
 	vpfe_unregister_ccdc_device(&ccdc_hw_dev);
+	return 0;
 }
+
+static struct platform_driver dm355_ccdc_driver = {
+	.driver = {
+		.name	= "dm355_ccdc",
+		.owner = THIS_MODULE,
+	},
+	.remove = __devexit_p(dm355_ccdc_remove),
+	.probe = dm355_ccdc_probe,
+};
+
+module_platform_driver(dm355_ccdc_driver);

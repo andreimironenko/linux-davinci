@@ -141,7 +141,7 @@ static int sch_transaction(void)
  * This is the main access entry for i2c-sch access
  * adap is i2c_adapter pointer, addr is the i2c device bus address, read_write
  * (0 for read and 1 for write), size is i2c transaction type and data is the
- * union of transaction for data to be transfered or data read from bus.
+ * union of transaction for data to be transferred or data read from bus.
  * return 0 for success and others for failure.
  */
 static s32 sch_access(struct i2c_adapter *adap, u16 addr,
@@ -306,20 +306,9 @@ static struct platform_driver smbus_sch_driver = {
 	.remove		= __devexit_p(smbus_sch_remove),
 };
 
-static int __init i2c_sch_init(void)
-{
-	return platform_driver_register(&smbus_sch_driver);
-}
-
-static void __exit i2c_sch_exit(void)
-{
-	platform_driver_unregister(&smbus_sch_driver);
-}
+module_platform_driver(smbus_sch_driver);
 
 MODULE_AUTHOR("Jacob Pan <jacob.jun.pan@intel.com>");
 MODULE_DESCRIPTION("Intel SCH SMBus driver");
 MODULE_LICENSE("GPL");
-
-module_init(i2c_sch_init);
-module_exit(i2c_sch_exit);
 MODULE_ALIAS("platform:isch_smbus");

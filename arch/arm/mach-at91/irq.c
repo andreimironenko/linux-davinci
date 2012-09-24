@@ -33,24 +33,25 @@
 #include <asm/mach/irq.h>
 #include <asm/mach/map.h>
 
+void __iomem *at91_aic_base;
 
-static void at91_aic_mask_irq(unsigned int irq)
+static void at91_aic_mask_irq(struct irq_data *d)
 {
 	/* Disable interrupt on AIC */
-	at91_sys_write(AT91_AIC_IDCR, 1 << irq);
+	at91_aic_write(AT91_AIC_IDCR, 1 << d->irq);
 }
 
-static void at91_aic_unmask_irq(unsigned int irq)
+static void at91_aic_unmask_irq(struct irq_data *d)
 {
 	/* Enable interrupt on AIC */
-	at91_sys_write(AT91_AIC_IECR, 1 << irq);
+	at91_aic_write(AT91_AIC_IECR, 1 << d->irq);
 }
 
 unsigned int at91_extern_irq;
 
 #define is_extern_irq(irq) ((1 << (irq)) & at91_extern_irq)
 
-static int at91_aic_set_type(unsigned irq, unsigned type)
+static int at91_aic_set_type(struct irq_data *d, unsigned type)
 {
 	unsigned int smr, srctype;
 
@@ -62,13 +63,13 @@ static int at91_aic_set_type(unsigned irq, unsigned type)
 		srctype = AT91_AIC_SRCTYPE_RISING;
 		break;
 	case IRQ_TYPE_LEVEL_LOW:
-		if ((irq == AT91_ID_FIQ) || is_extern_irq(irq))		/* only supported on external interrupts */
+		if ((d->irq == AT91_ID_FIQ) || is_extern_irq(d->irq))		/* only supported on external interrupts */
 			srctype = AT91_AIC_SRCTYPE_LOW;
 		else
 			return -EINVAL;
 		break;
 	case IRQ_TYPE_EDGE_FALLING:
-		if ((irq == AT91_ID_FIQ) || is_extern_irq(irq))		/* only supported on external interrupts */
+		if ((d->irq == AT91_ID_FIQ) || is_extern_irq(d->irq))		/* only supported on external interrupts */
 			srctype = AT91_AIC_SRCTYPE_FALLING;
 		else
 			return -EINVAL;
@@ -77,8 +78,8 @@ static int at91_aic_set_type(unsigned irq, unsigned type)
 		return -EINVAL;
 	}
 
-	smr = at91_sys_read(AT91_AIC_SMR(irq)) & ~AT91_AIC_SRCTYPE;
-	at91_sys_write(AT91_AIC_SMR(irq), smr | srctype);
+	smr = at91_aic_read(AT91_AIC_SMR(d->irq)) & ~AT91_AIC_SRCTYPE;
+	at91_aic_write(AT91_AIC_SMR(d->irq), smr | srctype);
 	return 0;
 }
 
@@ -87,30 +88,30 @@ static int at91_aic_set_type(unsigned irq, unsigned type)
 static u32 wakeups;
 static u32 backups;
 
-static int at91_aic_set_wake(unsigned irq, unsigned value)
+static int at91_aic_set_wake(struct irq_data *d, unsigned value)
 {
-	if (unlikely(irq >= 32))
+	if (unlikely(d->irq >= 32))
 		return -EINVAL;
 
 	if (value)
-		wakeups |= (1 << irq);
+		wakeups |= (1 << d->irq);
 	else
-		wakeups &= ~(1 << irq);
+		wakeups &= ~(1 << d->irq);
 
 	return 0;
 }
 
 void at91_irq_suspend(void)
 {
-	backups = at91_sys_read(AT91_AIC_IMR);
-	at91_sys_write(AT91_AIC_IDCR, backups);
-	at91_sys_write(AT91_AIC_IECR, wakeups);
+	backups = at91_aic_read(AT91_AIC_IMR);
+	at91_aic_write(AT91_AIC_IDCR, backups);
+	at91_aic_write(AT91_AIC_IECR, wakeups);
 }
 
 void at91_irq_resume(void)
 {
-	at91_sys_write(AT91_AIC_IDCR, wakeups);
-	at91_sys_write(AT91_AIC_IECR, backups);
+	at91_aic_write(AT91_AIC_IDCR, wakeups);
+	at91_aic_write(AT91_AIC_IECR, backups);
 }
 
 #else
@@ -119,11 +120,11 @@ void at91_irq_resume(void)
 
 static struct irq_chip at91_aic_chip = {
 	.name		= "AIC",
-	.ack		= at91_aic_mask_irq,
-	.mask		= at91_aic_mask_irq,
-	.unmask		= at91_aic_unmask_irq,
-	.set_type	= at91_aic_set_type,
-	.set_wake	= at91_aic_set_wake,
+	.irq_ack	= at91_aic_mask_irq,
+	.irq_mask	= at91_aic_mask_irq,
+	.irq_unmask	= at91_aic_unmask_irq,
+	.irq_set_type	= at91_aic_set_type,
+	.irq_set_wake	= at91_aic_set_wake,
 };
 
 /*
@@ -133,35 +134,39 @@ void __init at91_aic_init(unsigned int priority[NR_AIC_IRQS])
 {
 	unsigned int i;
 
+	at91_aic_base = ioremap(AT91_AIC, 512);
+
+	if (!at91_aic_base)
+		panic("Impossible to ioremap AT91_AIC\n");
+
 	/*
 	 * The IVR is used by macro get_irqnr_and_base to read and verify.
 	 * The irq number is NR_AIC_IRQS when a spurious interrupt has occurred.
 	 */
 	for (i = 0; i < NR_AIC_IRQS; i++) {
 		/* Put irq number in Source Vector Register: */
-		at91_sys_write(AT91_AIC_SVR(i), i);
+		at91_aic_write(AT91_AIC_SVR(i), i);
 		/* Active Low interrupt, with the specified priority */
-		at91_sys_write(AT91_AIC_SMR(i), AT91_AIC_SRCTYPE_LOW | priority[i]);
+		at91_aic_write(AT91_AIC_SMR(i), AT91_AIC_SRCTYPE_LOW | priority[i]);
 
-		set_irq_chip(i, &at91_aic_chip);
-		set_irq_handler(i, handle_level_irq);
+		irq_set_chip_and_handler(i, &at91_aic_chip, handle_level_irq);
 		set_irq_flags(i, IRQF_VALID | IRQF_PROBE);
 
 		/* Perform 8 End Of Interrupt Command to make sure AIC will not Lock out nIRQ */
 		if (i < 8)
-			at91_sys_write(AT91_AIC_EOICR, 0);
+			at91_aic_write(AT91_AIC_EOICR, 0);
 	}
 
 	/*
 	 * Spurious Interrupt ID in Spurious Vector Register is NR_AIC_IRQS
 	 * When there is no current interrupt, the IRQ Vector Register reads the value stored in AIC_SPU
 	 */
-	at91_sys_write(AT91_AIC_SPU, NR_AIC_IRQS);
+	at91_aic_write(AT91_AIC_SPU, NR_AIC_IRQS);
 
 	/* No debugging in AIC: Debug (Protect) Control Register */
-	at91_sys_write(AT91_AIC_DCR, 0);
+	at91_aic_write(AT91_AIC_DCR, 0);
 
 	/* Disable and clear all interrupts initially */
-	at91_sys_write(AT91_AIC_IDCR, 0xFFFFFFFF);
-	at91_sys_write(AT91_AIC_ICCR, 0xFFFFFFFF);
+	at91_aic_write(AT91_AIC_IDCR, 0xFFFFFFFF);
+	at91_aic_write(AT91_AIC_ICCR, 0xFFFFFFFF);
 }

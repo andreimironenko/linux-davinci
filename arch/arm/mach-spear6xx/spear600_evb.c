@@ -11,10 +11,11 @@
  * warranty of any kind, whether express or implied.
  */
 
+#include <asm/hardware/vic.h>
 #include <asm/mach/arch.h>
 #include <asm/mach-types.h>
 #include <mach/generic.h>
-#include <mach/spear.h>
+#include <mach/hardware.h>
 
 static struct amba_device *amba_devs[] __initdata = {
 	&gpio_device[0],
@@ -43,9 +44,11 @@ static void __init spear600_evb_init(void)
 }
 
 MACHINE_START(SPEAR600, "ST-SPEAR600-EVB")
-	.boot_params	=	0x00000100,
+	.atag_offset	=	0x100,
 	.map_io		=	spear6xx_map_io,
 	.init_irq	=	spear6xx_init_irq,
-	.timer		=	&spear_sys_timer,
+	.handle_irq	=	vic_handle_irq,
+	.timer		=	&spear6xx_timer,
 	.init_machine	=	spear600_evb_init,
+	.restart	=	spear_restart,
 MACHINE_END

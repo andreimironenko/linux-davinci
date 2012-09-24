@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
+#include <linux/dma-mapping.h>
 #include <linux/omapfb.h>
 
 #include <plat/common.h>
@@ -21,13 +22,16 @@
 #include <plat/vram.h>
 #include <plat/dsp.h>
 
+#include <plat/omap-secure.h>
+
 
 #define NO_LENGTH_CHECK 0xffffffff
 
-struct omap_board_config_kernel *omap_board_config;
+struct omap_board_config_kernel *omap_board_config __initdata;
 int omap_board_config_size;
 
-static const void *get_config(u16 tag, size_t len, int skip, size_t *len_out)
+static const void *__init get_config(u16 tag, size_t len,
+		int skip, size_t *len_out)
 {
 	struct omap_board_config_kernel *kinfo = NULL;
 	int i;
@@ -49,21 +53,28 @@ static const void *get_config(u16 tag, size_t len, int skip, size_t *len_out)
 	return kinfo->data;
 }
 
-const void *__omap_get_config(u16 tag, size_t len, int nr)
+const void *__init __omap_get_config(u16 tag, size_t len, int nr)
 {
         return get_config(tag, len, nr, NULL);
 }
-EXPORT_SYMBOL(__omap_get_config);
 
-const void *omap_get_var_config(u16 tag, size_t *len)
+const void *__init omap_get_var_config(u16 tag, size_t *len)
 {
         return get_config(tag, NO_LENGTH_CHECK, 0, len);
 }
-EXPORT_SYMBOL(omap_get_var_config);
 
 void __init omap_reserve(void)
 {
 	omapfb_reserve_sdram_memblock();
 	omap_vram_reserve_sdram_memblock();
 	omap_dsp_reserve_sdram_memblock();
+	omap_secure_ram_reserve_memblock();
+	omap_barrier_reserve_memblock();
+}
+
+void __init omap_init_consistent_dma_size(void)
+{
+#ifdef CONFIG_FB_OMAP_CONSISTENT_DMA_SIZE
+	init_consistent_dma_size(CONFIG_FB_OMAP_CONSISTENT_DMA_SIZE << 20);
+#endif
 }

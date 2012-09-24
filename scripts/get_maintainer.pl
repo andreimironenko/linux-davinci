@@ -13,7 +13,7 @@
 use strict;
 
 my $P = $0;
-my $V = '0.26-beta6';
+my $V = '0.26';
 
 use Getopt::Long qw(:config no_auto_abbrev);
 
@@ -40,7 +40,7 @@ my $email_use_mailmap = 1;
 my $output_multiline = 1;
 my $output_separator = ", ";
 my $output_roles = 0;
-my $output_rolestats = 0;
+my $output_rolestats = 1;
 my $scm = 0;
 my $web = 0;
 my $subsystem = 0;
@@ -95,7 +95,7 @@ my %VCS_cmds_git = (
     "execute_cmd" => \&git_execute_cmd,
     "available" => '(which("git") ne "") && (-d ".git")',
     "find_signers_cmd" =>
-	"git log --no-color --since=\$email_git_since " .
+	"git log --no-color --follow --since=\$email_git_since " .
 	    '--format="GitCommit: %H%n' .
 		      'GitAuthor: %an <%ae>%n' .
 		      'GitDate: %aD%n' .
@@ -328,7 +328,8 @@ sub read_mailmap {
 	# name1 <mail1> <mail2>
 	# name1 <mail1> name2 <mail2>
 	# (see man git-shortlog)
-	if (/^(.+)<(.+)>$/) {
+
+	if (/^([^<]+)<([^>]+)>$/) {
 	    my $real_name = $1;
 	    my $address = $2;
 
@@ -336,13 +337,13 @@ sub read_mailmap {
 	    ($real_name, $address) = parse_email("$real_name <$address>");
 	    $mailmap->{names}->{$address} = $real_name;
 
-	} elsif (/^<([^\s]+)>\s*<([^\s]+)>$/) {
+	} elsif (/^<([^>]+)>\s*<([^>]+)>$/) {
 	    my $real_address = $1;
 	    my $wrong_address = $2;
 
 	    $mailmap->{addresses}->{$wrong_address} = $real_address;
 
-	} elsif (/^(.+)<([^\s]+)>\s*<([^\s]+)>$/) {
+	} elsif (/^(.+)<([^>]+)>\s*<([^>]+)>$/) {
 	    my $real_name = $1;
 	    my $real_address = $2;
 	    my $wrong_address = $3;
@@ -353,7 +354,7 @@ sub read_mailmap {
 	    $mailmap->{names}->{$wrong_address} = $real_name;
 	    $mailmap->{addresses}->{$wrong_address} = $real_address;
 
-	} elsif (/^(.+)<([^\s]+)>\s*([^\s].*)<([^\s]+)>$/) {
+	} elsif (/^(.+)<([^>]+)>\s*(.+)\s*<([^>]+)>$/) {
 	    my $real_name = $1;
 	    my $real_address = $2;
 	    my $wrong_name = $3;
@@ -420,6 +421,14 @@ foreach my $file (@ARGV) {
 
 	open(my $patch, "< $file")
 	    or die "$P: Can't open $file: $!\n";
+
+	# We can check arbitrary information before the patch
+	# like the commit message, mail headers, etc...
+	# This allows us to match arbitrary keywords against any part
+	# of a git format-patch generated file (subject tags, etc...)
+
+	my $patch_prefix = "";			#Parsing the intro
+
 	while (<$patch>) {
 	    my $patch_line = $_;
 	    if (m/^\+\+\+\s+(\S+)/) {
@@ -428,13 +437,14 @@ foreach my $file (@ARGV) {
 		$filename =~ s@\n@@;
 		$lastfile = $filename;
 		push(@files, $filename);
+		$patch_prefix = "^[+-].*";	#Now parsing the actual patch
 	    } elsif (m/^\@\@ -(\d+),(\d+)/) {
 		if ($email_git_blame) {
 		    push(@range, "$lastfile:$1:$2");
 		}
 	    } elsif ($keywords) {
 		foreach my $line (keys %keyword_hash) {
-		    if ($patch_line =~ m/^[+-].*$keyword_hash{$line}/x) {
+		    if ($patch_line =~ m/${patch_prefix}$keyword_hash{$line}/x) {
 			push(@keyword_tvi, $line);
 		    }
 		}
@@ -493,6 +503,40 @@ if ($web) {
 }
 
 exit($exit);
+
+sub range_is_maintained {
+    my ($start, $end) = @_;
+
+    for (my $i = $start; $i < $end; $i++) {
+	my $line = $typevalue[$i];
+	if ($line =~ m/^(\C):\s*(.*)/) {
+	    my $type = $1;
+	    my $value = $2;
+	    if ($type eq 'S') {
+		if ($value =~ /(maintain|support)/i) {
+		    return 1;
+		}
+	    }
+	}
+    }
+    return 0;
+}
+
+sub range_has_maintainer {
+    my ($start, $end) = @_;
+
+    for (my $i = $start; $i < $end; $i++) {
+	my $line = $typevalue[$i];
+	if ($line =~ m/^(\C):\s*(.*)/) {
+	    my $type = $1;
+	    my $value = $2;
+	    if ($type eq 'M') {
+		return 1;
+	    }
+	}
+    }
+    return 0;
+}
 
 sub get_maintainers {
     %email_hash_name = ();
@@ -556,7 +600,9 @@ sub get_maintainers {
 				my $file_pd = ($file  =~ tr@/@@);
 				$value_pd++ if (substr($value,-1,1) ne "/");
 				$value_pd = -1 if ($value =~ /^\.\*/);
-				if ($value_pd >= $file_pd) {
+				if ($value_pd >= $file_pd &&
+				    range_is_maintained($start, $end) &&
+				    range_has_maintainer($start, $end)) {
 				    $exact_pattern_match_hash{$file} = 1;
 				}
 				if ($pattern_depth == 0 ||
@@ -720,7 +766,8 @@ Other options:
   --help => show this help information
 
 Default options:
-  [--email --git --m --n --l --multiline --pattern-depth=0 --remove-duplicates]
+  [--email --nogit --git-fallback --m --n --l --multiline -pattern-depth=0
+   --remove-duplicates --rolestats]
 
 Notes:
   Using "-f directory" may give unexpected results:
@@ -1342,7 +1389,7 @@ sub vcs_exists {
 	warn("$P: No supported VCS found.  Add --nogit to options?\n");
 	warn("Using a git repository produces better results.\n");
 	warn("Try Linus Torvalds' latest git repository using:\n");
-	warn("git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux-2.6.git\n");
+	warn("git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git\n");
 	$printed_novcs = 1;
     }
     return 0;

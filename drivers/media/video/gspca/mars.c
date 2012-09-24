@@ -19,6 +19,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #define MODULE_NAME "mars"
 
 #include "gspca.h"
@@ -178,8 +180,8 @@ static void reg_w(struct gspca_dev *gspca_dev,
 			&alen,
 			500);	/* timeout in milliseconds */
 	if (ret < 0) {
-		err("reg write [%02x] error %d",
-			gspca_dev->usb_buf[0], ret);
+		pr_err("reg write [%02x] error %d\n",
+		       gspca_dev->usb_buf[0], ret);
 		gspca_dev->usb_err = ret;
 	}
 }
@@ -261,7 +263,6 @@ static int sd_config(struct gspca_dev *gspca_dev,
 	cam->nmodes = ARRAY_SIZE(vga_mode);
 	cam->ctrls = sd->ctrls;
 	sd->quality = QUALITY_DEF;
-	gspca_dev->nbalt = 9;		/* use the altsetting 08 */
 	return 0;
 }
 
@@ -361,7 +362,7 @@ static int sd_start(struct gspca_dev *gspca_dev)
 		mi_w(gspca_dev, i + 1, mi_data[i]);
 
 	data[0] = 0x00;
-	data[1] = 0x4d;		/* ISOC transfering enable... */
+	data[1] = 0x4d;		/* ISOC transferring enable... */
 	reg_w(gspca_dev, 2);
 
 	gspca_dev->ctrl_inac = 0; /* activate the illuminator controls */
@@ -490,7 +491,7 @@ static const struct sd_desc sd_desc = {
 };
 
 /* -- module initialisation -- */
-static const __devinitdata struct usb_device_id device_table[] = {
+static const struct usb_device_id device_table[] = {
 	{USB_DEVICE(0x093a, 0x050f)},
 	{}
 };
@@ -515,15 +516,4 @@ static struct usb_driver sd_driver = {
 #endif
 };
 
-/* -- module insert / remove -- */
-static int __init sd_mod_init(void)
-{
-	return usb_register(&sd_driver);
-}
-static void __exit sd_mod_exit(void)
-{
-	usb_deregister(&sd_driver);
-}
-
-module_init(sd_mod_init);
-module_exit(sd_mod_exit);
+module_usb_driver(sd_driver);

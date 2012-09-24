@@ -47,7 +47,6 @@ struct ucb1x00_ts {
 	u16			x_res;
 	u16			y_res;
 
-	unsigned int		restart:1;
 	unsigned int		adcsync:1;
 };
 
@@ -60,6 +59,7 @@ static inline void ucb1x00_ts_evt_add(struct ucb1x00_ts *ts, u16 pressure, u16 x
 	input_report_abs(idev, ABS_X, x);
 	input_report_abs(idev, ABS_Y, y);
 	input_report_abs(idev, ABS_PRESSURE, pressure);
+	input_report_key(idev, BTN_TOUCH, 1);
 	input_sync(idev);
 }
 
@@ -68,6 +68,7 @@ static inline void ucb1x00_ts_event_release(struct ucb1x00_ts *ts)
 	struct input_dev *idev = ts->idev;
 
 	input_report_abs(idev, ABS_PRESSURE, 0);
+	input_report_key(idev, BTN_TOUCH, 0);
 	input_sync(idev);
 }
 
@@ -205,15 +206,17 @@ static int ucb1x00_thread(void *_ts)
 {
 	struct ucb1x00_ts *ts = _ts;
 	DECLARE_WAITQUEUE(wait, current);
+	bool frozen, ignore = false;
 	int valid = 0;
 
 	set_freezable();
 	add_wait_queue(&ts->irq_wait, &wait);
-	while (!kthread_should_stop()) {
+	while (!kthread_freezable_should_stop(&frozen)) {
 		unsigned int x, y, p;
 		signed long timeout;
 
-		ts->restart = 0;
+		if (frozen)
+			ignore = true;
 
 		ucb1x00_adc_enable(ts->ucb);
 
@@ -256,7 +259,7 @@ static int ucb1x00_thread(void *_ts)
 			 * space.  We therefore leave it to user space
 			 * to do any filtering they please.
 			 */
-			if (!ts->restart) {
+			if (!ignore) {
 				ucb1x00_ts_evt_add(ts, p, x, y);
 				valid = 1;
 			}
@@ -264,8 +267,6 @@ static int ucb1x00_thread(void *_ts)
 			set_current_state(TASK_INTERRUPTIBLE);
 			timeout = HZ / 100;
 		}
-
-		try_to_freeze();
 
 		schedule_timeout(timeout);
 	}
@@ -338,26 +339,6 @@ static void ucb1x00_ts_close(struct input_dev *idev)
 	ucb1x00_disable(ts->ucb);
 }
 
-#ifdef CONFIG_PM
-static int ucb1x00_ts_resume(struct ucb1x00_dev *dev)
-{
-	struct ucb1x00_ts *ts = dev->priv;
-
-	if (ts->rtask != NULL) {
-		/*
-		 * Restart the TS thread to ensure the
-		 * TS interrupt mode is set up again
-		 * after sleep.
-		 */
-		ts->restart = 1;
-		wake_up(&ts->irq_wait);
-	}
-	return 0;
-}
-#else
-#define ucb1x00_ts_resume NULL
-#endif
-
 
 /*
  * Initialisation.
@@ -384,12 +365,19 @@ static int ucb1x00_ts_add(struct ucb1x00_dev *dev)
 	idev->open       = ucb1x00_ts_open;
 	idev->close      = ucb1x00_ts_close;
 
-	__set_bit(EV_ABS, idev->evbit);
-	__set_bit(ABS_X, idev->absbit);
-	__set_bit(ABS_Y, idev->absbit);
-	__set_bit(ABS_PRESSURE, idev->absbit);
+	idev->evbit[0]   = BIT_MASK(EV_ABS) | BIT_MASK(EV_KEY);
+	idev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
 
 	input_set_drvdata(idev, ts);
+
+	ucb1x00_adc_enable(ts->ucb);
+	ts->x_res = ucb1x00_ts_read_xres(ts);
+	ts->y_res = ucb1x00_ts_read_yres(ts);
+	ucb1x00_adc_disable(ts->ucb);
+
+	input_set_abs_params(idev, ABS_X, 0, ts->x_res, 0, 0);
+	input_set_abs_params(idev, ABS_Y, 0, ts->y_res, 0, 0);
+	input_set_abs_params(idev, ABS_PRESSURE, 0, 0, 0, 0);
 
 	err = input_register_device(idev);
 	if (err)
@@ -416,7 +404,6 @@ static void ucb1x00_ts_remove(struct ucb1x00_dev *dev)
 static struct ucb1x00_driver ucb1x00_ts_driver = {
 	.add		= ucb1x00_ts_add,
 	.remove		= ucb1x00_ts_remove,
-	.resume		= ucb1x00_ts_resume,
 };
 
 static int __init ucb1x00_ts_init(void)

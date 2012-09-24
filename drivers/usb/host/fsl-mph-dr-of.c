@@ -16,6 +16,7 @@
 #include <linux/io.h>
 #include <linux/of_platform.h>
 #include <linux/clk.h>
+#include <linux/module.h>
 
 struct fsl_usb2_dev_data {
 	char *dr_mode;		/* controller mode */
@@ -262,19 +263,24 @@ static void fsl_usb2_mpc5121_exit(struct platform_device *pdev)
 	}
 }
 
-struct fsl_usb2_platform_data fsl_usb2_mpc5121_pd = {
+static struct fsl_usb2_platform_data fsl_usb2_mpc5121_pd = {
 	.big_endian_desc = 1,
 	.big_endian_mmio = 1,
 	.es = 1,
+	.have_sysif_regs = 0,
 	.le_setup_buf = 1,
 	.init = fsl_usb2_mpc5121_init,
 	.exit = fsl_usb2_mpc5121_exit,
 };
 #endif /* CONFIG_PPC_MPC512x */
 
+static struct fsl_usb2_platform_data fsl_usb2_mpc8xxx_pd = {
+	.have_sysif_regs = 1,
+};
+
 static const struct of_device_id fsl_usb2_mph_dr_of_match[] = {
-	{ .compatible = "fsl-usb2-mph", },
-	{ .compatible = "fsl-usb2-dr", },
+	{ .compatible = "fsl-usb2-mph", .data = &fsl_usb2_mpc8xxx_pd, },
+	{ .compatible = "fsl-usb2-dr", .data = &fsl_usb2_mpc8xxx_pd, },
 #ifdef CONFIG_PPC_MPC512x
 	{ .compatible = "fsl,mpc5121-usb2-dr", .data = &fsl_usb2_mpc5121_pd, },
 #endif
@@ -291,17 +297,7 @@ static struct platform_driver fsl_usb2_mph_dr_driver = {
 	.remove	= __devexit_p(fsl_usb2_mph_dr_of_remove),
 };
 
-static int __init fsl_usb2_mph_dr_init(void)
-{
-	return platform_driver_register(&fsl_usb2_mph_dr_driver);
-}
-module_init(fsl_usb2_mph_dr_init);
-
-static void __exit fsl_usb2_mph_dr_exit(void)
-{
-	platform_driver_unregister(&fsl_usb2_mph_dr_driver);
-}
-module_exit(fsl_usb2_mph_dr_exit);
+module_platform_driver(fsl_usb2_mph_dr_driver);
 
 MODULE_DESCRIPTION("FSL MPH DR OF devices driver");
 MODULE_AUTHOR("Anatolij Gustschin <agust@denx.de>");

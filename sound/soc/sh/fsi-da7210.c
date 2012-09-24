@@ -11,15 +11,25 @@
  */
 
 #include <linux/platform_device.h>
+#include <linux/module.h>
 #include <sound/sh_fsi.h>
 
 static int fsi_da7210_init(struct snd_soc_pcm_runtime *rtd)
 {
-	struct snd_soc_dai *dai = rtd->codec_dai;
+	struct snd_soc_dai *codec = rtd->codec_dai;
+	struct snd_soc_dai *cpu = rtd->cpu_dai;
+	int ret;
 
-	return snd_soc_dai_set_fmt(dai,
-				   SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+	ret = snd_soc_dai_set_fmt(codec,
+				   SND_SOC_DAIFMT_I2S |
 				   SND_SOC_DAIFMT_CBM_CFM);
+	if (ret < 0)
+		return ret;
+
+	ret = snd_soc_dai_set_fmt(cpu, SND_SOC_DAIFMT_I2S |
+				       SND_SOC_DAIFMT_CBS_CFS);
+
+	return ret;
 }
 
 static struct snd_soc_dai_link fsi_da7210_dai = {
@@ -33,7 +43,8 @@ static struct snd_soc_dai_link fsi_da7210_dai = {
 };
 
 static struct snd_soc_card fsi_soc_card = {
-	.name		= "FSI (DA7210)",
+	.name		= "FSI-DA7210",
+	.owner		= THIS_MODULE,
 	.dai_link	= &fsi_da7210_dai,
 	.num_links	= 1,
 };

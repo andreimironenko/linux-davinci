@@ -32,7 +32,6 @@
 #include <linux/bitmap.h>
 #include <linux/usb.h>
 #include <linux/i2c.h>
-#include <linux/version.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -50,7 +49,8 @@
 		      "Sascha Sommer <saschasommer@freenet.de>"
 
 #define DRIVER_DESC         "Empia em28xx based USB video device driver"
-#define EM28XX_VERSION_CODE  KERNEL_VERSION(0, 1, 2)
+
+#define EM28XX_VERSION "0.1.3"
 
 #define em28xx_videodbg(fmt, arg...) do {\
 	if (video_debug) \
@@ -72,6 +72,7 @@ do {\
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_LICENSE("GPL");
+MODULE_VERSION(EM28XX_VERSION);
 
 static unsigned int video_nr[] = {[0 ... (EM28XX_MAXBOARDS - 1)] = UNSET };
 static unsigned int vbi_nr[]   = {[0 ... (EM28XX_MAXBOARDS - 1)] = UNSET };
@@ -377,7 +378,7 @@ static inline void get_next_buf(struct em28xx_dmaqueue *dma_q,
 	/* Get the next buffer */
 	*buf = list_entry(dma_q->active.next, struct em28xx_buffer, vb.queue);
 
-	/* Cleans up buffer - Usefull for testing for frame/URB loss */
+	/* Cleans up buffer - Useful for testing for frame/URB loss */
 	outp = videobuf_to_vmalloc(&(*buf)->vb);
 	memset(outp, 0, (*buf)->vb.size);
 
@@ -404,7 +405,7 @@ static inline void vbi_get_next_buf(struct em28xx_dmaqueue *dma_q,
 
 	/* Get the next buffer */
 	*buf = list_entry(dma_q->active.next, struct em28xx_buffer, vb.queue);
-	/* Cleans up buffer - Usefull for testing for frame/URB loss */
+	/* Cleans up buffer - Useful for testing for frame/URB loss */
 	outp = videobuf_to_vmalloc(&(*buf)->vb);
 	memset(outp, 0x00, (*buf)->vb.size);
 
@@ -1069,6 +1070,10 @@ static int vidioc_try_fmt_vid_cap(struct file *file, void *priv,
 		/* the em2800 can only scale down to 50% */
 		height = height > (3 * maxh / 4) ? maxh : maxh / 2;
 		width = width > (3 * maxw / 4) ? maxw : maxw / 2;
+                /* MaxPacketSize for em2800 is too small to capture at full resolution
+                 * use half of maxw as the scaler can only scale to 50% */
+		if (width == maxw && height == maxh)
+			width /= 2;
 	} else {
 		/* width must even because of the YUYV format
 		   height must be even because of interlacing */
@@ -1151,6 +1156,21 @@ static int vidioc_g_std(struct file *file, void *priv, v4l2_std_id *norm)
 		return rc;
 
 	*norm = dev->norm;
+
+	return 0;
+}
+
+static int vidioc_querystd(struct file *file, void *priv, v4l2_std_id *norm)
+{
+	struct em28xx_fh   *fh  = priv;
+	struct em28xx      *dev = fh->dev;
+	int                rc;
+
+	rc = check_dev(dev);
+	if (rc < 0)
+		return rc;
+
+	v4l2_device_call_all(&dev->v4l2_dev, 0, video, querystd, norm);
 
 	return 0;
 }
@@ -1387,6 +1407,27 @@ static int vidioc_queryctrl(struct file *file, void *priv,
 		return -EINVAL;
 }
 
+/*
+ * FIXME: This is an indirect way to check if a control exists at a
+ * subdev. Instead of that hack, maybe the better would be to change all
+ * subdevs to return -ENOIOCTLCMD, if an ioctl is not supported.
+ */
+static int check_subdev_ctrl(struct em28xx *dev, int id)
+{
+	struct v4l2_queryctrl qc;
+
+	memset(&qc, 0, sizeof(qc));
+	qc.id = id;
+
+	/* enumerate V4L2 device controls */
+	v4l2_device_call_all(&dev->v4l2_dev, 0, core, queryctrl, &qc);
+
+	if (qc.type)
+		return 0;
+	else
+		return -EINVAL;
+}
+
 static int vidioc_g_ctrl(struct file *file, void *priv,
 				struct v4l2_control *ctrl)
 {
@@ -1399,7 +1440,6 @@ static int vidioc_g_ctrl(struct file *file, void *priv,
 		return rc;
 	rc = 0;
 
-
 	/* Set an AC97 control */
 	if (dev->audio_mode.ac97 != EM28XX_NO_AC97)
 		rc = ac97_get_ctrl(dev, ctrl);
@@ -1408,6 +1448,9 @@ static int vidioc_g_ctrl(struct file *file, void *priv,
 
 	/* It were not an AC97 control. Sends it to the v4l2 dev interface */
 	if (rc == 1) {
+		if (check_subdev_ctrl(dev, ctrl->id))
+			return -EINVAL;
+
 		v4l2_device_call_all(&dev->v4l2_dev, 0, core, g_ctrl, ctrl);
 		rc = 0;
 	}
@@ -1434,8 +1477,10 @@ static int vidioc_s_ctrl(struct file *file, void *priv,
 
 	/* It isn't an AC97 control. Sends it to the v4l2 dev interface */
 	if (rc == 1) {
-		v4l2_device_call_all(&dev->v4l2_dev, 0, core, s_ctrl, ctrl);
-
+		rc = check_subdev_ctrl(dev, ctrl->id);
+		if (!rc)
+			v4l2_device_call_all(&dev->v4l2_dev, 0,
+					     core, s_ctrl, ctrl);
 		/*
 		 * In the case of non-AC97 volume controls, we still need
 		 * to do some setups at em28xx, in order to mute/unmute
@@ -1452,7 +1497,7 @@ static int vidioc_s_ctrl(struct file *file, void *priv,
 			rc = em28xx_audio_analog_set(dev);
 		}
 	}
-	return rc;
+	return (rc < 0) ? rc : 0;
 }
 
 static int vidioc_g_tuner(struct file *file, void *priv,
@@ -1708,11 +1753,15 @@ static int vidioc_streamoff(struct file *file, void *priv,
 			fh, type, fh->resources, dev->resources);
 
 	if (fh->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
-		videobuf_streamoff(&fh->vb_vidq);
-		res_free(fh, EM28XX_RESOURCE_VIDEO);
+		if (res_check(fh, EM28XX_RESOURCE_VIDEO)) {
+			videobuf_streamoff(&fh->vb_vidq);
+			res_free(fh, EM28XX_RESOURCE_VIDEO);
+		}
 	} else if (fh->type == V4L2_BUF_TYPE_VBI_CAPTURE) {
-		videobuf_streamoff(&fh->vb_vbiq);
-		res_free(fh, EM28XX_RESOURCE_VBI);
+		if (res_check(fh, EM28XX_RESOURCE_VBI)) {
+			videobuf_streamoff(&fh->vb_vbiq);
+			res_free(fh, EM28XX_RESOURCE_VBI);
+		}
 	}
 
 	return 0;
@@ -1727,8 +1776,6 @@ static int vidioc_querycap(struct file *file, void  *priv,
 	strlcpy(cap->driver, "em28xx", sizeof(cap->driver));
 	strlcpy(cap->card, em28xx_boards[dev->model].name, sizeof(cap->card));
 	usb_make_path(dev->udev, cap->bus_info, sizeof(cap->bus_info));
-
-	cap->version = EM28XX_VERSION_CODE;
 
 	cap->capabilities =
 			V4L2_CAP_SLICED_VBI_CAPTURE |
@@ -1756,6 +1803,45 @@ static int vidioc_enum_fmt_vid_cap(struct file *file, void  *priv,
 	strlcpy(f->description, format[f->index].name, sizeof(f->description));
 	f->pixelformat = format[f->index].fourcc;
 
+	return 0;
+}
+
+static int vidioc_enum_framesizes(struct file *file, void *priv,
+				  struct v4l2_frmsizeenum *fsize)
+{
+	struct em28xx_fh      *fh  = priv;
+	struct em28xx         *dev = fh->dev;
+	struct em28xx_fmt     *fmt;
+	unsigned int	      maxw = norm_maxw(dev);
+	unsigned int	      maxh = norm_maxh(dev);
+
+	fmt = format_by_fourcc(fsize->pixel_format);
+	if (!fmt) {
+		em28xx_videodbg("Fourcc format (%08x) invalid.\n",
+				fsize->pixel_format);
+		return -EINVAL;
+	}
+
+	if (dev->board.is_em2800) {
+		if (fsize->index > 1)
+			return -EINVAL;
+		fsize->type = V4L2_FRMSIZE_TYPE_DISCRETE;
+		fsize->discrete.width = maxw / (1 + fsize->index);
+		fsize->discrete.height = maxh / (1 + fsize->index);
+		return 0;
+	}
+
+	if (fsize->index != 0)
+		return -EINVAL;
+
+	/* Report a continuous range */
+	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	fsize->stepwise.min_width = 48;
+	fsize->stepwise.min_height = 32;
+	fsize->stepwise.max_width = maxw;
+	fsize->stepwise.max_height = maxh;
+	fsize->stepwise.step_width = 1;
+	fsize->stepwise.step_height = 1;
 	return 0;
 }
 
@@ -1934,19 +2020,6 @@ static int vidioc_dqbuf(struct file *file, void *priv, struct v4l2_buffer *b)
 				      O_NONBLOCK);
 }
 
-#ifdef CONFIG_VIDEO_V4L1_COMPAT
-static int vidiocgmbuf(struct file *file, void *priv, struct video_mbuf *mbuf)
-{
-	struct em28xx_fh  *fh = priv;
-
-	if (fh->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-		return videobuf_cgmbuf(&fh->vb_vidq, mbuf, 8);
-	else
-		return videobuf_cgmbuf(&fh->vb_vbiq, mbuf, 8);
-}
-#endif
-
-
 /* ----------------------------------------------------------- */
 /* RADIO ESPECIFIC IOCTLS                                      */
 /* ----------------------------------------------------------- */
@@ -1960,7 +2033,6 @@ static int radio_querycap(struct file *file, void  *priv,
 	strlcpy(cap->card, em28xx_boards[dev->model].name, sizeof(cap->card));
 	usb_make_path(dev->udev, cap->bus_info, sizeof(cap->bus_info));
 
-	cap->version = EM28XX_VERSION_CODE;
 	cap->capabilities = V4L2_CAP_TUNER;
 	return 0;
 }
@@ -2186,6 +2258,7 @@ static int em28xx_v4l2_close(struct file *filp)
 		   free the remaining resources */
 		if (dev->state & DEV_DISCONNECTED) {
 			em28xx_release_resources(dev);
+			kfree(dev->alt_max_pkt_size);
 			kfree(dev);
 			return 0;
 		}
@@ -2326,10 +2399,10 @@ static const struct v4l2_ioctl_ops video_ioctl_ops = {
 	.vidioc_s_fmt_vid_cap       = vidioc_s_fmt_vid_cap,
 	.vidioc_g_fmt_vbi_cap       = vidioc_g_fmt_vbi_cap,
 	.vidioc_s_fmt_vbi_cap       = vidioc_s_fmt_vbi_cap,
+	.vidioc_enum_framesizes     = vidioc_enum_framesizes,
 	.vidioc_g_audio             = vidioc_g_audio,
 	.vidioc_s_audio             = vidioc_s_audio,
 	.vidioc_cropcap             = vidioc_cropcap,
-
 	.vidioc_g_fmt_sliced_vbi_cap   = vidioc_g_fmt_sliced_vbi_cap,
 	.vidioc_try_fmt_sliced_vbi_cap = vidioc_try_set_sliced_vbi_cap,
 	.vidioc_s_fmt_sliced_vbi_cap   = vidioc_try_set_sliced_vbi_cap,
@@ -2339,6 +2412,7 @@ static const struct v4l2_ioctl_ops video_ioctl_ops = {
 	.vidioc_qbuf                = vidioc_qbuf,
 	.vidioc_dqbuf               = vidioc_dqbuf,
 	.vidioc_g_std               = vidioc_g_std,
+	.vidioc_querystd            = vidioc_querystd,
 	.vidioc_s_std               = vidioc_s_std,
 	.vidioc_g_parm		    = vidioc_g_parm,
 	.vidioc_s_parm		    = vidioc_s_parm,
@@ -2358,9 +2432,6 @@ static const struct v4l2_ioctl_ops video_ioctl_ops = {
 	.vidioc_g_register          = vidioc_g_register,
 	.vidioc_s_register          = vidioc_s_register,
 	.vidioc_g_chip_ident        = vidioc_g_chip_ident,
-#endif
-#ifdef CONFIG_VIDEO_V4L1_COMPAT
-	.vidiocgmbuf                = vidiocgmbuf,
 #endif
 };
 
@@ -2436,11 +2507,10 @@ int em28xx_register_analog_devices(struct em28xx *dev)
 {
       u8 val;
 	int ret;
+	unsigned int maxw;
 
-	printk(KERN_INFO "%s: v4l2 driver version %d.%d.%d\n",
-		dev->name,
-		(EM28XX_VERSION_CODE >> 16) & 0xff,
-		(EM28XX_VERSION_CODE >> 8) & 0xff, EM28XX_VERSION_CODE & 0xff);
+	printk(KERN_INFO "%s: v4l2 driver version %s\n",
+		dev->name, EM28XX_VERSION);
 
 	/* set default norm */
 	dev->norm = em28xx_video_template.current_norm;
@@ -2450,8 +2520,15 @@ int em28xx_register_analog_devices(struct em28xx *dev)
 
 	/* Analog specific initialization */
 	dev->format = &format[0];
+
+	maxw = norm_maxw(dev);
+        /* MaxPacketSize for em2800 is too small to capture at full resolution
+         * use half of maxw as the scaler can only scale to 50% */
+        if (dev->board.is_em2800)
+            maxw /= 2;
+
 	em28xx_set_video_format(dev, format[0].fourcc,
-				norm_maxw(dev), norm_maxh(dev));
+				maxw, norm_maxh(dev));
 
 	video_mux(dev, dev->ctl_input);
 

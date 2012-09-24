@@ -17,6 +17,7 @@
 #include <linux/device.h>
 #include <linux/serial.h>
 #include <linux/tty.h>
+#include <linux/export.h>
 
 struct ttyprintk_port {
 	struct tty_port port;
@@ -144,7 +145,7 @@ static int tpk_write_room(struct tty_struct *tty)
 /*
  * TTY operations ioctl function.
  */
-static int tpk_ioctl(struct tty_struct *tty, struct file *file,
+static int tpk_ioctl(struct tty_struct *tty,
 			unsigned int cmd, unsigned long arg)
 {
 	struct ttyprintk_port *tpkp = tty->driver_data;
@@ -170,7 +171,7 @@ static const struct tty_operations ttyprintk_ops = {
 	.ioctl = tpk_ioctl,
 };
 
-struct tty_port_operations null_ops = { };
+static struct tty_port_operations null_ops = { };
 
 static struct tty_driver *ttyprintk_driver;
 

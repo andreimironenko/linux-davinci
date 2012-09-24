@@ -16,18 +16,25 @@
 /* Chosen so that structs with an unsigned long line up. */
 #define MAX_PARAM_PREFIX_LEN (64 - sizeof(unsigned long))
 
-#ifdef MODULE
 #define ___module_cat(a,b) __mod_ ## a ## b
 #define __module_cat(a,b) ___module_cat(a,b)
+#ifdef MODULE
 #define __MODULE_INFO(tag, name, info)					  \
 static const char __module_cat(name,__LINE__)[]				  \
   __used __attribute__((section(".modinfo"), unused, aligned(1)))	  \
   = __stringify(tag) "=" info
 #else  /* !MODULE */
-#define __MODULE_INFO(tag, name, info)
+/* This struct is here for syntactic coherency, it is not used */
+#define __MODULE_INFO(tag, name, info)					  \
+  struct __module_cat(name,__LINE__) {}
 #endif
 #define __MODULE_PARM_TYPE(name, _type)					  \
   __MODULE_INFO(parmtype, name##type, #name ":" _type)
+
+/* One for each parameter, describing how to use it.  Some files do
+   multiple of these per line, so can't just use MODULE_INFO. */
+#define MODULE_PARM_DESC(_parm, desc) \
+	__MODULE_INFO(parm, _parm, #_parm ":" desc)
 
 struct kernel_param;
 
@@ -65,9 +72,9 @@ struct kparam_string {
 struct kparam_array
 {
 	unsigned int max;
+	unsigned int elemsize;
 	unsigned int *num;
 	const struct kernel_param_ops *ops;
-	unsigned int elemsize;
 	void *elem;
 };
 
@@ -260,6 +267,26 @@ static inline void __kernel_param_unlock(void)
 			    .str = &__param_string_##name, 0, perm);	\
 	__MODULE_PARM_TYPE(name, "string")
 
+/**
+ * parameq - checks if two parameter names match
+ * @name1: parameter name 1
+ * @name2: parameter name 2
+ *
+ * Returns true if the two parameter names are equal.
+ * Dashes (-) are considered equal to underscores (_).
+ */
+extern bool parameq(const char *name1, const char *name2);
+
+/**
+ * parameqn - checks if two parameter names match
+ * @name1: parameter name 1
+ * @name2: parameter name 2
+ * @n: the length to compare
+ *
+ * Similar to parameq(), except it compares @n characters.
+ */
+extern bool parameqn(const char *name1, const char *name2, size_t n);
+
 /* Called on module insert or kernel boot */
 extern int parse_args(const char *name,
 		      char *args,
@@ -323,22 +350,22 @@ extern int param_set_charp(const char *val, const struct kernel_param *kp);
 extern int param_get_charp(char *buffer, const struct kernel_param *kp);
 #define param_check_charp(name, p) __param_check(name, p, char *)
 
-/* For historical reasons "bool" parameters can be (unsigned) "int". */
+/* We used to allow int as well as bool.  We're taking that away! */
 extern struct kernel_param_ops param_ops_bool;
 extern int param_set_bool(const char *val, const struct kernel_param *kp);
 extern int param_get_bool(char *buffer, const struct kernel_param *kp);
-#define param_check_bool(name, p)					\
-	static inline void __check_##name(void)				\
-	{								\
-		BUILD_BUG_ON(!__same_type((p), bool *) &&		\
-			     !__same_type((p), unsigned int *) &&	\
-			     !__same_type((p), int *));			\
-	}
+#define param_check_bool(name, p) __param_check(name, p, bool)
 
 extern struct kernel_param_ops param_ops_invbool;
 extern int param_set_invbool(const char *val, const struct kernel_param *kp);
 extern int param_get_invbool(char *buffer, const struct kernel_param *kp);
 #define param_check_invbool(name, p) __param_check(name, p, bool)
+
+/* An int, which can only be set like a bool (though it shows as an int). */
+extern struct kernel_param_ops param_ops_bint;
+extern int param_set_bint(const char *val, const struct kernel_param *kp);
+#define param_get_bint param_get_int
+#define param_check_bint param_check_int
 
 /**
  * module_param_array - a parameter which is an array of some type
@@ -368,9 +395,11 @@ extern int param_get_invbool(char *buffer, const struct kernel_param *kp);
  * module_param_named() for why this might be necessary.
  */
 #define module_param_array_named(name, array, type, nump, perm)		\
+	param_check_##type(name, &(array)[0]);				\
 	static const struct kparam_array __param_arr_##name		\
-	= { ARRAY_SIZE(array), nump, &param_ops_##type,			\
-	    sizeof(array[0]), array };					\
+	= { .max = ARRAY_SIZE(array), .num = nump,                      \
+	    .ops = &param_ops_##type,					\
+	    .elemsize = sizeof(array[0]), .elem = array };		\
 	__module_param_call(MODULE_PARAM_PREFIX, name,			\
 			    &param_array_ops,				\
 			    .arr = &__param_arr_##name,			\

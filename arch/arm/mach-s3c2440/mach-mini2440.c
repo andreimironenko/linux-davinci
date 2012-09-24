@@ -60,6 +60,8 @@
 
 #include <sound/s3c24xx_uda134x.h>
 
+#include "common.h"
+
 #define MACH_MINI2440_DM9K_BASE (S3C2410_CS4 + 0x300)
 
 static struct map_desc mini2440_iodesc[] __initdata = {
@@ -97,26 +99,8 @@ static struct s3c2410_uartcfg mini2440_uartcfgs[] __initdata = {
 
 /* USB device UDC support */
 
-static void mini2440_udc_pullup(enum s3c2410_udc_cmd_e cmd)
-{
-	pr_debug("udc: pullup(%d)\n", cmd);
-
-	switch (cmd) {
-		case S3C2410_UDC_P_ENABLE :
-			gpio_set_value(S3C2410_GPC(5), 1);
-			break;
-		case S3C2410_UDC_P_DISABLE :
-			gpio_set_value(S3C2410_GPC(5), 0);
-			break;
-		case S3C2410_UDC_P_RESET :
-			break;
-		default:
-			break;
-	}
-}
-
 static struct s3c2410_udc_mach_info mini2440_udc_cfg __initdata = {
-	.udc_command		= mini2440_udc_pullup,
+	.pullup_pin = S3C2410_GPC(5),
 };
 
 
@@ -173,7 +157,7 @@ static struct s3c2410fb_display mini2440_lcd_cfg[] __initdata = {
 	 * the same timings, however, anything smaller than 1024x768
 	 * will only be displayed in the top left corner of a 1024x768
 	 * XGA output unless you add optional dip switches to the shield.
-	 * Therefore timings for other resolutions have been ommited here.
+	 * Therefore timings for other resolutions have been omitted here.
 	 */
 	[2] = {
 		_LCD_DECLARE(
@@ -183,6 +167,24 @@ static struct s3c2410fb_display mini2440_lcd_cfg[] __initdata = {
 			24),	/* refresh rate, maximum stable,
 				 tested with the FPGA shield */
 		.lcdcon5	= (S3C2410_LCDCON5_FRM565 |
+				   S3C2410_LCDCON5_HWSWP),
+	},
+	/* mini2440 + 3.5" TFT (LCD-W35i, LQ035Q1DG06 type) + touchscreen*/
+	[3] = {
+		_LCD_DECLARE(
+			/* clock */
+			7,
+			/* xres, margin_right, margin_left, hsync */
+			320, 68, 66, 4,
+			/* yres, margin_top, margin_bottom, vsync */
+			240, 4, 4, 9,
+			/* refresh rate */
+			60),
+		.lcdcon5	= (S3C2410_LCDCON5_FRM565 |
+				   S3C2410_LCDCON5_INVVDEN |
+				   S3C2410_LCDCON5_INVVFRAME |
+				   S3C2410_LCDCON5_INVVLINE |
+				   S3C2410_LCDCON5_INVVCLK |
 				   S3C2410_LCDCON5_HWSWP),
 	},
 };
@@ -506,6 +508,11 @@ static struct i2c_board_info mini2440_i2c_devs[] __initdata = {
 	},
 };
 
+static struct platform_device uda1340_codec = {
+		.name = "uda134x-codec",
+		.id = -1,
+};
+
 static struct platform_device *mini2440_devices[] __initdata = {
 	&s3c_device_ohci,
 	&s3c_device_wdt,
@@ -521,7 +528,9 @@ static struct platform_device *mini2440_devices[] __initdata = {
 	&s3c_device_nand,
 	&s3c_device_sdi,
 	&s3c_device_iis,
+	&uda1340_codec,
 	&mini2440_audio,
+	&samsung_asoc_dma,
 };
 
 static void __init mini2440_map_io(void)
@@ -563,7 +572,7 @@ struct mini2440_features_t {
 	struct platform_device *optional[8];
 };
 
-static void mini2440_parse_features(
+static void __init mini2440_parse_features(
 		struct mini2440_features_t * features,
 		const char * features_str )
 {
@@ -644,10 +653,6 @@ static void __init mini2440_init(void)
 	s3c2410_gpio_setpin(S3C2410_GPB(1), 0);
 	s3c_gpio_cfgpin(S3C2410_GPB(1), S3C2410_GPIO_INPUT);
 
-	/* Make sure the D+ pullup pin is output */
-	WARN_ON(gpio_request(S3C2410_GPC(5), "udc pup"));
-	gpio_direction_output(S3C2410_GPC(5), 0);
-
 	/* mark the key as input, without pullups (there is one on the board) */
 	for (i = 0; i < ARRAY_SIZE(mini2440_buttons); i++) {
 		s3c_gpio_setpull(mini2440_buttons[i].gpio, S3C_GPIO_PULL_UP);
@@ -691,9 +696,10 @@ static void __init mini2440_init(void)
 
 MACHINE_START(MINI2440, "MINI2440")
 	/* Maintainer: Michel Pollet <buserror@gmail.com> */
-	.boot_params	= S3C2410_SDRAM_PA + 0x100,
+	.atag_offset	= 0x100,
 	.map_io		= mini2440_map_io,
 	.init_machine	= mini2440_init,
 	.init_irq	= s3c24xx_init_irq,
 	.timer		= &s3c24xx_timer,
+	.restart	= s3c244x_restart,
 MACHINE_END

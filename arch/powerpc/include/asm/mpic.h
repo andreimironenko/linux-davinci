@@ -3,7 +3,6 @@
 #ifdef __KERNEL__
 
 #include <linux/irq.h>
-#include <linux/sysdev.h>
 #include <asm/dcr.h>
 #include <asm/msi_bitmap.h>
 
@@ -252,6 +251,9 @@ struct mpic_irq_save {
 /* The instance data of a given MPIC */
 struct mpic
 {
+	/* The OpenFirmware dt node for this MPIC */
+	struct device_node *node;
+
 	/* The remapper for this MPIC */
 	struct irq_host		*irqhost;
 
@@ -263,6 +265,7 @@ struct mpic
 #ifdef CONFIG_SMP
 	struct irq_chip		hc_ipi;
 #endif
+	struct irq_chip		hc_tm;
 	const char		*name;
 	/* Flags */
 	unsigned int		flags;
@@ -273,15 +276,13 @@ struct mpic
 	unsigned int		irq_count;
 	/* Number of sources */
 	unsigned int		num_sources;
-	/* Number of CPUs */
-	unsigned int		num_cpus;
 	/* default senses array */
 	unsigned char		*senses;
 	unsigned int		senses_count;
 
 	/* vector numbers used for internal sources (ipi/timers) */
 	unsigned int		ipi_vecs[4];
-	unsigned int		timer_vecs[4];
+	unsigned int		timer_vecs[8];
 
 	/* Spurious vector to program into unused sources */
 	unsigned int		spurious_vec;
@@ -294,6 +295,9 @@ struct mpic
 
 	/* Register access method */
 	enum mpic_reg_type	reg_type;
+
+	/* The physical base address of the MPIC */
+	phys_addr_t paddr;
 
 	/* The various ioremap'ed bases */
 	struct mpic_reg_bank	gregs;
@@ -320,8 +324,6 @@ struct mpic
 	/* link */
 	struct mpic		*next;
 
-	struct sys_device	sysdev;
-
 #ifdef CONFIG_PM
 	struct mpic_irq_save	*save_data;
 #endif
@@ -335,11 +337,11 @@ struct mpic
  * Note setting any ID (leaving those bits to 0) means standard MPIC
  */
 
-/* This is the primary controller, only that one has IPIs and
- * has afinity control. A non-primary MPIC always uses CPU0
- * registers only
+/*
+ * This is a secondary ("chained") controller; it only uses the CPU0
+ * registers.  Primary controllers have IPIs and affinity control.
  */
-#define MPIC_PRIMARY			0x00000001
+#define MPIC_SECONDARY			0x00000001
 
 /* Set this for a big-endian MPIC */
 #define MPIC_BIG_ENDIAN			0x00000002
@@ -367,6 +369,12 @@ struct mpic
 #define MPIC_SINGLE_DEST_CPU		0x00001000
 /* Enable CoreInt delivery of interrupts */
 #define MPIC_ENABLE_COREINT		0x00002000
+/* Disable resetting of the MPIC.
+ * NOTE: This flag trumps MPIC_WANTS_RESET.
+ */
+#define MPIC_NO_RESET			0x00004000
+/* Freescale MPIC (compatible includes "fsl,mpic") */
+#define MPIC_FSL			0x00008000
 
 /* MPIC HW modification ID */
 #define MPIC_REGSET_MASK		0xf0000000
@@ -467,11 +475,11 @@ extern void mpic_request_ipis(void);
 void smp_mpic_message_pass(int target, int msg);
 
 /* Unmask a specific virq */
-extern void mpic_unmask_irq(unsigned int irq);
+extern void mpic_unmask_irq(struct irq_data *d);
 /* Mask a specific virq */
-extern void mpic_mask_irq(unsigned int irq);
+extern void mpic_mask_irq(struct irq_data *d);
 /* EOI a specific virq */
-extern void mpic_end_irq(unsigned int irq);
+extern void mpic_end_irq(struct irq_data *d);
 
 /* Fetch interrupt from a given mpic */
 extern unsigned int mpic_get_one_irq(struct mpic *mpic);

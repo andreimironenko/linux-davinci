@@ -27,9 +27,26 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/log2.h>
 
 #include "rt2x00.h"
 #include "rt2x00lib.h"
+
+/*
+ * Utility functions.
+ */
+u32 rt2x00lib_get_bssidx(struct rt2x00_dev *rt2x00dev,
+			 struct ieee80211_vif *vif)
+{
+	/*
+	 * When in STA mode, bssidx is always 0 otherwise local_address[5]
+	 * contains the bss number, see BSS_ID_MASK comments for details.
+	 */
+	if (rt2x00dev->intf_sta_count)
+		return 0;
+	return vif->addr[5] & (rt2x00dev->ops->max_ap_intf - 1);
+}
+EXPORT_SYMBOL_GPL(rt2x00lib_get_bssidx);
 
 /*
  * Radio control handlers.
@@ -66,19 +83,16 @@ int rt2x00lib_enable_radio(struct rt2x00_dev *rt2x00dev)
 	set_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags);
 
 	/*
-	 * Enable RX.
+	 * Enable queues.
 	 */
-	rt2x00lib_toggle_rx(rt2x00dev, STATE_RADIO_RX_ON);
+	rt2x00queue_start_queues(rt2x00dev);
+	rt2x00link_start_tuner(rt2x00dev);
+	rt2x00link_start_agc(rt2x00dev);
 
 	/*
 	 * Start watchdog monitoring.
 	 */
 	rt2x00link_start_watchdog(rt2x00dev);
-
-	/*
-	 * Start the TX queues.
-	 */
-	ieee80211_wake_queues(rt2x00dev->hw);
 
 	return 0;
 }
@@ -89,20 +103,17 @@ void rt2x00lib_disable_radio(struct rt2x00_dev *rt2x00dev)
 		return;
 
 	/*
-	 * Stop the TX queues in mac80211.
-	 */
-	ieee80211_stop_queues(rt2x00dev->hw);
-	rt2x00queue_stop_queues(rt2x00dev);
-
-	/*
 	 * Stop watchdog monitoring.
 	 */
 	rt2x00link_stop_watchdog(rt2x00dev);
 
 	/*
-	 * Disable RX.
+	 * Stop all queues
 	 */
-	rt2x00lib_toggle_rx(rt2x00dev, STATE_RADIO_RX_OFF);
+	rt2x00link_stop_agc(rt2x00dev);
+	rt2x00link_stop_tuner(rt2x00dev);
+	rt2x00queue_stop_queues(rt2x00dev);
+	rt2x00queue_flush_queues(rt2x00dev, true);
 
 	/*
 	 * Disable radio.
@@ -113,41 +124,11 @@ void rt2x00lib_disable_radio(struct rt2x00_dev *rt2x00dev)
 	rt2x00leds_led_radio(rt2x00dev, false);
 }
 
-void rt2x00lib_toggle_rx(struct rt2x00_dev *rt2x00dev, enum dev_state state)
-{
-	/*
-	 * When we are disabling the RX, we should also stop the link tuner.
-	 */
-	if (state == STATE_RADIO_RX_OFF)
-		rt2x00link_stop_tuner(rt2x00dev);
-
-	rt2x00dev->ops->lib->set_device_state(rt2x00dev, state);
-
-	/*
-	 * When we are enabling the RX, we should also start the link tuner.
-	 */
-	if (state == STATE_RADIO_RX_ON)
-		rt2x00link_start_tuner(rt2x00dev);
-}
-
 static void rt2x00lib_intf_scheduled_iter(void *data, u8 *mac,
 					  struct ieee80211_vif *vif)
 {
 	struct rt2x00_dev *rt2x00dev = data;
 	struct rt2x00_intf *intf = vif_to_intf(vif);
-	int delayed_flags;
-
-	/*
-	 * Copy all data we need during this action under the protection
-	 * of a spinlock. Otherwise race conditions might occur which results
-	 * into an invalid configuration.
-	 */
-	spin_lock(&intf->lock);
-
-	delayed_flags = intf->delayed_flags;
-	intf->delayed_flags = 0;
-
-	spin_unlock(&intf->lock);
 
 	/*
 	 * It is possible the radio was disabled while the work had been
@@ -158,8 +139,8 @@ static void rt2x00lib_intf_scheduled_iter(void *data, u8 *mac,
 	if (!test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
 		return;
 
-	if (delayed_flags & DELAYED_UPDATE_BEACON)
-		rt2x00queue_update_beacon(rt2x00dev, vif, true);
+	if (test_and_clear_bit(DELAYED_UPDATE_BEACON, &intf->delayed_flags))
+		rt2x00queue_update_beacon(rt2x00dev, vif);
 }
 
 static void rt2x00lib_intf_scheduled(struct work_struct *work)
@@ -174,6 +155,19 @@ static void rt2x00lib_intf_scheduled(struct work_struct *work)
 	ieee80211_iterate_active_interfaces(rt2x00dev->hw,
 					    rt2x00lib_intf_scheduled_iter,
 					    rt2x00dev);
+}
+
+static void rt2x00lib_autowakeup(struct work_struct *work)
+{
+	struct rt2x00_dev *rt2x00dev =
+	    container_of(work, struct rt2x00_dev, autowakeup_work.work);
+
+	if (!test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags))
+		return;
+
+	if (rt2x00dev->ops->lib->set_device_state(rt2x00dev, STATE_AWAKE))
+		ERROR(rt2x00dev, "Device failed to wakeup.\n");
+	clear_bit(CONFIG_POWERSAVING, &rt2x00dev->flags);
 }
 
 /*
@@ -212,7 +206,13 @@ static void rt2x00lib_beaconupdate_iter(void *data, u8 *mac,
 	    vif->type != NL80211_IFTYPE_WDS)
 		return;
 
-	rt2x00queue_update_beacon(rt2x00dev, vif, true);
+	/*
+	 * Update the beacon without locking. This is safe on PCI devices
+	 * as they only update the beacon periodically here. This should
+	 * never be called for USB devices.
+	 */
+	WARN_ON(rt2x00_is_usb(rt2x00dev));
+	rt2x00queue_update_beacon_locked(rt2x00dev, vif);
 }
 
 void rt2x00lib_beacondone(struct rt2x00_dev *rt2x00dev)
@@ -221,21 +221,21 @@ void rt2x00lib_beacondone(struct rt2x00_dev *rt2x00dev)
 		return;
 
 	/* send buffered bc/mc frames out for every bssid */
-	ieee80211_iterate_active_interfaces(rt2x00dev->hw,
-					    rt2x00lib_bc_buffer_iter,
-					    rt2x00dev);
+	ieee80211_iterate_active_interfaces_atomic(rt2x00dev->hw,
+						   rt2x00lib_bc_buffer_iter,
+						   rt2x00dev);
 	/*
 	 * Devices with pre tbtt interrupt don't need to update the beacon
 	 * here as they will fetch the next beacon directly prior to
 	 * transmission.
 	 */
-	if (test_bit(DRIVER_SUPPORT_PRE_TBTT_INTERRUPT, &rt2x00dev->flags))
+	if (test_bit(CAPABILITY_PRE_TBTT_INTERRUPT, &rt2x00dev->cap_flags))
 		return;
 
 	/* fetch next beacon */
-	ieee80211_iterate_active_interfaces(rt2x00dev->hw,
-					    rt2x00lib_beaconupdate_iter,
-					    rt2x00dev);
+	ieee80211_iterate_active_interfaces_atomic(rt2x00dev->hw,
+						   rt2x00lib_beaconupdate_iter,
+						   rt2x00dev);
 }
 EXPORT_SYMBOL_GPL(rt2x00lib_beacondone);
 
@@ -245,16 +245,24 @@ void rt2x00lib_pretbtt(struct rt2x00_dev *rt2x00dev)
 		return;
 
 	/* fetch next beacon */
-	ieee80211_iterate_active_interfaces(rt2x00dev->hw,
-					    rt2x00lib_beaconupdate_iter,
-					    rt2x00dev);
+	ieee80211_iterate_active_interfaces_atomic(rt2x00dev->hw,
+						   rt2x00lib_beaconupdate_iter,
+						   rt2x00dev);
 }
 EXPORT_SYMBOL_GPL(rt2x00lib_pretbtt);
 
+void rt2x00lib_dmastart(struct queue_entry *entry)
+{
+	set_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags);
+	rt2x00queue_index_inc(entry, Q_INDEX);
+}
+EXPORT_SYMBOL_GPL(rt2x00lib_dmastart);
+
 void rt2x00lib_dmadone(struct queue_entry *entry)
 {
+	set_bit(ENTRY_DATA_STATUS_PENDING, &entry->flags);
 	clear_bit(ENTRY_OWNER_DEVICE_DATA, &entry->flags);
-	rt2x00queue_index_inc(entry->queue, Q_INDEX_DMA_DONE);
+	rt2x00queue_index_inc(entry, Q_INDEX_DMA_DONE);
 }
 EXPORT_SYMBOL_GPL(rt2x00lib_dmadone);
 
@@ -264,11 +272,9 @@ void rt2x00lib_txdone(struct queue_entry *entry,
 	struct rt2x00_dev *rt2x00dev = entry->queue->rt2x00dev;
 	struct ieee80211_tx_info *tx_info = IEEE80211_SKB_CB(entry->skb);
 	struct skb_frame_desc *skbdesc = get_skb_frame_desc(entry->skb);
-	enum data_queue_qid qid = skb_get_queue_mapping(entry->skb);
-	unsigned int header_length = ieee80211_get_hdrlen_from_skb(entry->skb);
+	unsigned int header_length, i;
 	u8 rate_idx, rate_flags, retry_rates;
 	u8 skbdesc_flags = skbdesc->flags;
-	unsigned int i;
 	bool success;
 
 	/*
@@ -287,9 +293,14 @@ void rt2x00lib_txdone(struct queue_entry *entry,
 	skbdesc->flags &= ~SKBDESC_DESC_IN_SKB;
 
 	/*
+	 * Determine the length of 802.11 header.
+	 */
+	header_length = ieee80211_get_hdrlen_from_skb(entry->skb);
+
+	/*
 	 * Remove L2 padding which was added during
 	 */
-	if (test_bit(DRIVER_REQUIRE_L2PAD, &rt2x00dev->flags))
+	if (test_bit(REQUIRE_L2PAD, &rt2x00dev->cap_flags))
 		rt2x00queue_remove_l2pad(entry->skb, header_length);
 
 	/*
@@ -298,7 +309,7 @@ void rt2x00lib_txdone(struct queue_entry *entry,
 	 * mac80211 will expect the same data to be present it the
 	 * frame as it was passed to us.
 	 */
-	if (test_bit(CONFIG_SUPPORT_HW_CRYPTO, &rt2x00dev->flags))
+	if (test_bit(CAPABILITY_HW_CRYPTO, &rt2x00dev->cap_flags))
 		rt2x00crypto_tx_insert_iv(entry->skb, header_length);
 
 	/*
@@ -371,10 +382,14 @@ void rt2x00lib_txdone(struct queue_entry *entry,
 	 * which would allow the rc algorithm to better decide on
 	 * which rates are suitable.
 	 */
-	if (tx_info->flags & IEEE80211_TX_CTL_AMPDU) {
+	if (test_bit(TXDONE_AMPDU, &txdesc->flags) ||
+	    tx_info->flags & IEEE80211_TX_CTL_AMPDU) {
 		tx_info->flags |= IEEE80211_TX_STAT_AMPDU;
 		tx_info->status.ampdu_len = 1;
 		tx_info->status.ampdu_ack_len = success ? 1 : 0;
+
+		if (!success)
+			tx_info->flags |= IEEE80211_TX_STAT_AMPDU_NO_BACK;
 	}
 
 	if (rate_flags & IEEE80211_TX_RC_USE_RTS_CTS) {
@@ -391,7 +406,7 @@ void rt2x00lib_txdone(struct queue_entry *entry,
 	 * send the status report back.
 	 */
 	if (!(skbdesc_flags & SKBDESC_NOT_MAC80211)) {
-		if (test_bit(DRIVER_REQUIRE_TASKLET_CONTEXT, &rt2x00dev->flags))
+		if (test_bit(REQUIRE_TASKLET_CONTEXT, &rt2x00dev->cap_flags))
 			ieee80211_tx_status(rt2x00dev->hw, entry->skb);
 		else
 			ieee80211_tx_status_ni(rt2x00dev->hw, entry->skb);
@@ -406,15 +421,19 @@ void rt2x00lib_txdone(struct queue_entry *entry,
 
 	rt2x00dev->ops->lib->clear_entry(entry);
 
-	rt2x00queue_index_inc(entry->queue, Q_INDEX_DONE);
+	rt2x00queue_index_inc(entry, Q_INDEX_DONE);
 
 	/*
 	 * If the data queue was below the threshold before the txdone
 	 * handler we must make sure the packet queue in the mac80211 stack
-	 * is reenabled when the txdone handler has finished.
+	 * is reenabled when the txdone handler has finished. This has to be
+	 * serialized with rt2x00mac_tx(), otherwise we can wake up queue
+	 * before it was stopped.
 	 */
+	spin_lock_bh(&entry->queue->tx_lock);
 	if (!rt2x00queue_threshold(entry->queue))
-		ieee80211_wake_queue(rt2x00dev->hw, qid);
+		rt2x00queue_unpause_queue(entry->queue);
+	spin_unlock_bh(&entry->queue->tx_lock);
 }
 EXPORT_SYMBOL_GPL(rt2x00lib_txdone);
 
@@ -429,6 +448,93 @@ void rt2x00lib_txdone_noinfo(struct queue_entry *entry, u32 status)
 	rt2x00lib_txdone(entry, &txdesc);
 }
 EXPORT_SYMBOL_GPL(rt2x00lib_txdone_noinfo);
+
+static u8 *rt2x00lib_find_ie(u8 *data, unsigned int len, u8 ie)
+{
+	struct ieee80211_mgmt *mgmt = (void *)data;
+	u8 *pos, *end;
+
+	pos = (u8 *)mgmt->u.beacon.variable;
+	end = data + len;
+	while (pos < end) {
+		if (pos + 2 + pos[1] > end)
+			return NULL;
+
+		if (pos[0] == ie)
+			return pos;
+
+		pos += 2 + pos[1];
+	}
+
+	return NULL;
+}
+
+static void rt2x00lib_sleep(struct work_struct *work)
+{
+	struct rt2x00_dev *rt2x00dev =
+	    container_of(work, struct rt2x00_dev, sleep_work);
+
+	if (!test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags))
+		return;
+
+	/*
+	 * Check again is powersaving is enabled, to prevent races from delayed
+	 * work execution.
+	 */
+	if (!test_bit(CONFIG_POWERSAVING, &rt2x00dev->flags))
+		rt2x00lib_config(rt2x00dev, &rt2x00dev->hw->conf,
+				 IEEE80211_CONF_CHANGE_PS);
+}
+
+static void rt2x00lib_rxdone_check_ps(struct rt2x00_dev *rt2x00dev,
+				      struct sk_buff *skb,
+				      struct rxdone_entry_desc *rxdesc)
+{
+	struct ieee80211_hdr *hdr = (void *) skb->data;
+	struct ieee80211_tim_ie *tim_ie;
+	u8 *tim;
+	u8 tim_len;
+	bool cam;
+
+	/* If this is not a beacon, or if mac80211 has no powersaving
+	 * configured, or if the device is already in powersaving mode
+	 * we can exit now. */
+	if (likely(!ieee80211_is_beacon(hdr->frame_control) ||
+		   !(rt2x00dev->hw->conf.flags & IEEE80211_CONF_PS)))
+		return;
+
+	/* min. beacon length + FCS_LEN */
+	if (skb->len <= 40 + FCS_LEN)
+		return;
+
+	/* and only beacons from the associated BSSID, please */
+	if (!(rxdesc->dev_flags & RXDONE_MY_BSS) ||
+	    !rt2x00dev->aid)
+		return;
+
+	rt2x00dev->last_beacon = jiffies;
+
+	tim = rt2x00lib_find_ie(skb->data, skb->len - FCS_LEN, WLAN_EID_TIM);
+	if (!tim)
+		return;
+
+	if (tim[1] < sizeof(*tim_ie))
+		return;
+
+	tim_len = tim[1];
+	tim_ie = (struct ieee80211_tim_ie *) &tim[2];
+
+	/* Check whenever the PHY can be turned off again. */
+
+	/* 1. What about buffered unicast traffic for our AID? */
+	cam = ieee80211_check_tim(tim_ie, tim_len, rt2x00dev->aid);
+
+	/* 2. Maybe the AP wants to send multicast/broadcast data? */
+	cam |= (tim_ie->bitmap_ctrl & 0x01);
+
+	if (!cam && !test_bit(CONFIG_POWERSAVING, &rt2x00dev->flags))
+		queue_work(rt2x00dev->workqueue, &rt2x00dev->sleep_work);
+}
 
 static int rt2x00lib_rxdone_read_signal(struct rt2x00_dev *rt2x00dev,
 					struct rxdone_entry_desc *rxdesc)
@@ -486,6 +592,10 @@ void rt2x00lib_rxdone(struct queue_entry *entry)
 	unsigned int header_length;
 	int rate_idx;
 
+	if (!test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags) ||
+	    !test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
+		goto submit_entry;
+
 	if (test_bit(ENTRY_DATA_IO_FAILED, &entry->flags))
 		goto submit_entry;
 
@@ -509,6 +619,18 @@ void rt2x00lib_rxdone(struct queue_entry *entry)
 	rt2x00dev->ops->lib->fill_rxdone(entry, &rxdesc);
 
 	/*
+	 * Check for valid size in case we get corrupted descriptor from
+	 * hardware.
+	 */
+	if (unlikely(rxdesc.size == 0 ||
+		     rxdesc.size > entry->queue->data_size)) {
+		WARNING(rt2x00dev, "Wrong frame size %d max %d.\n",
+			rxdesc.size, entry->queue->data_size);
+		dev_kfree_skb(entry->skb);
+		goto renew_skb;
+	}
+
+	/*
 	 * The data behind the ieee80211 header must be
 	 * aligned on a 4 byte boundary.
 	 */
@@ -528,8 +650,6 @@ void rt2x00lib_rxdone(struct queue_entry *entry)
 		 (rxdesc.size > header_length) &&
 		 (rxdesc.dev_flags & RXDONE_L2PAD))
 		rt2x00queue_remove_l2pad(entry->skb, header_length);
-	else
-		rt2x00queue_align_payload(entry->skb, header_length);
 
 	/* Trim buffer to correct size */
 	skb_trim(entry->skb, rxdesc.size);
@@ -541,6 +661,12 @@ void rt2x00lib_rxdone(struct queue_entry *entry)
 	if (rxdesc.rate_mode == RATE_MODE_HT_MIX ||
 	    rxdesc.rate_mode == RATE_MODE_HT_GREENFIELD)
 		rxdesc.flags |= RX_FLAG_HT;
+
+	/*
+	 * Check if this is a beacon, and more frames have been
+	 * buffered while we were in powersaving mode.
+	 */
+	rt2x00lib_rxdone_check_ps(rt2x00dev, entry->skb, &rxdesc);
 
 	/*
 	 * Update extra components
@@ -564,15 +690,18 @@ void rt2x00lib_rxdone(struct queue_entry *entry)
 
 	ieee80211_rx_ni(rt2x00dev->hw, entry->skb);
 
+renew_skb:
 	/*
 	 * Replace the skb with the freshly allocated one.
 	 */
 	entry->skb = skb;
 
 submit_entry:
-	rt2x00dev->ops->lib->clear_entry(entry);
-	rt2x00queue_index_inc(entry->queue, Q_INDEX);
-	rt2x00queue_index_inc(entry->queue, Q_INDEX_DONE);
+	entry->flags = 0;
+	rt2x00queue_index_inc(entry, Q_INDEX_DONE);
+	if (test_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags) &&
+	    test_bit(DEVICE_STATE_ENABLED_RADIO, &rt2x00dev->flags))
+		rt2x00dev->ops->lib->clear_entry(entry);
 }
 EXPORT_SYMBOL_GPL(rt2x00lib_rxdone);
 
@@ -670,7 +799,10 @@ static void rt2x00lib_channel(struct ieee80211_channel *entry,
 			      const int channel, const int tx_power,
 			      const int value)
 {
-	entry->center_freq = ieee80211_channel_to_frequency(channel);
+	/* XXX: this assumption about the band is wrong for 802.11j */
+	entry->band = channel <= 14 ? IEEE80211_BAND_2GHZ : IEEE80211_BAND_5GHZ;
+	entry->center_freq = ieee80211_channel_to_frequency(channel,
+							    entry->band);
 	entry->hw_value = value;
 	entry->max_power = tx_power;
 	entry->max_antenna_gain = 0xff;
@@ -681,7 +813,7 @@ static void rt2x00lib_rate(struct ieee80211_rate *entry,
 {
 	entry->flags = 0;
 	entry->bitrate = rate->bitrate;
-	entry->hw_value =index;
+	entry->hw_value = index;
 	entry->hw_value_short = index;
 
 	if (rate->flags & DEV_RATE_SHORT_PREAMBLE)
@@ -703,11 +835,11 @@ static int rt2x00lib_probe_hw_modes(struct rt2x00_dev *rt2x00dev,
 	if (spec->supported_rates & SUPPORT_RATE_OFDM)
 		num_rates += 8;
 
-	channels = kzalloc(sizeof(*channels) * spec->num_channels, GFP_KERNEL);
+	channels = kcalloc(spec->num_channels, sizeof(*channels), GFP_KERNEL);
 	if (!channels)
 		return -ENOMEM;
 
-	rates = kzalloc(sizeof(*rates) * num_rates, GFP_KERNEL);
+	rates = kcalloc(num_rates, sizeof(*rates), GFP_KERNEL);
 	if (!rates)
 		goto exit_free_channels;
 
@@ -813,34 +945,57 @@ static int rt2x00lib_probe_hw(struct rt2x00_dev *rt2x00dev)
 	/*
 	 * Take TX headroom required for alignment into account.
 	 */
-	if (test_bit(DRIVER_REQUIRE_L2PAD, &rt2x00dev->flags))
+	if (test_bit(REQUIRE_L2PAD, &rt2x00dev->cap_flags))
 		rt2x00dev->hw->extra_tx_headroom += RT2X00_L2PAD_SIZE;
-	else if (test_bit(DRIVER_REQUIRE_DMA, &rt2x00dev->flags))
+	else if (test_bit(REQUIRE_DMA, &rt2x00dev->cap_flags))
 		rt2x00dev->hw->extra_tx_headroom += RT2X00_ALIGN_SIZE;
+
+	/*
+	 * Tell mac80211 about the size of our private STA structure.
+	 */
+	rt2x00dev->hw->sta_data_size = sizeof(struct rt2x00_sta);
 
 	/*
 	 * Allocate tx status FIFO for driver use.
 	 */
-	if (test_bit(DRIVER_REQUIRE_TXSTATUS_FIFO, &rt2x00dev->flags) &&
-	    rt2x00dev->ops->lib->txstatus_tasklet) {
+	if (test_bit(REQUIRE_TXSTATUS_FIFO, &rt2x00dev->cap_flags)) {
 		/*
-		 * Allocate txstatus fifo and tasklet, we use a size of 512
-		 * for the kfifo which is big enough to store 512/4=128 tx
-		 * status reports. In the worst case (tx status for all tx
-		 * queues gets reported before we've got a chance to handle
-		 * them) 24*4=384 tx status reports need to be cached.
+		 * Allocate the txstatus fifo. In the worst case the tx
+		 * status fifo has to hold the tx status of all entries
+		 * in all tx queues. Hence, calculate the kfifo size as
+		 * tx_queues * entry_num and round up to the nearest
+		 * power of 2.
 		 */
-		status = kfifo_alloc(&rt2x00dev->txstatus_fifo, 512,
+		int kfifo_size =
+			roundup_pow_of_two(rt2x00dev->ops->tx_queues *
+					   rt2x00dev->ops->tx->entry_num *
+					   sizeof(u32));
+
+		status = kfifo_alloc(&rt2x00dev->txstatus_fifo, kfifo_size,
 				     GFP_KERNEL);
 		if (status)
 			return status;
-
-		/* tasklet for processing the tx status reports. */
-		tasklet_init(&rt2x00dev->txstatus_tasklet,
-			     rt2x00dev->ops->lib->txstatus_tasklet,
-			     (unsigned long)rt2x00dev);
-
 	}
+
+	/*
+	 * Initialize tasklets if used by the driver. Tasklets are
+	 * disabled until the interrupts are turned on. The driver
+	 * has to handle that.
+	 */
+#define RT2X00_TASKLET_INIT(taskletname) \
+	if (rt2x00dev->ops->lib->taskletname) { \
+		tasklet_init(&rt2x00dev->taskletname, \
+			     rt2x00dev->ops->lib->taskletname, \
+			     (unsigned long)rt2x00dev); \
+	}
+
+	RT2X00_TASKLET_INIT(txstatus_tasklet);
+	RT2X00_TASKLET_INIT(pretbtt_tasklet);
+	RT2X00_TASKLET_INIT(tbtt_tasklet);
+	RT2X00_TASKLET_INIT(rxdone_tasklet);
+	RT2X00_TASKLET_INIT(autowake_tasklet);
+
+#undef RT2X00_TASKLET_INIT
 
 	/*
 	 * Register HW.
@@ -970,6 +1125,7 @@ int rt2x00lib_probe_dev(struct rt2x00_dev *rt2x00dev)
 {
 	int retval = -ENOMEM;
 
+	spin_lock_init(&rt2x00dev->irqmask_lock);
 	mutex_init(&rt2x00dev->csr_mutex);
 
 	set_bit(DEVICE_STATE_PRESENT, &rt2x00dev->flags);
@@ -994,9 +1150,18 @@ int rt2x00lib_probe_dev(struct rt2x00_dev *rt2x00dev)
 		    BIT(NL80211_IFTYPE_WDS);
 
 	/*
-	 * Initialize configuration work.
+	 * Initialize work.
 	 */
+	rt2x00dev->workqueue =
+	    alloc_ordered_workqueue(wiphy_name(rt2x00dev->hw->wiphy), 0);
+	if (!rt2x00dev->workqueue) {
+		retval = -ENOMEM;
+		goto exit;
+	}
+
 	INIT_WORK(&rt2x00dev->intf_work, rt2x00lib_intf_scheduled);
+	INIT_DELAYED_WORK(&rt2x00dev->autowakeup_work, rt2x00lib_autowakeup);
+	INIT_WORK(&rt2x00dev->sleep_work, rt2x00lib_sleep);
 
 	/*
 	 * Let the driver probe the device to detect the capabilities.
@@ -1052,8 +1217,15 @@ void rt2x00lib_remove_dev(struct rt2x00_dev *rt2x00dev)
 	 * Stop all work.
 	 */
 	cancel_work_sync(&rt2x00dev->intf_work);
-	cancel_work_sync(&rt2x00dev->rxdone_work);
-	cancel_work_sync(&rt2x00dev->txdone_work);
+	cancel_delayed_work_sync(&rt2x00dev->autowakeup_work);
+	cancel_work_sync(&rt2x00dev->sleep_work);
+	if (rt2x00_is_usb(rt2x00dev)) {
+		del_timer_sync(&rt2x00dev->txstatus_timer);
+		cancel_work_sync(&rt2x00dev->rxdone_work);
+		cancel_work_sync(&rt2x00dev->txdone_work);
+	}
+	if (rt2x00dev->workqueue)
+		destroy_workqueue(rt2x00dev->workqueue);
 
 	/*
 	 * Free the tx status fifo.
@@ -1064,6 +1236,10 @@ void rt2x00lib_remove_dev(struct rt2x00_dev *rt2x00dev)
 	 * Kill the tx status tasklet.
 	 */
 	tasklet_kill(&rt2x00dev->txstatus_tasklet);
+	tasklet_kill(&rt2x00dev->pretbtt_tasklet);
+	tasklet_kill(&rt2x00dev->tbtt_tasklet);
+	tasklet_kill(&rt2x00dev->rxdone_tasklet);
+	tasklet_kill(&rt2x00dev->autowake_tasklet);
 
 	/*
 	 * Uninitialize device.

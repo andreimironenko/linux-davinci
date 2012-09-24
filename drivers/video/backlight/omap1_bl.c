@@ -146,6 +146,7 @@ static int omapbl_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	memset(&props, 0, sizeof(struct backlight_properties));
+	props.type = BACKLIGHT_RAW;
 	props.max_brightness = OMAPBL_MAX_INTENSITY;
 	dev = backlight_device_register("omap-bl", &pdev->dev, bl, &omapbl_ops,
 					&props);
@@ -194,18 +195,7 @@ static struct platform_driver omapbl_driver = {
 	},
 };
 
-static int __init omapbl_init(void)
-{
-	return platform_driver_register(&omapbl_driver);
-}
-
-static void __exit omapbl_exit(void)
-{
-	platform_driver_unregister(&omapbl_driver);
-}
-
-module_init(omapbl_init);
-module_exit(omapbl_exit);
+module_platform_driver(omapbl_driver);
 
 MODULE_AUTHOR("Andrzej Zaborowski <balrog@zabor.org>");
 MODULE_DESCRIPTION("OMAP LCD Backlight driver");

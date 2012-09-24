@@ -9,7 +9,7 @@
  * as published by the Free Software Foundation; version 2
  * of the License.
  *
- * SCU runing in ARC processor communicates with other entity running in IA
+ * SCU running in ARC processor communicates with other entity running in IA
  * core through IPC mechanism which in turn messaging between IA core ad SCU.
  * SCU has two IPC mechanism IPC-1 and IPC-2. IPC-1 is used between IA32 and
  * SCU where IPC-2 is used between P-Unit and SCU. This driver delas with
@@ -19,11 +19,12 @@
 #include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/init.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/pm.h>
 #include <linux/pci.h>
 #include <linux/interrupt.h>
 #include <linux/sfi.h>
+#include <linux/module.h>
 #include <asm/mrst.h>
 #include <asm/intel_scu_ipc.h>
 
@@ -160,7 +161,7 @@ static int pwr_reg_rdwr(u16 *addr, u8 *data, u32 count, u32 op, u32 id)
 {
 	int i, nc, bytes, d;
 	u32 offset = 0;
-	u32 err = 0;
+	int err;
 	u8 cbuf[IPC_WWBUF_SIZE] = { };
 	u32 *wbuf = (u32 *)&cbuf;
 
@@ -403,7 +404,7 @@ EXPORT_SYMBOL(intel_scu_ipc_update_register);
  */
 int intel_scu_ipc_simple_command(int cmd, int sub)
 {
-	u32 err = 0;
+	int err;
 
 	mutex_lock(&ipclock);
 	if (ipcdev.pdev == NULL) {
@@ -433,8 +434,7 @@ EXPORT_SYMBOL(intel_scu_ipc_simple_command);
 int intel_scu_ipc_command(int cmd, int sub, u32 *in, int inlen,
 							u32 *out, int outlen)
 {
-	u32 err = 0;
-	int i = 0;
+	int i, err;
 
 	mutex_lock(&ipclock);
 	if (ipcdev.pdev == NULL) {
@@ -496,7 +496,7 @@ int intel_scu_ipc_i2c_cntrl(u32 addr, u32 *data)
 			"intel_scu_ipc: I2C INVALID_CMD = 0x%x\n", cmd);
 
 		mutex_unlock(&ipclock);
-		return -1;
+		return -EIO;
 	}
 	mutex_unlock(&ipclock);
 	return 0;
@@ -641,7 +641,7 @@ update_end:
 
 	if (status == IPC_FW_UPDATE_SUCCESS)
 		return 0;
-	return -1;
+	return -EIO;
 }
 EXPORT_SYMBOL(intel_scu_ipc_fw_update);
 
@@ -699,6 +699,9 @@ static int ipc_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		iounmap(ipcdev.ipc_base);
 		return -ENOMEM;
 	}
+
+	intel_scu_devices_create();
+
 	return 0;
 }
 
@@ -720,9 +723,10 @@ static void ipc_remove(struct pci_dev *pdev)
 	iounmap(ipcdev.ipc_base);
 	iounmap(ipcdev.i2c_base);
 	ipcdev.pdev = NULL;
+	intel_scu_devices_destroy();
 }
 
-static const struct pci_device_id pci_ids[] = {
+static DEFINE_PCI_DEVICE_TABLE(pci_ids) = {
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, 0x080e)},
 	{PCI_DEVICE(PCI_VENDOR_ID_INTEL, 0x082a)},
 	{ 0,}

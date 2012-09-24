@@ -4,10 +4,15 @@
 #include <linux/err.h>
 #include <linux/sched.h>
 
-struct task_struct *kthread_create(int (*threadfn)(void *data),
-				   void *data,
-				   const char namefmt[], ...)
-	__attribute__((format(printf, 3, 4)));
+__printf(4, 5)
+struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
+					   void *data,
+					   int node,
+					   const char namefmt[], ...);
+
+#define kthread_create(threadfn, data, namefmt, arg...) \
+	kthread_create_on_node(threadfn, data, -1, namefmt, ##arg)
+
 
 /**
  * kthread_run - create and wake a thread.
@@ -30,10 +35,12 @@ struct task_struct *kthread_create(int (*threadfn)(void *data),
 void kthread_bind(struct task_struct *k, unsigned int cpu);
 int kthread_stop(struct task_struct *k);
 int kthread_should_stop(void);
+bool kthread_freezable_should_stop(bool *was_frozen);
 void *kthread_data(struct task_struct *k);
 
 int kthreadd(void *unused);
 extern struct task_struct *kthreadd_task;
+extern int tsk_fork_get_node(struct task_struct *tsk);
 
 /*
  * Simple work processor based on kthread.
@@ -64,7 +71,7 @@ struct kthread_work {
 };
 
 #define KTHREAD_WORKER_INIT(worker)	{				\
-	.lock = SPIN_LOCK_UNLOCKED,					\
+	.lock = __SPIN_LOCK_UNLOCKED((worker).lock),			\
 	.work_list = LIST_HEAD_INIT((worker).work_list),		\
 	}
 

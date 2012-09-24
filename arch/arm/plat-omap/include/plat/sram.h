@@ -11,7 +11,27 @@
 #ifndef __ARCH_ARM_OMAP_SRAM_H
 #define __ARCH_ARM_OMAP_SRAM_H
 
-extern void * omap_sram_push(void * start, unsigned long size);
+#ifndef __ASSEMBLY__
+#include <linux/slab.h>
+#include <linux/genalloc.h>
+#include <asm/fncpy.h>
+
+extern struct gen_pool *omap_gen_pool;
+
+/*
+ * Note that fncpy requires the SRAM address to be aligned to an 8-byte
+ * boundary, so the min_alloc_order for the pool is set appropriately.
+ */
+#define omap_sram_push(funcp, size) ({				\
+	typeof(&(funcp)) _res;					\
+	size_t _sz = size;					\
+	void *_sram = gen_pool_alloc(omap_gen_pool, _sz);	\
+	_res = (_sram ? fncpy(_sram, &(funcp), _sz) : NULL);	\
+	if (!_res)						\
+		pr_err("Not enough space in SRAM\n");		\
+	_res;							\
+})
+
 extern void omap_sram_reprogram_clock(u32 dpllctl, u32 ckctl);
 
 extern void omap2_sram_ddr_init(u32 *slow_dll_ctrl, u32 fast_dll_ctrl,
@@ -74,4 +94,18 @@ extern void omap_push_sram_idle(void);
 static inline void omap_push_sram_idle(void) {}
 #endif /* CONFIG_PM */
 
+#endif /* __ASSEMBLY__ */
+
+/*
+ * OMAP2+: define the SRAM PA addresses.
+ * Used by the SRAM management code and the idle sleep code.
+ */
+#define OMAP2_SRAM_PA		0x40200000
+#define OMAP3_SRAM_PA           0x40200000
+#ifdef CONFIG_OMAP4_ERRATA_I688
+#define OMAP4_SRAM_PA		0x40304000
+#define OMAP4_SRAM_VA		0xfe404000
+#else
+#define OMAP4_SRAM_PA		0x40300000
+#endif
 #endif

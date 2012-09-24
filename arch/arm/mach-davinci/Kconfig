@@ -45,10 +45,9 @@ config DAVINCI_UART1_AFE
 	bool "Enable UART1 flow control"
 	depends on SERIAL_8250=y && ARCH_DAVINCI_DA850=y
 	help
-	  Say Y here if you want to enable flow control on UART1.
-	  This flag enables the UART1 RTS/CTS lines pinmuxing only if
-	  McASP is not selected. That is McASP pinmuxing overrides
-	  enabling of UART1 RTS/CTS.
+	  Say Y here if you want to enable flow control on UART1. This flag
+	  is necessary to detect pinmux clash between UART1 RTS/CTS lines with
+	  MCASP.
 
 config ARCH_DAVINCI_DA8XX
 	select CPU_ARM926T
@@ -72,6 +71,7 @@ config MACH_DAVINCI_EVM
 	depends on ARCH_DAVINCI_DM644x
 	select MISC_DEVICES
 	select EEPROM_AT24
+	select I2C
 	help
 	  Configure this option to specify the whether the board used
 	  for development is a DM644x EVM
@@ -81,6 +81,7 @@ config MACH_SFFSDR
 	depends on ARCH_DAVINCI_DM644x
 	select MISC_DEVICES
 	select EEPROM_AT24
+	select I2C
 	help
 	  Say Y here to select the Lyrtech Small Form Factor
 	  Software Defined Radio (SFFSDR) board.
@@ -114,6 +115,7 @@ config MACH_DAVINCI_DM6467_EVM
 	select MACH_DAVINCI_DM6467TEVM
 	select MISC_DEVICES
 	select EEPROM_AT24
+	select I2C
 	help
 	  Configure this option to specify the whether the board used
 	  for development is a DM6467 EVM
@@ -127,6 +129,7 @@ config MACH_DAVINCI_DM365_EVM
 	depends on ARCH_DAVINCI_DM365
 	select MISC_DEVICES
 	select EEPROM_AT24
+	select I2C
 	help
 	  Configure this option to specify whether the board used
 	  for development is a DM365 EVM
@@ -138,6 +141,7 @@ config MACH_DAVINCI_DA830_EVM
 	select GPIO_PCF857X
 	select MISC_DEVICES
 	select EEPROM_AT24
+	select I2C
 	help
 	  Say Y here to select the TI DA830/OMAP-L137/AM17x Evaluation Module.
 
@@ -222,6 +226,25 @@ config DA850_UI_CAMERA
 
 endchoice
 
+config DA850_FIX_PLL0_SYSCLK3RATE
+	int "PLL0_SYSCLK3 rate"
+	depends on ARCH_DAVINCI_DA850
+	range 0 148000000
+	default 0
+	help
+	  Set this value with desired EMIF clock rate, Otherwise EMIF clock
+          rate is decided based on OPP value.
+
+config DA850_WL12XX
+	bool "AM18x wl1271 daughter board"
+	depends on MACH_DAVINCI_DA850_EVM
+	help
+	  The wl1271 daughter card for AM18x EVMs is a combo wireless
+	  connectivity add-on card, based on the LS Research TiWi module with
+	  Texas Instruments' wl1271 solution.
+	  Say Y if you want to use a wl1271 expansion card connected to the
+	  AM18x EVM.
+
 config GPIO_PCA953X
 	default MACH_DAVINCI_DA850_EVM
 
@@ -240,6 +263,7 @@ config MACH_MITYOMAPL138
 	depends on ARCH_DAVINCI_DA850
 	select MISC_DEVICES
 	select EEPROM_AT24
+	select I2C
 	help
 	  Say Y here to select the Critical Link MityDSP-L138/MityARM-1808
 	  System on Module.  Information on this SoM may be found at

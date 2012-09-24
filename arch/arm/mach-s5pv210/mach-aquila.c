@@ -22,6 +22,7 @@
 #include <linux/input.h>
 #include <linux/gpio.h>
 
+#include <asm/hardware/vic.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/map.h>
 #include <asm/setup.h>
@@ -29,16 +30,18 @@
 
 #include <mach/map.h>
 #include <mach/regs-clock.h>
-#include <mach/regs-fb.h>
 
 #include <plat/gpio-cfg.h>
 #include <plat/regs-serial.h>
-#include <plat/s5pv210.h>
 #include <plat/devs.h>
 #include <plat/cpu.h>
 #include <plat/fb.h>
 #include <plat/fimc-core.h>
 #include <plat/sdhci.h>
+#include <plat/s5p-time.h>
+#include <plat/regs-fb-v4.h>
+
+#include "common.h"
 
 /* Following are default values for UCON, ULCON and UFCON UART registers */
 #define AQUILA_UCON_DEFAULT	(S3C2410_UCON_TXILEVEL |	\
@@ -149,7 +152,7 @@ static struct regulator_init_data aquila_ldo2_data = {
 
 static struct regulator_init_data aquila_ldo3_data = {
 	.constraints	= {
-		.name		= "VUSB/MIPI_1.1V",
+		.name		= "VUSB+MIPI_1.1V",
 		.min_uV		= 1100000,
 		.max_uV		= 1100000,
 		.apply_uV	= 1,
@@ -197,7 +200,7 @@ static struct regulator_init_data aquila_ldo7_data = {
 
 static struct regulator_init_data aquila_ldo8_data = {
 	.constraints	= {
-		.name		= "VUSB/VADC_3.3V",
+		.name		= "VUSB+VADC_3.3V",
 		.min_uV		= 3300000,
 		.max_uV		= 3300000,
 		.apply_uV	= 1,
@@ -207,7 +210,7 @@ static struct regulator_init_data aquila_ldo8_data = {
 
 static struct regulator_init_data aquila_ldo9_data = {
 	.constraints	= {
-		.name		= "VCC/VCAM_2.8V",
+		.name		= "VCC+VCAM_2.8V",
 		.min_uV		= 2800000,
 		.max_uV		= 2800000,
 		.apply_uV	= 1,
@@ -296,13 +299,11 @@ static struct regulator_init_data aquila_ldo17_data = {
 };
 
 /* BUCK */
-static struct regulator_consumer_supply buck1_consumer[] = {
-	{	.supply	= "vddarm", },
-};
+static struct regulator_consumer_supply buck1_consumer =
+	REGULATOR_SUPPLY("vddarm", NULL);
 
-static struct regulator_consumer_supply buck2_consumer[] = {
-	{	.supply	= "vddint", },
-};
+static struct regulator_consumer_supply buck2_consumer =
+	REGULATOR_SUPPLY("vddint", NULL);
 
 static struct regulator_init_data aquila_buck1_data = {
 	.constraints	= {
@@ -313,8 +314,8 @@ static struct regulator_init_data aquila_buck1_data = {
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				  REGULATOR_CHANGE_STATUS,
 	},
-	.num_consumer_supplies	= ARRAY_SIZE(buck1_consumer),
-	.consumer_supplies	= buck1_consumer,
+	.num_consumer_supplies	= 1,
+	.consumer_supplies	= &buck1_consumer,
 };
 
 static struct regulator_init_data aquila_buck2_data = {
@@ -326,8 +327,8 @@ static struct regulator_init_data aquila_buck2_data = {
 		.valid_ops_mask	= REGULATOR_CHANGE_VOLTAGE |
 				  REGULATOR_CHANGE_STATUS,
 	},
-	.num_consumer_supplies	= ARRAY_SIZE(buck2_consumer),
-	.consumer_supplies	= buck2_consumer,
+	.num_consumer_supplies	= 1,
+	.consumer_supplies	= &buck2_consumer,
 };
 
 static struct regulator_init_data aquila_buck3_data = {
@@ -381,33 +382,24 @@ static struct max8998_platform_data aquila_max8998_pdata = {
 	.buck1_set1	= S5PV210_GPH0(3),
 	.buck1_set2	= S5PV210_GPH0(4),
 	.buck2_set3	= S5PV210_GPH0(5),
-	.buck1_max_voltage1 = 1200000,
-	.buck1_max_voltage2 = 1200000,
-	.buck2_max_voltage = 1200000,
+	.buck1_voltage1	= 1200000,
+	.buck1_voltage2	= 1200000,
+	.buck1_voltage3	= 1200000,
+	.buck1_voltage4	= 1200000,
+	.buck2_voltage1	= 1200000,
+	.buck2_voltage2	= 1200000,
 };
 #endif
 
 static struct regulator_consumer_supply wm8994_fixed_voltage0_supplies[] = {
-	{
-		.dev_name	= "5-001a",
-		.supply		= "DBVDD",
-	}, {
-		.dev_name	= "5-001a",
-		.supply		= "AVDD2",
-	}, {
-		.dev_name	= "5-001a",
-		.supply		= "CPVDD",
-	},
+	REGULATOR_SUPPLY("DBVDD", "5-001a"),
+	REGULATOR_SUPPLY("AVDD2", "5-001a"),
+	REGULATOR_SUPPLY("CPVDD", "5-001a"),
 };
 
 static struct regulator_consumer_supply wm8994_fixed_voltage1_supplies[] = {
-	{
-		.dev_name	= "5-001a",
-		.supply		= "SPKVDD1",
-	}, {
-		.dev_name	= "5-001a",
-		.supply		= "SPKVDD2",
-	},
+	REGULATOR_SUPPLY("SPKVDD1", "5-001a"),
+	REGULATOR_SUPPLY("SPKVDD2", "5-001a"),
 };
 
 static struct regulator_init_data wm8994_fixed_voltage0_init_data = {
@@ -456,15 +448,11 @@ static struct platform_device wm8994_fixed_voltage1 = {
 	},
 };
 
-static struct regulator_consumer_supply wm8994_avdd1_supply = {
-	.dev_name	= "5-001a",
-	.supply		= "AVDD1",
-};
+static struct regulator_consumer_supply wm8994_avdd1_supply =
+	REGULATOR_SUPPLY("AVDD1", "5-001a");
 
-static struct regulator_consumer_supply wm8994_dcvdd_supply = {
-	.dev_name	= "5-001a",
-	.supply		= "DCVDD",
-};
+static struct regulator_consumer_supply wm8994_dcvdd_supply =
+	REGULATOR_SUPPLY("DCVDD", "5-001a");
 
 static struct regulator_init_data wm8994_ldo1_data = {
 	.constraints	= {
@@ -609,8 +597,7 @@ static struct s3c_sdhci_platdata aquila_hsmmc2_data __initdata = {
 
 static void aquila_setup_sdhci(void)
 {
-	gpio_request(AQUILA_EXT_FLASH_EN, "FLASH_EN");
-	gpio_direction_output(AQUILA_EXT_FLASH_EN, 1);
+	gpio_request_one(AQUILA_EXT_FLASH_EN, GPIOF_OUT_INIT_HIGH, "FLASH_EN");
 
 	s3c_sdhci0_set_platdata(&aquila_hsmmc0_data);
 	s3c_sdhci1_set_platdata(&aquila_hsmmc1_data);
@@ -658,9 +645,10 @@ static void __init aquila_sound_init(void)
 
 static void __init aquila_map_io(void)
 {
-	s5p_init_io(NULL, 0, S5P_VA_CHIPID);
+	s5pv210_init_io(NULL, 0);
 	s3c24xx_init_clocks(24000000);
 	s3c24xx_init_uarts(aquila_uartcfgs, ARRAY_SIZE(aquila_uartcfgs));
+	s5p_set_timer_source(S5P_PWM3, S5P_PWM4);
 }
 
 static void __init aquila_machine_init(void)
@@ -691,9 +679,11 @@ MACHINE_START(AQUILA, "Aquila")
 	/* Maintainers:
 	   Marek Szyprowski <m.szyprowski@samsung.com>
 	   Kyungmin Park <kyungmin.park@samsung.com> */
-	.boot_params	= S5P_PA_SDRAM + 0x100,
+	.atag_offset	= 0x100,
 	.init_irq	= s5pv210_init_irq,
+	.handle_irq	= vic_handle_irq,
 	.map_io		= aquila_map_io,
 	.init_machine	= aquila_machine_init,
-	.timer		= &s3c24xx_timer,
+	.timer		= &s5p_timer,
+	.restart	= s5pv210_restart,
 MACHINE_END

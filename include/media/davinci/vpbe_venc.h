@@ -18,6 +18,7 @@
 #define _VPBE_VENC_H
 
 #include <media/v4l2-subdev.h>
+#include <media/davinci/vpbe_types.h>
 
 #define VPBE_VENC_SUBDEV_NAME "vpbe-venc"
 
@@ -26,46 +27,23 @@
 #define VENC_FIRST_FIELD	BIT(1)
 #define VENC_SECOND_FIELD	BIT(2)
 
-/**
- * struct venc_callback
- * @next: used internally by the venc driver to maintain a linked list of
- *        callbacks
- * @mask: a bitmask specifying the venc event(s) for which the
- *        callback will be invoked
- * @handler: the callback routine
- * @arg: a null pointer that is passed as the second argument to the callback
- *       routine
- */
-struct venc_callback {
-	struct venc_callback *next;
-	char *owner;
-	unsigned mask;
-	void (*handler) (unsigned event, void *arg);
-	void *arg;
-};
-
 struct venc_platform_data {
-	enum vpbe_types venc_type;
+	enum vpbe_version venc_type;
 	int (*setup_pinmux)(enum v4l2_mbus_pixelcode if_type,
 			    int field);
 	int (*setup_clock)(enum vpbe_enc_timings_type type,
-			__u64 mode);
+			   unsigned int mode);
 	int (*setup_if_config)(enum v4l2_mbus_pixelcode pixcode);
-
 	/* Number of LCD outputs supported */
 	int num_lcd_outputs;
-	enum v4l2_mbus_pixelcode if_params;
+	struct vpbe_if_params *lcd_if_params;
 };
 
 enum venc_ioctls {
 	VENC_GET_FLD = 1,
-	VENC_REG_CALLBACK,
-	VENC_UNREG_CALLBACK,
-	VENC_INTERRUPT,
-	VENC_CONFIGURE,
 };
 
-void enable_lcd(void);
-void enable_hd_clk(void);
-
+/* exported functions */
+struct v4l2_subdev *venc_sub_dev_init(struct v4l2_device *v4l2_dev,
+		const char *venc_name);
 #endif

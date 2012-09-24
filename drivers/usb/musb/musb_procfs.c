@@ -42,8 +42,6 @@
 
 #include "davinci.h"
 
-#ifdef CONFIG_USB_MUSB_HDRC_HCD
-
 static int dump_qh(struct musb_qh *qh, char *buf, unsigned max)
 {
 	int				count;
@@ -104,9 +102,6 @@ dump_queue(struct list_head *q, char *buf, unsigned max)
 	return count;
 }
 
-#endif	/* HCD */
-
-#ifdef CONFIG_USB_GADGET_MUSB_HDRC
 static int dump_ep(struct musb_ep *ep, char *buffer, unsigned max)
 {
 	char		*buf = buffer;
@@ -205,7 +200,6 @@ static int dump_ep(struct musb_ep *ep, char *buffer, unsigned max)
 	} while (0);
 	return buf - buffer;
 }
-#endif
 
 static int
 dump_end_info(struct musb *musb, u8 epnum, char *aBuffer, unsigned max)
@@ -216,8 +210,7 @@ dump_end_info(struct musb *musb, u8 epnum, char *aBuffer, unsigned max)
 
 	do {
 		musb_ep_select(musb, musb->mregs, epnum);
-#ifdef CONFIG_USB_MUSB_HDRC_HCD
-		if (is_host_active(musb)) {
+		if (is_host_enabled(musb)) {
 			int		dump_rx, dump_tx;
 			void __iomem	*regs = hw_ep->regs;
 
@@ -425,9 +418,7 @@ dump_end_info(struct musb *musb, u8 epnum, char *aBuffer, unsigned max)
 				}
 			}
 		}
-#endif
-#ifdef CONFIG_USB_GADGET_MUSB_HDRC
-		if (is_peripheral_active(musb)) {
+		if (is_peripheral_enabled(musb)) {
 			code = 0;
 
 			if (hw_ep->ep_in.desc || !epnum) {
@@ -447,7 +438,6 @@ dump_end_info(struct musb *musb, u8 epnum, char *aBuffer, unsigned max)
 				max -= code;
 			}
 		}
-#endif
 	} while (0);
 
 	return buf - aBuffer;
@@ -474,7 +464,7 @@ static int dump_header_stats(struct musb *musb, char *buffer)
 	buffer += count;
 
 	code = sprintf(buffer, "OTG state: %s; %sactive\n",
-			otg_state_string(musb),
+			otg_state_string(musb->xceiv->state),
 			musb->is_active ? "" : "in");
 	if (code <= 0)
 		goto done;
@@ -495,38 +485,27 @@ static int dump_header_stats(struct musb *musb, char *buffer)
 			"?dma?"
 #endif
 			", "
-#ifdef CONFIG_USB_MUSB_OTG
 			"otg (peripheral+host)"
-#elif defined(CONFIG_USB_GADGET_MUSB_HDRC)
-			"peripheral"
-#elif defined(CONFIG_USB_MUSB_HDRC_HCD)
-			"host"
-#endif
-			", debug=%d [eps=%d]\n",
-		musb_debug,
+			", [eps=%d]\n",
 		musb->nr_endpoints);
 	if (code <= 0)
 		goto done;
 	count += code;
 	buffer += code;
 
-#ifdef	CONFIG_USB_GADGET_MUSB_HDRC
 	code = sprintf(buffer, "Peripheral address: %02x\n",
 			musb_readb(musb->ctrl_base, MUSB_FADDR));
 	if (code <= 0)
 		goto done;
 	buffer += code;
 	count += code;
-#endif
 
-#ifdef	CONFIG_USB_MUSB_HDRC_HCD
 	code = sprintf(buffer, "Root port status: %08x\n",
 			musb->port1_status);
 	if (code <= 0)
 		goto done;
 	buffer += code;
 	count += code;
-#endif
 
 #ifdef	CONFIG_ARCH_DAVINCI
 	code = sprintf(buffer,
@@ -535,7 +514,7 @@ static int dump_header_stats(struct musb *musb, char *buffer)
 			"\n",
 			musb_readl(musb->ctrl_base, DAVINCI_USB_CTRL_REG),
 			musb_readl(musb->ctrl_base, DAVINCI_USB_STAT_REG),
-			__raw_readl((void __force __iomem *)
+			readl((void __force __iomem *)
 					IO_ADDRESS(USBPHY_CTL_PADDR)),
 			musb_readl(musb->ctrl_base, DAVINCI_RNDIS_REG),
 			musb_readl(musb->ctrl_base, DAVINCI_AUTOREQ_REG),
@@ -594,7 +573,6 @@ static int dump_header_stats(struct musb *musb, char *buffer)
 		buffer += code;
 	}
 
-#ifdef CONFIG_USB_GADGET_MUSB_HDRC
 	if (is_peripheral_enabled(musb)) {
 		code = sprintf(buffer, "Gadget driver: %s\n",
 				musb->gadget_driver
@@ -605,7 +583,6 @@ static int dump_header_stats(struct musb *musb, char *buffer)
 		count += code;
 		buffer += code;
 	}
-#endif
 
 done:
 	return count;
@@ -708,40 +685,29 @@ static int musb_proc_write(struct file *file, const char __user *buffer,
 			musb_load_testpacket(musb);
 			musb_writeb(mbase, MUSB_TESTMODE,
 					MUSB_TEST_PACKET);
+			musb_writew(musb->endpoints[0].regs,
+				MUSB_CSR0, MUSB_CSR0_TXPKTRDY);
+			dev_dbg(musb->controller,
+				"musb:testmode sending test packet\n");
 		}
 		break;
 
-#if (CONFIG_USB_MUSB_DEBUG > 0)
-		/* set/read debug level */
-	case 'D':{
-			if (count > 1) {
-				char digits[8], *p = digits;
-				int i = 0, level = 0, sign = 1;
-				int len = min(count - 1, (unsigned long)8);
-
-				if (copy_from_user(&digits, &buffer[1], len))
-					return -EFAULT;
-
-				/* optional sign */
-				if (*p == '-') {
-					len -= 1;
-					sign = -sign;
-					p++;
-				}
-
-				/* read it */
-				while (i++ < len && *p > '0' && *p < '9') {
-					level = level * 10 + (*p - '0');
-					p++;
-				}
-
-				level *= sign;
-				DBG(1, "debug level %d\n", level);
-				musb_debug = level;
-			}
-		}
+	case 'b':
+		/* generate software babble interrupt */
+		musb_simulate_babble_intr(musb);
 		break;
 
+	case 'K':
+		/* enable babble workaround */
+		musb->enable_babble_work = 1;
+		INFO("enabled babble workaround\n");
+		break;
+
+	case 'k':
+		/* disable babble workaround */
+		musb->enable_babble_work = 0;
+		INFO("disabled babble workaround\n");
+		break;
 
 	case '?':
 		INFO("?: you are seeing it\n");
@@ -752,8 +718,9 @@ static int musb_proc_write(struct file *file, const char __user *buffer,
 		INFO("H: host mode\n");
 		INFO("T: start sending TEST_PACKET\n");
 		INFO("D: set/read dbug level\n");
+		INFO("K/k: enable/disable babble workaround\n");
+		INFO("b: generate software babble interrupt\n");
 		break;
-#endif
 
 	default:
 		ERR("Command %c not implemented\n", cmd);

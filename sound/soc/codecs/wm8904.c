@@ -17,14 +17,12 @@
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/i2c.h>
-#include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-#include <sound/soc-dapm.h>
 #include <sound/initval.h>
 #include <sound/tlv.h>
 #include <sound/wm8904.h>
@@ -51,7 +49,6 @@ static const char *wm8904_supply_names[WM8904_NUM_SUPPLIES] = {
 struct wm8904_priv {
 
 	enum wm8904_type devtype;
-	void *control_data;
 
 	struct regulator_bulk_data supplies[WM8904_NUM_SUPPLIES];
 
@@ -597,7 +594,7 @@ static struct {
 	{ 0x003F, 0x003F, 0 }, /* R248 - FLL NCO Test 1 */
 };
 
-static int wm8904_volatile_register(unsigned int reg)
+static int wm8904_volatile_register(struct snd_soc_codec *codec, unsigned int reg)
 {
 	return wm8904_access[reg].vol;
 }
@@ -869,7 +866,7 @@ SOC_ENUM("Right Capture Mode", rin_mode),
 SOC_DOUBLE_R("Capture Volume", WM8904_ANALOGUE_LEFT_INPUT_0,
 	     WM8904_ANALOGUE_RIGHT_INPUT_0, 0, 31, 0),
 SOC_DOUBLE_R("Capture Switch", WM8904_ANALOGUE_LEFT_INPUT_0,
-	     WM8904_ANALOGUE_RIGHT_INPUT_0, 7, 1, 0),
+	     WM8904_ANALOGUE_RIGHT_INPUT_0, 7, 1, 1),
 
 SOC_SINGLE("High Pass Filter Switch", WM8904_ADC_DIGITAL_0, 4, 1, 0),
 SOC_ENUM("High Pass Filter Mode", hpf_mode),
@@ -1198,7 +1195,7 @@ SND_SOC_DAPM_INPUT("IN2R"),
 SND_SOC_DAPM_INPUT("IN3L"),
 SND_SOC_DAPM_INPUT("IN3R"),
 
-SND_SOC_DAPM_MICBIAS("MICBIAS", WM8904_MIC_BIAS_CONTROL_0, 0, 0),
+SND_SOC_DAPM_SUPPLY("MICBIAS", WM8904_MIC_BIAS_CONTROL_0, 0, 0, NULL, 0),
 
 SND_SOC_DAPM_MUX("Left Capture Mux", SND_SOC_NOPM, 0, 0, &lin_mux),
 SND_SOC_DAPM_MUX("Left Capture Inverting Mux", SND_SOC_NOPM, 0, 0,
@@ -1427,10 +1424,11 @@ static const struct snd_soc_dapm_route wm8912_intercon[] = {
 static int wm8904_add_widgets(struct snd_soc_codec *codec)
 {
 	struct wm8904_priv *wm8904 = snd_soc_codec_get_drvdata(codec);
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
 
-	snd_soc_dapm_new_controls(codec, wm8904_core_dapm_widgets,
+	snd_soc_dapm_new_controls(dapm, wm8904_core_dapm_widgets,
 				  ARRAY_SIZE(wm8904_core_dapm_widgets));
-	snd_soc_dapm_add_routes(codec, core_intercon,
+	snd_soc_dapm_add_routes(dapm, core_intercon,
 				ARRAY_SIZE(core_intercon));
 
 	switch (wm8904->devtype) {
@@ -1442,20 +1440,20 @@ static int wm8904_add_widgets(struct snd_soc_codec *codec)
 		snd_soc_add_controls(codec, wm8904_snd_controls,
 				     ARRAY_SIZE(wm8904_snd_controls));
 
-		snd_soc_dapm_new_controls(codec, wm8904_adc_dapm_widgets,
+		snd_soc_dapm_new_controls(dapm, wm8904_adc_dapm_widgets,
 					  ARRAY_SIZE(wm8904_adc_dapm_widgets));
-		snd_soc_dapm_new_controls(codec, wm8904_dac_dapm_widgets,
+		snd_soc_dapm_new_controls(dapm, wm8904_dac_dapm_widgets,
 					  ARRAY_SIZE(wm8904_dac_dapm_widgets));
-		snd_soc_dapm_new_controls(codec, wm8904_dapm_widgets,
+		snd_soc_dapm_new_controls(dapm, wm8904_dapm_widgets,
 					  ARRAY_SIZE(wm8904_dapm_widgets));
 
-		snd_soc_dapm_add_routes(codec, core_intercon,
+		snd_soc_dapm_add_routes(dapm, core_intercon,
 					ARRAY_SIZE(core_intercon));
-		snd_soc_dapm_add_routes(codec, adc_intercon,
+		snd_soc_dapm_add_routes(dapm, adc_intercon,
 					ARRAY_SIZE(adc_intercon));
-		snd_soc_dapm_add_routes(codec, dac_intercon,
+		snd_soc_dapm_add_routes(dapm, dac_intercon,
 					ARRAY_SIZE(dac_intercon));
-		snd_soc_dapm_add_routes(codec, wm8904_intercon,
+		snd_soc_dapm_add_routes(dapm, wm8904_intercon,
 					ARRAY_SIZE(wm8904_intercon));
 		break;
 
@@ -1463,17 +1461,17 @@ static int wm8904_add_widgets(struct snd_soc_codec *codec)
 		snd_soc_add_controls(codec, wm8904_dac_snd_controls,
 				     ARRAY_SIZE(wm8904_dac_snd_controls));
 
-		snd_soc_dapm_new_controls(codec, wm8904_dac_dapm_widgets,
+		snd_soc_dapm_new_controls(dapm, wm8904_dac_dapm_widgets,
 					  ARRAY_SIZE(wm8904_dac_dapm_widgets));
 
-		snd_soc_dapm_add_routes(codec, dac_intercon,
+		snd_soc_dapm_add_routes(dapm, dac_intercon,
 					ARRAY_SIZE(dac_intercon));
-		snd_soc_dapm_add_routes(codec, wm8912_intercon,
+		snd_soc_dapm_add_routes(dapm, wm8912_intercon,
 					ARRAY_SIZE(wm8912_intercon));
 		break;
 	}
 
-	snd_soc_dapm_new_widgets(codec);
+	snd_soc_dapm_new_widgets(dapm);
 	return 0;
 }
 
@@ -1589,7 +1587,7 @@ static int wm8904_hw_params(struct snd_pcm_substream *substream,
 		       - wm8904->fs);
 	for (i = 1; i < ARRAY_SIZE(clk_sys_rates); i++) {
 		cur_val = abs((wm8904->sysclk_rate /
-			       clk_sys_rates[i].ratio) - wm8904->fs);;
+			       clk_sys_rates[i].ratio) - wm8904->fs);
 		if (cur_val < best_val) {
 			best = i;
 			best_val = cur_val;
@@ -1895,7 +1893,7 @@ static int fll_factors(struct _fll_div *fll_div, unsigned int Fref,
 
 	pr_debug("Fvco=%dHz\n", target);
 
-	/* Find an appropraite FLL_FRATIO and factor it out of the target */
+	/* Find an appropriate FLL_FRATIO and factor it out of the target */
 	for (i = 0; i < ARRAY_SIZE(fll_fratios); i++) {
 		if (fll_fratios[i].min <= Fref && Fref <= fll_fratios[i].max) {
 			fll_div->fll_fratio = fll_fratios[i].fll_fratio;
@@ -2138,7 +2136,7 @@ static int wm8904_set_bias_level(struct snd_soc_codec *codec,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (codec->bias_level == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			ret = regulator_bulk_enable(ARRAY_SIZE(wm8904->supplies),
 						    wm8904->supplies);
 			if (ret != 0) {
@@ -2197,7 +2195,7 @@ static int wm8904_set_bias_level(struct snd_soc_codec *codec,
 				       wm8904->supplies);
 		break;
 	}
-	codec->bias_level = level;
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -2206,7 +2204,7 @@ static int wm8904_set_bias_level(struct snd_soc_codec *codec,
 #define WM8904_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE |\
 			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
-static struct snd_soc_dai_ops wm8904_dai_ops = {
+static const struct snd_soc_dai_ops wm8904_dai_ops = {
 	.set_sysclk = wm8904_set_sysclk,
 	.set_fmt = wm8904_set_fmt,
 	.set_tdm_slot = wm8904_set_tdm_slot,
@@ -2236,7 +2234,7 @@ static struct snd_soc_dai_driver wm8904_dai = {
 };
 
 #ifdef CONFIG_PM
-static int wm8904_suspend(struct snd_soc_codec *codec, pm_message_t state)
+static int wm8904_suspend(struct snd_soc_codec *codec)
 {
 	wm8904_set_bias_level(codec, SND_SOC_BIAS_OFF);
 
@@ -2373,7 +2371,7 @@ static int wm8904_probe(struct snd_soc_codec *codec)
 	int ret, i;
 
 	codec->cache_sync = 1;
-	codec->idle_bias_off = 1;
+	codec->dapm.idle_bias_off = 1;
 
 	switch (wm8904->devtype) {
 	case WM8904:
@@ -2436,19 +2434,28 @@ static int wm8904_probe(struct snd_soc_codec *codec)
 	}
 
 	/* Change some default settings - latch VU and enable ZC */
-	reg_cache[WM8904_ADC_DIGITAL_VOLUME_LEFT] |= WM8904_ADC_VU;
-	reg_cache[WM8904_ADC_DIGITAL_VOLUME_RIGHT] |= WM8904_ADC_VU;
-	reg_cache[WM8904_DAC_DIGITAL_VOLUME_LEFT] |= WM8904_DAC_VU;
-	reg_cache[WM8904_DAC_DIGITAL_VOLUME_RIGHT] |= WM8904_DAC_VU;
-	reg_cache[WM8904_ANALOGUE_OUT1_LEFT] |= WM8904_HPOUT_VU |
-		WM8904_HPOUTLZC;
-	reg_cache[WM8904_ANALOGUE_OUT1_RIGHT] |= WM8904_HPOUT_VU |
-		WM8904_HPOUTRZC;
-	reg_cache[WM8904_ANALOGUE_OUT2_LEFT] |= WM8904_LINEOUT_VU |
-		WM8904_LINEOUTLZC;
-	reg_cache[WM8904_ANALOGUE_OUT2_RIGHT] |= WM8904_LINEOUT_VU |
-		WM8904_LINEOUTRZC;
-	reg_cache[WM8904_CLOCK_RATES_0] &= ~WM8904_SR_MODE;
+	snd_soc_update_bits(codec, WM8904_ADC_DIGITAL_VOLUME_LEFT,
+			    WM8904_ADC_VU, WM8904_ADC_VU);
+	snd_soc_update_bits(codec, WM8904_ADC_DIGITAL_VOLUME_RIGHT,
+			    WM8904_ADC_VU, WM8904_ADC_VU);
+	snd_soc_update_bits(codec, WM8904_DAC_DIGITAL_VOLUME_LEFT,
+			    WM8904_DAC_VU, WM8904_DAC_VU);
+	snd_soc_update_bits(codec, WM8904_DAC_DIGITAL_VOLUME_RIGHT,
+			    WM8904_DAC_VU, WM8904_DAC_VU);
+	snd_soc_update_bits(codec, WM8904_ANALOGUE_OUT1_LEFT,
+			    WM8904_HPOUT_VU | WM8904_HPOUTLZC,
+			    WM8904_HPOUT_VU | WM8904_HPOUTLZC);
+	snd_soc_update_bits(codec, WM8904_ANALOGUE_OUT1_RIGHT,
+			    WM8904_HPOUT_VU | WM8904_HPOUTRZC,
+			    WM8904_HPOUT_VU | WM8904_HPOUTRZC);
+	snd_soc_update_bits(codec, WM8904_ANALOGUE_OUT2_LEFT,
+			    WM8904_LINEOUT_VU | WM8904_LINEOUTLZC,
+			    WM8904_LINEOUT_VU | WM8904_LINEOUTLZC);
+	snd_soc_update_bits(codec, WM8904_ANALOGUE_OUT2_RIGHT,
+			    WM8904_LINEOUT_VU | WM8904_LINEOUTRZC,
+			    WM8904_LINEOUT_VU | WM8904_LINEOUTRZC);
+	snd_soc_update_bits(codec, WM8904_CLOCK_RATES_0,
+			    WM8904_SR_MODE, 0);
 
 	/* Apply configuration from the platform data. */
 	if (wm8904->pdata) {
@@ -2469,10 +2476,12 @@ static int wm8904_probe(struct snd_soc_codec *codec)
 	/* Set Class W by default - this will be managed by the Class
 	 * G widget at runtime where bypass paths are available.
 	 */
-	reg_cache[WM8904_CLASS_W_0] |= WM8904_CP_DYN_PWR;
+	snd_soc_update_bits(codec, WM8904_CLASS_W_0,
+			    WM8904_CP_DYN_PWR, WM8904_CP_DYN_PWR);
 
 	/* Use normal bias source */
-	reg_cache[WM8904_BIAS_CONTROL_0] &= ~WM8904_POBCTRL;
+	snd_soc_update_bits(codec, WM8904_BIAS_CONTROL_0,
+			    WM8904_POBCTRL, 0);
 
 	wm8904_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
@@ -2529,7 +2538,6 @@ static __devinit int wm8904_i2c_probe(struct i2c_client *i2c,
 
 	wm8904->devtype = id->driver_data;
 	i2c_set_clientdata(i2c, wm8904);
-	wm8904->control_data = i2c;
 	wm8904->pdata = i2c->dev.platform_data;
 
 	ret = snd_soc_register_codec(&i2c->dev,
@@ -2549,13 +2557,14 @@ static __devexit int wm8904_i2c_remove(struct i2c_client *client)
 static const struct i2c_device_id wm8904_i2c_id[] = {
 	{ "wm8904", WM8904 },
 	{ "wm8912", WM8912 },
+	{ "wm8918", WM8904 },   /* Actually a subset, updates to follow */
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, wm8904_i2c_id);
 
 static struct i2c_driver wm8904_i2c_driver = {
 	.driver = {
-		.name = "wm8904-codec",
+		.name = "wm8904",
 		.owner = THIS_MODULE,
 	},
 	.probe =    wm8904_i2c_probe,

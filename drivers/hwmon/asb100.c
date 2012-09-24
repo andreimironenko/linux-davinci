@@ -36,6 +36,8 @@
     asb100	7	3	1	4	0x31	0x0694	yes	no
 */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/i2c.h>
@@ -701,8 +703,7 @@ static int asb100_detect(struct i2c_client *client,
 	int val1, val2;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
-		pr_debug("asb100.o: detect failed, "
-				"smbus byte data not supported!\n");
+		pr_debug("detect failed, smbus byte data not supported!\n");
 		return -ENODEV;
 	}
 
@@ -715,7 +716,7 @@ static int asb100_detect(struct i2c_client *client,
 			(((!(val1 & 0x80)) && (val2 != 0x94)) ||
 			/* Check for ASB100 ID (high byte ) */
 			((val1 & 0x80) && (val2 != 0x06)))) {
-		pr_debug("asb100: detect failed, bad chip id 0x%02x!\n", val2);
+		pr_debug("detect failed, bad chip id 0x%02x!\n", val2);
 		return -ENODEV;
 	}
 
@@ -744,7 +745,7 @@ static int asb100_probe(struct i2c_client *client,
 
 	data = kzalloc(sizeof(struct asb100_data), GFP_KERNEL);
 	if (!data) {
-		pr_debug("asb100.o: probe failed, kzalloc failed!\n");
+		pr_debug("probe failed, kzalloc failed!\n");
 		err = -ENOMEM;
 		goto ERROR0;
 	}
@@ -828,17 +829,17 @@ static int asb100_read_value(struct i2c_client *client, u16 reg)
 		/* convert from ISA to LM75 I2C addresses */
 		switch (reg & 0xff) {
 		case 0x50: /* TEMP */
-			res = swab16(i2c_smbus_read_word_data(cl, 0));
+			res = i2c_smbus_read_word_swapped(cl, 0);
 			break;
 		case 0x52: /* CONFIG */
 			res = i2c_smbus_read_byte_data(cl, 1);
 			break;
 		case 0x53: /* HYST */
-			res = swab16(i2c_smbus_read_word_data(cl, 2));
+			res = i2c_smbus_read_word_swapped(cl, 2);
 			break;
 		case 0x55: /* MAX */
 		default:
-			res = swab16(i2c_smbus_read_word_data(cl, 3));
+			res = i2c_smbus_read_word_swapped(cl, 3);
 			break;
 		}
 	}
@@ -876,10 +877,10 @@ static void asb100_write_value(struct i2c_client *client, u16 reg, u16 value)
 			i2c_smbus_write_byte_data(cl, 1, value & 0xff);
 			break;
 		case 0x53: /* HYST */
-			i2c_smbus_write_word_data(cl, 2, swab16(value));
+			i2c_smbus_write_word_swapped(cl, 2, value);
 			break;
 		case 0x55: /* MAX */
-			i2c_smbus_write_word_data(cl, 3, swab16(value));
+			i2c_smbus_write_word_swapped(cl, 3, value);
 			break;
 		}
 	}

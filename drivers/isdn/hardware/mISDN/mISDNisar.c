@@ -29,6 +29,7 @@
 #include <linux/delay.h>
 #include <linux/vmalloc.h>
 #include <linux/mISDNhw.h>
+#include <linux/module.h>
 #include "isar.h"
 
 #define ISAR_REV	"2.1"
@@ -264,7 +265,7 @@ load_firmware(struct isar_hw *isar, const u8 *buf, int size)
 			while (noc) {
 				val = le16_to_cpu(*sp++);
 				*mp++ = val >> 8;
-				*mp++ = val & 0xFF;;
+				*mp++ = val & 0xFF;
 				noc--;
 			}
 			spin_lock_irqsave(isar->hwlock, flags);

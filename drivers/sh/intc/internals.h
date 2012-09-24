@@ -4,7 +4,7 @@
 #include <linux/kernel.h>
 #include <linux/types.h>
 #include <linux/radix-tree.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 
 #define _INTC_MK(fn, mode, addr_e, addr_d, width, shift) \
 	((shift) | ((width) << 5) | ((fn) << 9) | ((mode) << 13) | \
@@ -51,9 +51,8 @@ struct intc_subgroup_entry {
 
 struct intc_desc_int {
 	struct list_head list;
-	struct sys_device sysdev;
+	struct device dev;
 	struct radix_tree_root tree;
-	pm_message_t state;
 	raw_spinlock_t lock;
 	unsigned int index;
 	unsigned long *reg;
@@ -68,6 +67,7 @@ struct intc_desc_int {
 	struct intc_window *window;
 	unsigned int nr_windows;
 	struct irq_chip chip;
+	bool skip_suspend;
 };
 
 
@@ -87,7 +87,7 @@ enum {	MODE_ENABLE_REG = 0, /* Bit(s) set -> interrupt enabled */
 
 static inline struct intc_desc_int *get_intc_desc(unsigned int irq)
 {
-	struct irq_chip *chip = get_irq_chip(irq);
+	struct irq_chip *chip = irq_get_chip(irq);
 
 	return container_of(chip, struct intc_desc_int, chip);
 }
@@ -104,7 +104,7 @@ static inline void activate_irq(int irq)
 	set_irq_flags(irq, IRQF_VALID);
 #else
 	/* same effect on other architectures */
-	set_irq_noprobe(irq);
+	irq_set_noprobe(irq);
 #endif
 }
 
@@ -158,7 +158,7 @@ void _intc_enable(struct irq_data *data, unsigned long handle);
 extern struct list_head intc_list;
 extern raw_spinlock_t intc_big_lock;
 extern unsigned int nr_intc_controllers;
-extern struct sysdev_class intc_sysdev_class;
+extern struct bus_type intc_subsys;
 
 unsigned int intc_get_dfl_prio_level(void);
 unsigned int intc_get_prio_level(unsigned int irq);

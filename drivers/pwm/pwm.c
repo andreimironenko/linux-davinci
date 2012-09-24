@@ -124,7 +124,8 @@ void pwm_release(struct pwm_device *p)
 	mutex_lock(&device_list_mutex);
 
 	if (!test_and_clear_bit(FLAG_REQUESTED, &p->flags)) {
-		BUG();
+		pr_debug("%s pwm device is not requested!\n",
+				dev_name(p->dev));
 		goto done;
 	}
 
@@ -157,8 +158,10 @@ unsigned long pwm_ticks_to_ns(struct pwm_device *p, unsigned long ticks)
 {
 	unsigned long long ns;
 
-	if (!p->tick_hz)
+	if (!p->tick_hz) {
+		pr_debug("%s: frequency is zero\n", dev_name(p->dev));
 		return 0;
+	}
 
 	ns = ticks;
 	ns *= 1000000000UL;
@@ -249,7 +252,10 @@ err:
 
 	if (ret)
 		return ret;
-	return p->ops->config(p, c);
+	spin_lock(&p->pwm_lock);
+	ret = p->ops->config(p, c);
+	spin_unlock(&p->pwm_lock);
+	return ret;
 }
 EXPORT_SYMBOL(pwm_config);
 
@@ -260,7 +266,9 @@ int pwm_set_period_ns(struct pwm_device *p, unsigned long period_ns)
 		.period_ticks = pwm_ns_to_ticks(p, period_ns),
 	};
 
+	spin_lock(&p->pwm_lock);
 	p->period_ns = period_ns;
+	spin_unlock(&p->pwm_lock);
 	return pwm_config(p, &c);
 }
 EXPORT_SYMBOL(pwm_set_period_ns);
@@ -273,15 +281,15 @@ EXPORT_SYMBOL(pwm_get_period_ns);
 
 int pwm_set_frequency(struct pwm_device *p, unsigned long freq)
 {
-	struct pwm_config c = {
-		.config_mask = BIT(PWM_CONFIG_PERIOD_TICKS),
-		.period_ticks = pwm_ns_to_ticks(p, (NSEC_PER_SEC / freq)),
-	};
-
+	struct pwm_config c;
 	if (!freq)
 		return -EINVAL;
 
+	c.config_mask = BIT(PWM_CONFIG_PERIOD_TICKS);
+	c.period_ticks = pwm_ns_to_ticks(p, (NSEC_PER_SEC / freq));
+	spin_lock(&p->pwm_lock);
 	p->period_ns = NSEC_PER_SEC / freq;
+	spin_unlock(&p->pwm_lock);
 	return pwm_config(p, &c);
 }
 EXPORT_SYMBOL(pwm_set_frequency);
@@ -292,8 +300,10 @@ unsigned long pwm_get_frequency(struct pwm_device *p)
 
 	 period_ns = pwm_ticks_to_ns(p, p->period_ticks);
 
-	if (!period_ns)
+	if (!period_ns) {
+		pr_debug("%s: frequency is zero\n", dev_name(p->dev));
 		return 0;
+	}
 
 	return	NSEC_PER_SEC / period_ns;
 }
@@ -307,7 +317,9 @@ int pwm_set_period_ticks(struct pwm_device *p,
 		.period_ticks = ticks,
 	};
 
+	spin_lock(&p->pwm_lock);
 	p->period_ns = pwm_ticks_to_ns(p, ticks);
+	spin_unlock(&p->pwm_lock);
 	return pwm_config(p, &c);
 }
 EXPORT_SYMBOL(pwm_set_period_ticks);
@@ -318,7 +330,10 @@ int pwm_set_duty_ns(struct pwm_device *p, unsigned long duty_ns)
 		.config_mask = BIT(PWM_CONFIG_DUTY_TICKS),
 		.duty_ticks = pwm_ns_to_ticks(p, duty_ns),
 	};
+
+	spin_lock(&p->pwm_lock);
 	p->duty_ns = duty_ns;
+	spin_unlock(&p->pwm_lock);
 	return pwm_config(p, &c);
 }
 EXPORT_SYMBOL(pwm_set_duty_ns);
@@ -336,8 +351,10 @@ int pwm_set_duty_percent(struct pwm_device *p, int percent)
 		.duty_percent = percent,
 	};
 
+	spin_lock(&p->pwm_lock);
 	p->duty_ns = p->period_ns * percent;
 	p->duty_ns /= 100;
+	spin_unlock(&p->pwm_lock);
 	return pwm_config(p, &c);
 }
 EXPORT_SYMBOL(pwm_set_duty_percent);
@@ -345,6 +362,11 @@ EXPORT_SYMBOL(pwm_set_duty_percent);
 unsigned long pwm_get_duty_percent(struct pwm_device *p)
 {
 	unsigned long long duty_percent;
+
+	if (!p->period_ns) {
+		pr_debug("%s: frequency is zero\n", dev_name(p->dev));
+		return 0;
+	}
 
 	duty_percent = pwm_ticks_to_ns(p, p->duty_ticks);
 	duty_percent *= 100;
@@ -361,7 +383,9 @@ int pwm_set_duty_ticks(struct pwm_device *p,
 		.duty_ticks = ticks,
 	};
 
+	spin_lock(&p->pwm_lock);
 	p->duty_ns = pwm_ticks_to_ns(p, ticks);
+	spin_unlock(&p->pwm_lock);
 	return pwm_config(p, &c);
 }
 EXPORT_SYMBOL(pwm_set_duty_ticks);
@@ -450,10 +474,17 @@ static ssize_t pwm_run_store(struct device *dev,
 			     const char *buf, size_t len)
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
+	int ret;
+
 	if (sysfs_streq(buf, "1"))
-		pwm_start(p);
+		ret = pwm_start(p);
 	else if (sysfs_streq(buf, "0"))
-		pwm_stop(p);
+		ret = pwm_stop(p);
+	else
+		ret = -EINVAL;
+
+	if (ret < 0)
+		return ret;
 	return len;
 }
 static DEVICE_ATTR(run, S_IRUGO | S_IWUSR, pwm_run_show, pwm_run_store);
@@ -481,9 +512,15 @@ static ssize_t pwm_duty_ns_store(struct device *dev,
 {
 	unsigned long duty_ns;
 	struct pwm_device *p = dev_get_drvdata(dev);
+	int ret;
 
-	if (!strict_strtoul(buf, 10, &duty_ns))
-		pwm_set_duty_ns(p, duty_ns);
+	if (!kstrtoul(buf, 10, &duty_ns)) {
+		ret = pwm_set_duty_ns(p, duty_ns);
+
+		if (ret < 0)
+			return ret;
+	}
+
 	return len;
 }
 static DEVICE_ATTR(duty_ns, S_IRUGO | S_IWUSR, pwm_duty_ns_show,
@@ -504,9 +541,15 @@ static ssize_t pwm_duty_percent_store(struct device *dev,
 {
 	unsigned long duty_ns;
 	struct pwm_device *p = dev_get_drvdata(dev);
+	int ret;
 
-	if (!strict_strtoul(buf, 10, &duty_ns))
-		pwm_set_duty_percent(p, duty_ns);
+	if (!kstrtoul(buf, 10, &duty_ns)) {
+		ret = pwm_set_duty_percent(p, duty_ns);
+
+		if (ret < 0)
+			return ret;
+	}
+
 	return len;
 }
 static DEVICE_ATTR(duty_percent, S_IRUGO | S_IWUSR, pwm_duty_percent_show,
@@ -526,9 +569,15 @@ static ssize_t pwm_period_ns_store(struct device *dev,
 {
 	unsigned long period_ns;
 	struct pwm_device *p = dev_get_drvdata(dev);
+	int ret;
 
-	if (!strict_strtoul(buf, 10, &period_ns))
-		pwm_set_period_ns(p, period_ns);
+	if (!kstrtoul(buf, 10, &period_ns)) {
+		ret = pwm_set_period_ns(p, period_ns);
+
+		if (ret < 0)
+			return ret;
+	}
+
 	return len;
 }
 static DEVICE_ATTR(period_ns, S_IRUGO | S_IWUSR, pwm_period_ns_show,
@@ -548,10 +597,15 @@ static ssize_t pwm_period_freq_store(struct device *dev,
 				   size_t len)
 {
 	unsigned long freq_hz;
+	int ret;
 
 	struct pwm_device *p = dev_get_drvdata(dev);
-	if (!strict_strtoul(buf, 10, &freq_hz))
-		pwm_set_frequency(p, freq_hz);
+	if (!kstrtoul(buf, 10, &freq_hz)) {
+		ret = pwm_set_frequency(p, freq_hz);
+
+		if (ret < 0)
+			return ret;
+	}
 	return len;
 }
 
@@ -572,9 +626,15 @@ static ssize_t pwm_polarity_store(struct device *dev,
 {
 	unsigned long polarity;
 	struct pwm_device *p = dev_get_drvdata(dev);
+	int ret;
 
-	if (!strict_strtoul(buf, 10, &polarity))
-		pwm_set_polarity(p, polarity);
+	if (!kstrtoul(buf, 10, &polarity)) {
+		ret = pwm_set_polarity(p, polarity);
+
+		if (ret < 0)
+			return ret;
+	}
+
 	return len;
 }
 static DEVICE_ATTR(polarity, S_IRUGO | S_IWUSR, pwm_polarity_show,
@@ -585,17 +645,16 @@ static ssize_t pwm_request_show(struct device *dev,
 				char *buf)
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
-	struct pwm_device *ret;
+	int ret;
 
-	mutex_lock(&device_list_mutex);
-	ret = __pwm_request(p, REQUEST_SYSFS);
-	mutex_unlock(&device_list_mutex);
+	ret = test_bit(FLAG_REQUESTED, &p->flags);
 
-	if (IS_ERR_OR_NULL(ret))
-		return sprintf(buf, "fail (owner: %s  pid: %d)\n",
-			       p->label, p->pid);
+	if (ret)
+		return sprintf(buf, "%s requested by %s\n",
+				dev_name(p->dev), p->label);
 	else
-		return sprintf(buf, "%s (pid %d)\n", ret->label, ret->pid);
+		return sprintf(buf, "%s is free\n",
+				dev_name(p->dev));
 }
 
 static ssize_t pwm_request_store(struct device *dev,
@@ -603,8 +662,21 @@ static ssize_t pwm_request_store(struct device *dev,
 				 const char *buf, size_t len)
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
+	unsigned long request;
+	struct pwm_device *ret;
 
-	pwm_release(p);
+	if (!kstrtoul(buf, 10, &request)) {
+		if (request) {
+			mutex_lock(&device_list_mutex);
+			ret = __pwm_request(p, REQUEST_SYSFS);
+			mutex_unlock(&device_list_mutex);
+
+			if (IS_ERR(ret))
+				return PTR_ERR(ret);
+		} else
+			pwm_release(p);
+	}
+
 	return len;
 }
 static DEVICE_ATTR(request, S_IRUGO | S_IWUSR, pwm_request_show,
@@ -693,6 +765,7 @@ int pwm_register_byname(struct pwm_device *p, struct device *parent,
 	if (ret < 0)
 		printk(KERN_ERR "Failed to add cpufreq notifier\n");
 
+	spin_lock_init(&p->pwm_lock);
 	goto done;
 
 err_create_group:
@@ -728,6 +801,38 @@ int pwm_register(struct pwm_device *p, struct device *parent, int id)
 }
 EXPORT_SYMBOL(pwm_register);
 
+struct device *capture_dev_register(struct device *dev)
+{
+	int *ret;
+	char name[100];
+	struct device *new_dev;
+
+	scnprintf(name, sizeof name, "%s", dev_name(dev));
+
+	mutex_lock(&device_list_mutex);
+	new_dev = class_find_device(&pwm_class, NULL, (char *)name,
+						pwm_match_name);
+	if (new_dev)
+		ret = NULL;
+
+	new_dev = device_create(&pwm_class, dev, MKDEV(0, 0), NULL,
+								name);
+	mutex_unlock(&device_list_mutex);
+	return new_dev;
+}
+EXPORT_SYMBOL(capture_dev_register);
+
+struct device *capture_request_device(char *name)
+{
+	struct device *dev = NULL;
+
+	mutex_lock(&device_list_mutex);
+	dev = class_find_device(&pwm_class, NULL, (char *)name,
+						pwm_match_name);
+	mutex_unlock(&device_list_mutex);
+	return dev;
+}
+EXPORT_SYMBOL(capture_request_device);
 
 int pwm_unregister(struct pwm_device *p)
 {

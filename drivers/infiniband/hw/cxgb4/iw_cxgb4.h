@@ -35,7 +35,7 @@
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/idr.h>
-#include <linux/workqueue.h>
+#include <linux/completion.h>
 #include <linux/netdevice.h>
 #include <linux/sched.h>
 #include <linux/pci.h>
@@ -46,7 +46,6 @@
 #include <linux/timer.h>
 #include <linux/io.h>
 #include <linux/kfifo.h>
-#include <linux/mutex.h>
 
 #include <asm/byteorder.h>
 
@@ -133,16 +132,20 @@ static inline int c4iw_num_stags(struct c4iw_rdev *rdev)
 #define C4IW_WR_TO (10*HZ)
 
 struct c4iw_wr_wait {
-	wait_queue_head_t wait;
-	int done;
+	struct completion completion;
 	int ret;
 };
 
 static inline void c4iw_init_wr_wait(struct c4iw_wr_wait *wr_waitp)
 {
 	wr_waitp->ret = 0;
-	wr_waitp->done = 0;
-	init_waitqueue_head(&wr_waitp->wait);
+	init_completion(&wr_waitp->completion);
+}
+
+static inline void c4iw_wake_up(struct c4iw_wr_wait *wr_waitp, int ret)
+{
+	wr_waitp->ret = ret;
+	complete(&wr_waitp->completion);
 }
 
 static inline int c4iw_wait_for_reply(struct c4iw_rdev *rdev,
@@ -151,22 +154,26 @@ static inline int c4iw_wait_for_reply(struct c4iw_rdev *rdev,
 				 const char *func)
 {
 	unsigned to = C4IW_WR_TO;
-	do {
+	int ret;
 
-		wait_event_timeout(wr_waitp->wait, wr_waitp->done, to);
-		if (!wr_waitp->done) {
+	do {
+		ret = wait_for_completion_timeout(&wr_waitp->completion, to);
+		if (!ret) {
 			printk(KERN_ERR MOD "%s - Device %s not responding - "
 			       "tid %u qpid %u\n", func,
 			       pci_name(rdev->lldi.pdev), hwtid, qpid);
+			if (c4iw_fatal_error(rdev)) {
+				wr_waitp->ret = -EIO;
+				break;
+			}
 			to = to << 2;
 		}
-	} while (!wr_waitp->done);
+	} while (!ret);
 	if (wr_waitp->ret)
-		printk(KERN_WARNING MOD "%s: FW reply %d tid %u qpid %u\n",
-		       pci_name(rdev->lldi.pdev), wr_waitp->ret, hwtid, qpid);
+		PDBG("%s: FW reply %d tid %u qpid %u\n",
+		     pci_name(rdev->lldi.pdev), wr_waitp->ret, hwtid, qpid);
 	return wr_waitp->ret;
 }
-
 
 struct c4iw_dev {
 	struct ib_device ibdev;
@@ -176,10 +183,7 @@ struct c4iw_dev {
 	struct idr qpidr;
 	struct idr mmidr;
 	spinlock_t lock;
-	struct list_head entry;
-	struct delayed_work db_drop_task;
 	struct dentry *debugfs_root;
-	u8 registered;
 };
 
 static inline struct c4iw_dev *to_c4iw_dev(struct ib_device *ibdev)
@@ -305,6 +309,7 @@ struct c4iw_cq {
 	struct c4iw_dev *rhp;
 	struct t4_cq cq;
 	spinlock_t lock;
+	spinlock_t comp_handler_lock;
 	atomic_t refcnt;
 	wait_queue_head_t wait;
 };
@@ -319,6 +324,7 @@ struct c4iw_mpa_attributes {
 	u8 recv_marker_enabled;
 	u8 xmit_marker_enabled;
 	u8 crc_enabled;
+	u8 enhanced_rdma_conn;
 	u8 version;
 	u8 p2p_type;
 };
@@ -345,6 +351,8 @@ struct c4iw_qp_attributes {
 	u8 is_terminate_local;
 	struct c4iw_mpa_attributes mpa_attr;
 	struct c4iw_ep *llp_stream_handle;
+	u8 layer_etype;
+	u8 ecode;
 };
 
 struct c4iw_qp {
@@ -497,10 +505,17 @@ enum c4iw_mmid_state {
 #define MPA_KEY_REP "MPA ID Rep Frame"
 
 #define MPA_MAX_PRIVATE_DATA	256
+#define MPA_ENHANCED_RDMA_CONN	0x10
 #define MPA_REJECT		0x20
 #define MPA_CRC			0x40
 #define MPA_MARKERS		0x80
 #define MPA_FLAGS_MASK		0xE0
+
+#define MPA_V2_PEER2PEER_MODEL          0x8000
+#define MPA_V2_ZERO_LEN_FPDU_RTR        0x4000
+#define MPA_V2_RDMA_WRITE_RTR           0x8000
+#define MPA_V2_RDMA_READ_RTR            0x4000
+#define MPA_V2_IRD_ORD_MASK             0x3FFF
 
 #define c4iw_put_ep(ep) { \
 	PDBG("put_ep (via %s:%u) ep %p refcnt %d\n", __func__, __LINE__,  \
@@ -522,6 +537,11 @@ struct mpa_message {
 	u8 revision;
 	__be16 private_data_size;
 	u8 private_data[0];
+};
+
+struct mpa_v2_conn_params {
+	__be16 ird;
+	__be16 ord;
 };
 
 struct terminate_message {
@@ -576,7 +596,10 @@ enum c4iw_ddp_ecodes {
 
 enum c4iw_mpa_ecodes {
 	MPA_CRC_ERR		= 0x02,
-	MPA_MARKER_ERR		= 0x03
+	MPA_MARKER_ERR          = 0x03,
+	MPA_LOCAL_CATA          = 0x05,
+	MPA_INSUFF_IRD          = 0x06,
+	MPA_NOMATCH_RTR         = 0x07,
 };
 
 enum c4iw_ep_state {
@@ -647,6 +670,8 @@ struct c4iw_ep {
 	u16 txq_idx;
 	u16 ctrlq_idx;
 	u8 tos;
+	u8 retry_with_mpa_v1;
+	u8 tried_with_mpa_v1;
 };
 
 static inline struct c4iw_ep *to_ep(struct iw_cm_id *cm_id)
@@ -760,7 +785,6 @@ int c4iw_flush_rq(struct t4_wq *wq, struct t4_cq *cq, int count);
 int c4iw_flush_sq(struct t4_wq *wq, struct t4_cq *cq, int count);
 int c4iw_ev_handler(struct c4iw_dev *rnicp, u32 qid);
 u16 c4iw_rqes_posted(struct c4iw_qp *qhp);
-int c4iw_post_zb_read(struct c4iw_qp *qhp);
 int c4iw_post_terminate(struct c4iw_qp *qhp, struct t4_cqe *err_cqe);
 u32 c4iw_get_cqid(struct c4iw_rdev *rdev, struct c4iw_dev_ucontext *uctx);
 void c4iw_put_cqid(struct c4iw_rdev *rdev, u32 qid,

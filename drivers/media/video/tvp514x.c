@@ -31,13 +31,12 @@
 #include <linux/i2c.h>
 #include <linux/delay.h>
 #include <linux/videodev2.h>
-#include <linux/slab.h>
-#include <linux/v4l2-mediabus.h>
+#include <linux/module.h>
 
 #include <media/v4l2-device.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-chip-ident.h>
-#include <media/media-entity.h>
+#include <media/v4l2-ctrls.h>
 #include <media/tvp514x.h>
 
 #include "tvp514x_regs.h"
@@ -48,7 +47,7 @@
 #define LOCK_RETRY_DELAY                (200)
 
 /* Debug functions */
-static int debug;
+static bool debug;
 module_param(debug, bool, 0644);
 MODULE_PARM_DESC(debug, "Debug level (0-1)");
 
@@ -96,6 +95,7 @@ static struct tvp514x_reg tvp514x_reg_list_default[0x40];
  */
 struct tvp514x_decoder {
 	struct v4l2_subdev sd;
+	struct v4l2_ctrl_handler hdl;
 	struct tvp514x_reg tvp514x_regs[ARRAY_SIZE(tvp514x_reg_list_default)];
 	const struct tvp514x_platform_data *pdata;
 
@@ -259,6 +259,11 @@ static struct tvp514x_std_info tvp514x_std_list[] = {
 static inline struct tvp514x_decoder *to_decoder(struct v4l2_subdev *sd)
 {
 	return container_of(sd, struct tvp514x_decoder, sd);
+}
+
+static inline struct v4l2_subdev *to_sd(struct v4l2_ctrl *ctrl)
+{
+	return &container_of(ctrl->handler, struct tvp514x_decoder, hdl)->sd;
 }
 
 
@@ -762,213 +767,54 @@ static int tvp514x_s_routing(struct v4l2_subdev *sd,
 }
 
 /**
- * tvp514x_queryctrl() - V4L2 decoder interface handler for queryctrl
- * @sd: pointer to standard V4L2 sub-device structure
- * @qctrl: standard V4L2 v4l2_queryctrl structure
- *
- * If the requested control is supported, returns the control information.
- * Otherwise, returns -EINVAL if the control is not supported.
- */
-static int
-tvp514x_queryctrl(struct v4l2_subdev *sd, struct v4l2_queryctrl *qctrl)
-{
-	int err = -EINVAL;
-
-	if (qctrl == NULL)
-		return err;
-
-	switch (qctrl->id) {
-	case V4L2_CID_BRIGHTNESS:
-		/* Brightness supported is (0-255), */
-		err = v4l2_ctrl_query_fill(qctrl, 0, 255, 1, 128);
-		break;
-	case V4L2_CID_CONTRAST:
-	case V4L2_CID_SATURATION:
-		/**
-		 * Saturation and Contrast supported is -
-		 *	Contrast: 0 - 255 (Default - 128)
-		 *	Saturation: 0 - 255 (Default - 128)
-		 */
-		err = v4l2_ctrl_query_fill(qctrl, 0, 255, 1, 128);
-		break;
-	case V4L2_CID_HUE:
-		/* Hue Supported is -
-		 *	Hue - -180 - +180 (Default - 0, Step - +180)
-		 */
-		err = v4l2_ctrl_query_fill(qctrl, -180, 180, 180, 0);
-		break;
-	case V4L2_CID_AUTOGAIN:
-		/**
-		 * Auto Gain supported is -
-		 * 	0 - 1 (Default - 1)
-		 */
-		err = v4l2_ctrl_query_fill(qctrl, 0, 1, 1, 1);
-		break;
-	default:
-		v4l2_err(sd, "invalid control id %d\n", qctrl->id);
-		return err;
-	}
-
-	v4l2_dbg(1, debug, sd, "Query Control:%s: Min - %d, Max - %d, Def - %d",
-			qctrl->name, qctrl->minimum, qctrl->maximum,
-			qctrl->default_value);
-
-	return err;
-}
-
-/**
- * tvp514x_g_ctrl() - V4L2 decoder interface handler for g_ctrl
- * @sd: pointer to standard V4L2 sub-device structure
- * @ctrl: pointer to v4l2_control structure
- *
- * If the requested control is supported, returns the control's current
- * value from the decoder. Otherwise, returns -EINVAL if the control is not
- * supported.
- */
-static int
-tvp514x_g_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
-{
-	struct tvp514x_decoder *decoder = to_decoder(sd);
-
-	if (ctrl == NULL)
-		return -EINVAL;
-
-	switch (ctrl->id) {
-	case V4L2_CID_BRIGHTNESS:
-		ctrl->value = decoder->tvp514x_regs[REG_BRIGHTNESS].val;
-		break;
-	case V4L2_CID_CONTRAST:
-		ctrl->value = decoder->tvp514x_regs[REG_CONTRAST].val;
-		break;
-	case V4L2_CID_SATURATION:
-		ctrl->value = decoder->tvp514x_regs[REG_SATURATION].val;
-		break;
-	case V4L2_CID_HUE:
-		ctrl->value = decoder->tvp514x_regs[REG_HUE].val;
-		if (ctrl->value == 0x7F)
-			ctrl->value = 180;
-		else if (ctrl->value == 0x80)
-			ctrl->value = -180;
-		else
-			ctrl->value = 0;
-
-		break;
-	case V4L2_CID_AUTOGAIN:
-		ctrl->value = decoder->tvp514x_regs[REG_AFE_GAIN_CTRL].val;
-		if ((ctrl->value & 0x3) == 3)
-			ctrl->value = 1;
-		else
-			ctrl->value = 0;
-
-		break;
-	default:
-		v4l2_err(sd, "invalid control id %d\n", ctrl->id);
-		return -EINVAL;
-	}
-
-	v4l2_dbg(1, debug, sd, "Get Control: ID - %d - %d",
-			ctrl->id, ctrl->value);
-	return 0;
-}
-
-/**
  * tvp514x_s_ctrl() - V4L2 decoder interface handler for s_ctrl
- * @sd: pointer to standard V4L2 sub-device structure
- * @ctrl: pointer to v4l2_control structure
+ * @ctrl: pointer to v4l2_ctrl structure
  *
  * If the requested control is supported, sets the control's current
  * value in HW. Otherwise, returns -EINVAL if the control is not supported.
  */
-static int
-tvp514x_s_ctrl(struct v4l2_subdev *sd, struct v4l2_control *ctrl)
+static int tvp514x_s_ctrl(struct v4l2_ctrl *ctrl)
 {
+	struct v4l2_subdev *sd = to_sd(ctrl);
 	struct tvp514x_decoder *decoder = to_decoder(sd);
 	int err = -EINVAL, value;
 
-	if (ctrl == NULL)
-		return err;
-
-	value = ctrl->value;
+	value = ctrl->val;
 
 	switch (ctrl->id) {
 	case V4L2_CID_BRIGHTNESS:
-		if (ctrl->value < 0 || ctrl->value > 255) {
-			v4l2_err(sd, "invalid brightness setting %d\n",
-					ctrl->value);
-			return -ERANGE;
-		}
-		err = tvp514x_write_reg(sd, REG_BRIGHTNESS,
-				value);
-		if (err)
-			return err;
-
-		decoder->tvp514x_regs[REG_BRIGHTNESS].val = value;
+		err = tvp514x_write_reg(sd, REG_BRIGHTNESS, value);
+		if (!err)
+			decoder->tvp514x_regs[REG_BRIGHTNESS].val = value;
 		break;
 	case V4L2_CID_CONTRAST:
-		if (ctrl->value < 0 || ctrl->value > 255) {
-			v4l2_err(sd, "invalid contrast setting %d\n",
-					ctrl->value);
-			return -ERANGE;
-		}
 		err = tvp514x_write_reg(sd, REG_CONTRAST, value);
-		if (err)
-			return err;
-
-		decoder->tvp514x_regs[REG_CONTRAST].val = value;
+		if (!err)
+			decoder->tvp514x_regs[REG_CONTRAST].val = value;
 		break;
 	case V4L2_CID_SATURATION:
-		if (ctrl->value < 0 || ctrl->value > 255) {
-			v4l2_err(sd, "invalid saturation setting %d\n",
-					ctrl->value);
-			return -ERANGE;
-		}
 		err = tvp514x_write_reg(sd, REG_SATURATION, value);
-		if (err)
-			return err;
-
-		decoder->tvp514x_regs[REG_SATURATION].val = value;
+		if (!err)
+			decoder->tvp514x_regs[REG_SATURATION].val = value;
 		break;
 	case V4L2_CID_HUE:
 		if (value == 180)
 			value = 0x7F;
 		else if (value == -180)
 			value = 0x80;
-		else if (value == 0)
-			value = 0;
-		else {
-			v4l2_err(sd, "invalid hue setting %d\n", ctrl->value);
-			return -ERANGE;
-		}
 		err = tvp514x_write_reg(sd, REG_HUE, value);
-		if (err)
-			return err;
-
-		decoder->tvp514x_regs[REG_HUE].val = value;
+		if (!err)
+			decoder->tvp514x_regs[REG_HUE].val = value;
 		break;
 	case V4L2_CID_AUTOGAIN:
-		if (value == 1)
-			value = 0x0F;
-		else if (value == 0)
-			value = 0x0C;
-		else {
-			v4l2_err(sd, "invalid auto gain setting %d\n",
-					ctrl->value);
-			return -ERANGE;
-		}
-		err = tvp514x_write_reg(sd, REG_AFE_GAIN_CTRL, value);
-		if (err)
-			return err;
-
-		decoder->tvp514x_regs[REG_AFE_GAIN_CTRL].val = value;
+		err = tvp514x_write_reg(sd, REG_AFE_GAIN_CTRL, value ? 0x0f : 0x0c);
+		if (!err)
+			decoder->tvp514x_regs[REG_AFE_GAIN_CTRL].val = value;
 		break;
-	default:
-		v4l2_err(sd, "invalid control id %d\n", ctrl->id);
-		return err;
 	}
 
-	v4l2_dbg(1, debug, sd, "Set Control: ID - %d - %d",
-			ctrl->id, ctrl->value);
-
+	v4l2_dbg(1, debug, sd, "Set Control: ID - %d - %d\n",
+			ctrl->id, ctrl->val);
 	return err;
 }
 
@@ -1110,100 +956,18 @@ static int tvp514x_s_stream(struct v4l2_subdev *sd, int enable)
 	return err;
 }
 
-/**
- * tvp514x_mbus_fmt_cap() - V4L2 decoder interface handler for try/s/g_mbus_fmt
- * @sd: pointer to standard V4L2 sub-device structure
- * @f: pointer to the mediabus format structure
- *
- * Negotiates the image capture size and mediabus format.
- */
-static int
-tvp514x_mbus_fmt(struct v4l2_subdev *sd, struct v4l2_mbus_framefmt *f)
-{
-	struct tvp514x_decoder *decoder = to_decoder(sd);
-	enum tvp514x_std current_std;
-
-	if (f == NULL)
-		return -EINVAL;
-
-	/* Calculate height and width based on current standard */
-	current_std = decoder->current_std;
-
-	f->code = V4L2_MBUS_FMT_YUYV8_2X8;
-	f->width = decoder->std_list[current_std].width;
-	f->height = decoder->std_list[current_std].height;
-	f->field = V4L2_FIELD_INTERLACED;
-	f->colorspace = V4L2_COLORSPACE_SMPTE170M;
-	v4l2_dbg(1, debug, sd, "MBUS_FMT: Width - %d, Height - %d\n",
-			f->width, f->height);
-	return 0;
-}
-
-static int tvp514x_enum_mbus_code(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_fh *fh,
-			      struct v4l2_subdev_mbus_code_enum *code)
-{
-	u32 pad = code->pad;
-	u32 index = code->index;
-
-	memset(code, 0, sizeof(*code));
-	code->index = index;
-	code->pad = pad;
-
-	if (index != 0)
-		return -EINVAL;
-
-	code->code = V4L2_MBUS_FMT_YUYV8_2X8;
-
-	return 0;
-}
-
-static int tvp514x_get_pad_format(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_fh *fh,
-		       struct v4l2_subdev_format *format)
-{
-	__u32 which	= format->which;
-	struct tvp514x_decoder *decoder = to_decoder(sd);
-
-	if (which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		format->format = decoder->format;
-	else {
-		format->format.code = V4L2_MBUS_FMT_YUYV8_2X8;
-		format->format.width =
-		  tvp514x_std_list[decoder->current_std].width;
-		format->format.height =
-		  tvp514x_std_list[decoder->current_std].height;
-		format->format.colorspace = V4L2_COLORSPACE_SMPTE170M;
-		format->format.field = V4L2_FIELD_INTERLACED;
-	}
-
-	return 0;
-}
-static int tvp514x_set_pad_format(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_fh *fh,
-		       struct v4l2_subdev_format *fmt)
-{
-	struct tvp514x_decoder *decoder = to_decoder(sd);
-
-	if ((fmt->format.code != V4L2_MBUS_FMT_YUYV8_2X8) ||
-		(fmt->format.width !=
-		tvp514x_std_list[decoder->current_std].width) ||
-		(fmt->format.height !=
-		tvp514x_std_list[decoder->current_std].height) ||
-		(fmt->format.colorspace != V4L2_COLORSPACE_SMPTE170M) ||
-		(fmt->format.field != V4L2_FIELD_INTERLACED)) {
-		return -EINVAL;
-	}
-
-	decoder->format = fmt->format;
-
-	return 0;
-}
+static const struct v4l2_ctrl_ops tvp514x_ctrl_ops = {
+	.s_ctrl = tvp514x_s_ctrl,
+};
 
 static const struct v4l2_subdev_core_ops tvp514x_core_ops = {
-	.queryctrl = tvp514x_queryctrl,
-	.g_ctrl = tvp514x_g_ctrl,
-	.s_ctrl = tvp514x_s_ctrl,
+	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
+	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
+	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
+	.g_ctrl = v4l2_subdev_g_ctrl,
+	.s_ctrl = v4l2_subdev_s_ctrl,
+	.queryctrl = v4l2_subdev_queryctrl,
+	.querymenu = v4l2_subdev_querymenu,
 	.s_std = tvp514x_s_std,
 };
 
@@ -1308,21 +1072,28 @@ tvp514x_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	/* Register with V4L2 layer as slave device */
 	sd = &decoder->sd;
 	v4l2_i2c_subdev_init(sd, client, &tvp514x_ops);
-	strlcpy(sd->name, TVP514X_MODULE_NAME, sizeof(sd->name));
 
-#if defined(CONFIG_MEDIA_CONTROLLER)
-	decoder->pad.flags = MEDIA_PAD_FL_OUTPUT;
-	decoder->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	decoder->sd.entity.flags |= MEDIA_ENT_T_V4L2_SUBDEV_DECODER;
+	v4l2_ctrl_handler_init(&decoder->hdl, 5);
+	v4l2_ctrl_new_std(&decoder->hdl, &tvp514x_ctrl_ops,
+		V4L2_CID_BRIGHTNESS, 0, 255, 1, 128);
+	v4l2_ctrl_new_std(&decoder->hdl, &tvp514x_ctrl_ops,
+		V4L2_CID_CONTRAST, 0, 255, 1, 128);
+	v4l2_ctrl_new_std(&decoder->hdl, &tvp514x_ctrl_ops,
+		V4L2_CID_SATURATION, 0, 255, 1, 128);
+	v4l2_ctrl_new_std(&decoder->hdl, &tvp514x_ctrl_ops,
+		V4L2_CID_HUE, -180, 180, 180, 0);
+	v4l2_ctrl_new_std(&decoder->hdl, &tvp514x_ctrl_ops,
+		V4L2_CID_AUTOGAIN, 0, 1, 1, 1);
+	sd->ctrl_handler = &decoder->hdl;
+	if (decoder->hdl.error) {
+		int err = decoder->hdl.error;
 
-	ret = media_entity_init(&decoder->sd.entity, 1, &decoder->pad, 0);
-	if (ret < 0) {
-		v4l2_err(sd, "%s decoder driver failed to register !!\n",
-			 sd->name);
+		v4l2_ctrl_handler_free(&decoder->hdl);
 		kfree(decoder);
-		return ret;
+		return err;
 	}
-#endif
+	v4l2_ctrl_handler_setup(&decoder->hdl);
+
 	v4l2_info(sd, "%s decoder driver registered !!\n", sd->name);
 
 	return 0;
@@ -1342,9 +1113,7 @@ static int tvp514x_remove(struct i2c_client *client)
 	struct tvp514x_decoder *decoder = to_decoder(sd);
 
 	v4l2_device_unregister_subdev(sd);
-#if defined(CONFIG_MEDIA_CONTROLLER)
-	media_entity_cleanup(&decoder->sd.entity);
-#endif
+	v4l2_ctrl_handler_free(&decoder->hdl);
 	kfree(decoder);
 	return 0;
 }

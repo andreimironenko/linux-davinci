@@ -750,6 +750,7 @@ isdn_tty_modem_hup(modem_info * info, int local)
  * supplementary service (CAPI 2.0 part III)
  */
 #include <linux/isdn/capicmd.h>
+#include <linux/module.h>
 
 int
 isdn_tty_capi_facility(capi_msg *cm) {
@@ -792,7 +793,7 @@ isdn_tty_suspend(char *id, modem_info * info, atemu * m)
 }
 
 /* isdn_tty_resume() tries to resume a suspended call
- * setup of the lower levels before that. unfortunatly here is no
+ * setup of the lower levels before that. unfortunately here is no
  * checking for compatibility of used protocols implemented by Q931
  * It does the same things like isdn_tty_dial, the last command
  * is different, may be we can merge it.
@@ -998,7 +999,6 @@ isdn_tty_change_speed(modem_info * info)
 {
 	uint cflag,
 	 cval,
-	 fcr,
 	 quot;
 	int i;
 
@@ -1037,7 +1037,6 @@ isdn_tty_change_speed(modem_info * info)
 		cval |= UART_LCR_PARITY;
 	if (!(cflag & PARODD))
 		cval |= UART_LCR_EPAR;
-	fcr = 0;
 
 	/* CTS flow control flag and modem status interrupts */
 	if (cflag & CRTSCTS) {
@@ -1345,7 +1344,7 @@ isdn_tty_get_lsr_info(modem_info * info, uint __user * value)
 
 
 static int
-isdn_tty_tiocmget(struct tty_struct *tty, struct file *file)
+isdn_tty_tiocmget(struct tty_struct *tty)
 {
 	modem_info *info = (modem_info *) tty->driver_data;
 	u_char control, status;
@@ -1372,7 +1371,7 @@ isdn_tty_tiocmget(struct tty_struct *tty, struct file *file)
 }
 
 static int
-isdn_tty_tiocmset(struct tty_struct *tty, struct file *file,
+isdn_tty_tiocmset(struct tty_struct *tty,
 		unsigned int set, unsigned int clear)
 {
 	modem_info *info = (modem_info *) tty->driver_data;
@@ -1413,8 +1412,7 @@ isdn_tty_tiocmset(struct tty_struct *tty, struct file *file,
 }
 
 static int
-isdn_tty_ioctl(struct tty_struct *tty, struct file *file,
-	       uint cmd, ulong arg)
+isdn_tty_ioctl(struct tty_struct *tty, uint cmd, ulong arg)
 {
 	modem_info *info = (modem_info *) tty->driver_data;
 	int retval;
@@ -1696,7 +1694,7 @@ isdn_tty_close(struct tty_struct *tty, struct file *filp)
 	 * line status register.
 	 */
 	if (info->flags & ISDN_ASYNC_INITIALIZED) {
-		tty_wait_until_sent(tty, 3000);	/* 30 seconds timeout */
+		tty_wait_until_sent_from_close(tty, 3000);	/* 30 seconds timeout */
 		/*
 		 * Before we drop DTR, make sure the UART transmitter
 		 * has completely drained; this is especially

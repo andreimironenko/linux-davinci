@@ -10,7 +10,8 @@
  * published by the Free Software Foundation.
 */
 
-#include <linux/sysdev.h>
+#include <linux/device.h>
+#include <linux/syscore_ops.h>
 #include <linux/io.h>
 
 #include <asm/cacheflush.h>
@@ -23,10 +24,8 @@
 
 extern void s3c2412_sleep_enter(void);
 
-static void s3c2416_cpu_suspend(void)
+static int s3c2416_cpu_suspend(unsigned long arg)
 {
-	flush_cache_all();
-
 	/* enable wakeup sources regardless of battery state */
 	__raw_writel(S3C2443_PWRCFG_SLEEP, S3C2443_PWRCFG);
 
@@ -34,6 +33,8 @@ static void s3c2416_cpu_suspend(void)
 	__raw_writel(0x2BED, S3C2443_PWRMODE);
 
 	s3c2412_sleep_enter();
+
+	panic("sleep resumed to originator?");
 }
 
 static void s3c2416_pm_prepare(void)
@@ -47,7 +48,7 @@ static void s3c2416_pm_prepare(void)
 	__raw_writel(virt_to_phys(s3c_cpu_resume), S3C2412_INFORM1);
 }
 
-static int s3c2416_pm_add(struct sys_device *sysdev)
+static int s3c2416_pm_add(struct device *dev, struct subsys_interface *sif)
 {
 	pm_cpu_prep = s3c2416_pm_prepare;
 	pm_cpu_sleep = s3c2416_cpu_suspend;
@@ -55,30 +56,28 @@ static int s3c2416_pm_add(struct sys_device *sysdev)
 	return 0;
 }
 
-static int s3c2416_pm_suspend(struct sys_device *dev, pm_message_t state)
+static struct subsys_interface s3c2416_pm_interface = {
+	.name		= "s3c2416_pm",
+	.subsys		= &s3c2416_subsys,
+	.add_dev	= s3c2416_pm_add,
+};
+
+static __init int s3c2416_pm_init(void)
 {
-	return 0;
+	return subsys_interface_register(&s3c2416_pm_interface);
 }
 
-static int s3c2416_pm_resume(struct sys_device *dev)
+arch_initcall(s3c2416_pm_init);
+
+
+static void s3c2416_pm_resume(void)
 {
 	/* unset the return-from-sleep amd inform flags */
 	__raw_writel(0x0, S3C2443_PWRMODE);
 	__raw_writel(0x0, S3C2412_INFORM0);
 	__raw_writel(0x0, S3C2412_INFORM1);
-
-	return 0;
 }
 
-static struct sysdev_driver s3c2416_pm_driver = {
-	.add		= s3c2416_pm_add,
-	.suspend	= s3c2416_pm_suspend,
+struct syscore_ops s3c2416_pm_syscore_ops = {
 	.resume		= s3c2416_pm_resume,
 };
-
-static __init int s3c2416_pm_init(void)
-{
-	return sysdev_driver_register(&s3c2416_sysclass, &s3c2416_pm_driver);
-}
-
-arch_initcall(s3c2416_pm_init);

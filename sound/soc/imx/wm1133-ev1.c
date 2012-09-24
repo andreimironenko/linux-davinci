@@ -14,12 +14,12 @@
 
 #include <linux/platform_device.h>
 #include <linux/clk.h>
+#include <linux/module.h>
 #include <sound/core.h>
 #include <sound/jack.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-#include <sound/soc-dapm.h>
 
 #include <mach/audmux.h>
 
@@ -213,11 +213,12 @@ static struct snd_soc_jack_pin mic_jack_pins[] = {
 static int wm1133_ev1_init(struct snd_soc_pcm_runtime *rtd)
 {
 	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
 
-	snd_soc_dapm_new_controls(codec, wm1133_ev1_widgets,
+	snd_soc_dapm_new_controls(dapm, wm1133_ev1_widgets,
 				  ARRAY_SIZE(wm1133_ev1_widgets));
 
-	snd_soc_dapm_add_routes(codec, wm1133_ev1_map,
+	snd_soc_dapm_add_routes(dapm, wm1133_ev1_map,
 				ARRAY_SIZE(wm1133_ev1_map));
 
 	/* Headphone jack detection */
@@ -234,7 +235,7 @@ static int wm1133_ev1_init(struct snd_soc_pcm_runtime *rtd)
 	wm8350_mic_jack_detect(codec, &mic_jack, SND_JACK_MICROPHONE,
 			       SND_JACK_BTN_0);
 
-	snd_soc_dapm_force_enable_pin(codec, "Mic Bias");
+	snd_soc_dapm_force_enable_pin(dapm, "Mic Bias");
 
 	return 0;
 }
@@ -254,6 +255,7 @@ static struct snd_soc_dai_link wm1133_ev1_dai = {
 
 static struct snd_soc_card wm1133_ev1 = {
 	.name = "WM1133-EV1",
+	.owner = THIS_MODULE,
 	.dai_link = &wm1133_ev1_dai,
 	.num_links = 1,
 };

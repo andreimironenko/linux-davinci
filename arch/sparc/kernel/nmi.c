@@ -10,7 +10,7 @@
 #include <linux/init.h>
 #include <linux/percpu.h>
 #include <linux/nmi.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/kprobes.h>
 #include <linux/kernel_stat.h>
 #include <linux/reboot.h>
@@ -270,8 +270,6 @@ int __init nmi_init(void)
 			atomic_set(&nmi_active, -1);
 		}
 	}
-	if (!err)
-		init_hw_perf_events();
 
 	return err;
 }

@@ -18,12 +18,11 @@
 #include <linux/vmalloc.h>
 #include <linux/sched.h>
 
-#include <linux/ncp_fs.h>
-#include "ncplib_kernel.h"
+#include "ncp_fs.h"
 
-static int ncp_fsync(struct file *file, int datasync)
+static int ncp_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	return 0;
+	return filemap_write_and_wait_range(file->f_mapping, start, end);
 }
 
 /*

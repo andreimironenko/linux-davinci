@@ -17,8 +17,6 @@
 
 #include <mach/hardware.h>
 
-#define IO_SPACE_LIMIT 0x0000ffff
-
 extern int (*ixp4xx_pci_read)(u32 addr, u32 cmd, u32* data);
 extern int ixp4xx_pci_write(u32 addr, u32 cmd, u32 data);
 
@@ -74,8 +72,8 @@ static inline void __indirect_iounmap(void __iomem *addr)
 		__iounmap(addr);
 }
 
-#define __arch_ioremap(a, s, f)		__indirect_ioremap(a, s, f)
-#define __arch_iounmap(a)		__indirect_iounmap(a)
+#define __arch_ioremap			__indirect_ioremap
+#define __arch_iounmap			__indirect_iounmap
 
 #define writeb(v, p)			__indirect_writeb(v, p)
 #define writew(v, p)			__indirect_writew(v, p)

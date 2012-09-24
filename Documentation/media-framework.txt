@@ -9,8 +9,8 @@ Introduction
 ------------
 
 The media controller API is documented in DocBook format in
-Documentation/DocBook/v4l/media-controller.xml. This document will focus on
-the kernel-side implementation of the media framework.
+Documentation/DocBook/media/v4l/media-controller.xml. This document will focus
+on the kernel-side implementation of the media framework.
 
 
 Abstract media device model
@@ -184,17 +184,17 @@ pointer the canonical way to store and pass link references.
 
 Pads have flags that describe the pad capabilities and state.
 
-	MEDIA_PAD_FL_INPUT indicates that the pad supports sinking data.
-	MEDIA_PAD_FL_OUTPUT indicates that the pad supports sourcing data.
+	MEDIA_PAD_FL_SINK indicates that the pad supports sinking data.
+	MEDIA_PAD_FL_SOURCE indicates that the pad supports sourcing data.
 
-One and only one of MEDIA_PAD_FL_INPUT and MEDIA_PAD_FL_OUTPUT must be set for
+One and only one of MEDIA_PAD_FL_SINK and MEDIA_PAD_FL_SOURCE must be set for
 each pad.
 
 - Links
 
 Links are represented by a struct media_link instance, defined in
 include/media/media-entity.h. Each entity stores all links originating at or
-targetting any of its pads in a links array. A given link is thus stored
+targeting any of its pads in a links array. A given link is thus stored
 twice, once in the source entity and once in the target entity. The array is
 pre-allocated and grows dynamically as needed.
 
@@ -310,7 +310,7 @@ is non-immutable. The operation must either configure the hardware or store
 the configuration information to be applied later.
 
 Link configuration must not have any side effect on other links. If an enabled
-link at a sink pad prevents another link at the same pad from being disabled,
+link at a sink pad prevents another link at the same pad from being enabled,
 the link_setup operation must return -EBUSY and can't implicitly disable the
 first enabled link.
 
@@ -348,6 +348,6 @@ a streaming entity. Links that can be modified while streaming must be marked
 with the MEDIA_LNK_FL_DYNAMIC flag.
 
 If other operations need to be disallowed on streaming entities (such as
-changing entities configuration parameters) drivers can explictly check the
+changing entities configuration parameters) drivers can explicitly check the
 media_entity stream_count field to find out if an entity is streaming. This
 operation must be done with the media_device graph_mutex held.

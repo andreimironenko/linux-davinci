@@ -31,13 +31,13 @@
  * GPIOs in a single control area, others have some GPIOs implemented in
  * different modules.
  *
- * This implementation attempts accomodate the differences while presenting
+ * This implementation attempts accommodate the differences while presenting
  * a generic interface that will optimize to as few instructions as possible.
  */
 #if defined(CONFIG_M5206) || defined(CONFIG_M5206e) || \
     defined(CONFIG_M520x) || defined(CONFIG_M523x) || \
     defined(CONFIG_M527x) || defined(CONFIG_M528x) || \
-    defined(CONFIG_M532x) || defined(CONFIG_M548x)
+    defined(CONFIG_M532x) || defined(CONFIG_M54xx)
 
 /* These parts have GPIO organized by 8 bit ports */
 
@@ -225,7 +225,8 @@ static inline void gpio_set_value(unsigned gpio, int value)
 
 static inline int gpio_to_irq(unsigned gpio)
 {
-	return (gpio < MCFGPIO_IRQ_MAX) ? gpio + MCFGPIO_IRQ_VECBASE : -EINVAL;
+	return (gpio < MCFGPIO_IRQ_MAX) ? gpio + MCFGPIO_IRQ_VECBASE
+		: __gpio_to_irq(gpio);
 }
 
 static inline int irq_to_gpio(unsigned irq)

@@ -21,7 +21,7 @@
 
 #include <linux/init.h>
 #include <linux/platform_device.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/amba/bus.h>
 #include <linux/amba/pl061.h>
 #include <linux/amba/mmci.h>
@@ -64,15 +64,10 @@ static struct map_desc realview_pb11mp_io_desc[] __initdata = {
 		.pfn		= __phys_to_pfn(REALVIEW_PB11MP_GIC_DIST_BASE),
 		.length		= SZ_4K,
 		.type		= MT_DEVICE,
-	}, {
-		.virtual	= IO_ADDRESS(REALVIEW_TC11MP_GIC_CPU_BASE),
-		.pfn		= __phys_to_pfn(REALVIEW_TC11MP_GIC_CPU_BASE),
-		.length		= SZ_4K,
-		.type		= MT_DEVICE,
-	}, {
-		.virtual	= IO_ADDRESS(REALVIEW_TC11MP_GIC_DIST_BASE),
-		.pfn		= __phys_to_pfn(REALVIEW_TC11MP_GIC_DIST_BASE),
-		.length		= SZ_4K,
+	}, {	/* Maps the SCU, GIC CPU interface, TWD, GIC DIST */
+		.virtual	= IO_ADDRESS(REALVIEW_TC11MP_PRIV_MEM_BASE),
+		.pfn		= __phys_to_pfn(REALVIEW_TC11MP_PRIV_MEM_BASE),
+		.length		= REALVIEW_TC11MP_PRIV_MEM_SIZE,
 		.type		= MT_DEVICE,
 	}, {
 		.virtual	= IO_ADDRESS(REALVIEW_SCTL_BASE),
@@ -112,17 +107,14 @@ static void __init realview_pb11mp_map_io(void)
 
 static struct pl061_platform_data gpio0_plat_data = {
 	.gpio_base	= 0,
-	.irq_base	= -1,
 };
 
 static struct pl061_platform_data gpio1_plat_data = {
 	.gpio_base	= 8,
-	.irq_base	= -1,
 };
 
 static struct pl061_platform_data gpio2_plat_data = {
 	.gpio_base	= 16,
-	.irq_base	= -1,
 };
 
 static struct pl022_ssp_controller ssp0_plat_data = {
@@ -136,47 +128,26 @@ static struct pl022_ssp_controller ssp0_plat_data = {
  */
 
 #define GPIO2_IRQ		{ IRQ_PB11MP_GPIO2, NO_IRQ }
-#define GPIO2_DMA		{ 0, 0 }
 #define GPIO3_IRQ		{ IRQ_PB11MP_GPIO3, NO_IRQ }
-#define GPIO3_DMA		{ 0, 0 }
 #define AACI_IRQ		{ IRQ_TC11MP_AACI, NO_IRQ }
-#define AACI_DMA		{ 0x80, 0x81 }
 #define MMCI0_IRQ		{ IRQ_TC11MP_MMCI0A, IRQ_TC11MP_MMCI0B }
-#define MMCI0_DMA		{ 0x84, 0 }
 #define KMI0_IRQ		{ IRQ_TC11MP_KMI0, NO_IRQ }
-#define KMI0_DMA		{ 0, 0 }
 #define KMI1_IRQ		{ IRQ_TC11MP_KMI1, NO_IRQ }
-#define KMI1_DMA		{ 0, 0 }
 #define PB11MP_SMC_IRQ		{ NO_IRQ, NO_IRQ }
-#define PB11MP_SMC_DMA		{ 0, 0 }
 #define MPMC_IRQ		{ NO_IRQ, NO_IRQ }
-#define MPMC_DMA		{ 0, 0 }
 #define PB11MP_CLCD_IRQ		{ IRQ_PB11MP_CLCD, NO_IRQ }
-#define PB11MP_CLCD_DMA		{ 0, 0 }
 #define DMAC_IRQ		{ IRQ_PB11MP_DMAC, NO_IRQ }
-#define DMAC_DMA		{ 0, 0 }
 #define SCTL_IRQ		{ NO_IRQ, NO_IRQ }
-#define SCTL_DMA		{ 0, 0 }
 #define PB11MP_WATCHDOG_IRQ	{ IRQ_PB11MP_WATCHDOG, NO_IRQ }
-#define PB11MP_WATCHDOG_DMA	{ 0, 0 }
 #define PB11MP_GPIO0_IRQ	{ IRQ_PB11MP_GPIO0, NO_IRQ }
-#define PB11MP_GPIO0_DMA	{ 0, 0 }
 #define GPIO1_IRQ		{ IRQ_PB11MP_GPIO1, NO_IRQ }
-#define GPIO1_DMA		{ 0, 0 }
 #define PB11MP_RTC_IRQ		{ IRQ_TC11MP_RTC, NO_IRQ }
-#define PB11MP_RTC_DMA		{ 0, 0 }
 #define SCI_IRQ			{ IRQ_PB11MP_SCI, NO_IRQ }
-#define SCI_DMA			{ 7, 6 }
 #define PB11MP_UART0_IRQ	{ IRQ_TC11MP_UART0, NO_IRQ }
-#define PB11MP_UART0_DMA	{ 15, 14 }
 #define PB11MP_UART1_IRQ	{ IRQ_TC11MP_UART1, NO_IRQ }
-#define PB11MP_UART1_DMA	{ 13, 12 }
 #define PB11MP_UART2_IRQ	{ IRQ_PB11MP_UART2, NO_IRQ }
-#define PB11MP_UART2_DMA	{ 11, 10 }
 #define PB11MP_UART3_IRQ	{ IRQ_PB11MP_UART3, NO_IRQ }
-#define PB11MP_UART3_DMA	{ 0x86, 0x87 }
 #define PB11MP_SSP_IRQ		{ IRQ_PB11MP_SSP, NO_IRQ }
-#define PB11MP_SSP_DMA		{ 9, 8 }
 
 /* FPGA Primecells */
 AMBA_DEVICE(aaci,	"fpga:aaci",	AACI,		NULL);
@@ -309,13 +280,13 @@ static void __init gic_init_irq(void)
 	writel(0x00000000, __io_address(REALVIEW_SYS_LOCK));
 
 	/* ARM11MPCore test chip GIC, primary */
-	gic_cpu_base_addr = __io_address(REALVIEW_TC11MP_GIC_CPU_BASE);
-	gic_dist_init(0, __io_address(REALVIEW_TC11MP_GIC_DIST_BASE), 29);
-	gic_cpu_init(0, gic_cpu_base_addr);
+	gic_init(0, 29, __io_address(REALVIEW_TC11MP_GIC_DIST_BASE),
+		 __io_address(REALVIEW_TC11MP_GIC_CPU_BASE));
 
 	/* board GIC, secondary */
-	gic_dist_init(1, __io_address(REALVIEW_PB11MP_GIC_DIST_BASE), IRQ_PB11MP_GIC_START);
-	gic_cpu_init(1, __io_address(REALVIEW_PB11MP_GIC_CPU_BASE));
+	gic_init(1, IRQ_PB11MP_GIC_START,
+		 __io_address(REALVIEW_PB11MP_GIC_DIST_BASE),
+		 __io_address(REALVIEW_PB11MP_GIC_CPU_BASE));
 	gic_cascade_irq(1, IRQ_TC11MP_PB_IRQ1);
 }
 
@@ -336,7 +307,7 @@ static struct sys_timer realview_pb11mp_timer = {
 	.init		= realview_pb11mp_timer_init,
 };
 
-static void realview_pb11mp_reset(char mode)
+static void realview_pb11mp_restart(char mode, const char *cmd)
 {
 	void __iomem *reset_ctrl = __io_address(REALVIEW_SYS_RESETCTL);
 	void __iomem *lock_ctrl = __io_address(REALVIEW_SYS_LOCK);
@@ -348,6 +319,7 @@ static void realview_pb11mp_reset(char mode)
 	__raw_writel(REALVIEW_SYS_LOCK_VAL, lock_ctrl);
 	__raw_writel(0x0000, reset_ctrl);
 	__raw_writel(0x0004, reset_ctrl);
+	dsb();
 }
 
 static void __init realview_pb11mp_init(void)
@@ -376,15 +348,20 @@ static void __init realview_pb11mp_init(void)
 #ifdef CONFIG_LEDS
 	leds_event = realview_leds_event;
 #endif
-	realview_reset = realview_pb11mp_reset;
 }
 
 MACHINE_START(REALVIEW_PB11MP, "ARM-RealView PB11MPCore")
 	/* Maintainer: ARM Ltd/Deep Blue Solutions Ltd */
-	.boot_params	= PHYS_OFFSET + 0x00000100,
+	.atag_offset	= 0x100,
 	.fixup		= realview_fixup,
 	.map_io		= realview_pb11mp_map_io,
+	.init_early	= realview_init_early,
 	.init_irq	= gic_init_irq,
 	.timer		= &realview_pb11mp_timer,
+	.handle_irq	= gic_handle_irq,
 	.init_machine	= realview_pb11mp_init,
+#ifdef CONFIG_ZONE_DMA
+	.dma_zone_size	= SZ_256M,
+#endif
+	.restart	= realview_pb11mp_restart,
 MACHINE_END

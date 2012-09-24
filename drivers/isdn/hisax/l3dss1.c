@@ -353,7 +353,7 @@ l3dss1_parse_facility(struct PStack *st, struct l3_process *pc,
 			         { l3dss1_dummy_invoke(st, cr, id, ident, p, nlen);
                                    return;
                                  } 
-#ifdef HISAX_DE_AOC
+#ifdef CONFIG_DE_AOC
 			{
 
 #define FOO1(s,a,b) \
@@ -422,9 +422,9 @@ l3dss1_parse_facility(struct PStack *st, struct l3_process *pc,
 #undef FOO1
 
 			}
-#else  /* not HISAX_DE_AOC */
+#else  /* not CONFIG_DE_AOC */
                         l3_debug(st, "invoke break");
-#endif /* not HISAX_DE_AOC */
+#endif /* not CONFIG_DE_AOC */
 			break;
 		case 2:	/* return result */
 			 /* if no process available handle separately */ 
@@ -1595,7 +1595,7 @@ l3dss1_setup(struct l3_process *pc, u_char pr, void *arg)
 	 * Bearer Capabilities
 	 */
 	p = skb->data;
-	/* only the first occurence 'll be detected ! */
+	/* only the first occurrence 'll be detected ! */
 	if ((p = findie(p, skb->len, 0x04, 0))) {
 		if ((p[1] < 2) || (p[1] > 11))
 			err = 1;
@@ -2161,7 +2161,7 @@ static void l3dss1_redir_req_early(struct l3_process *pc, u_char pr, void *arg)
 
 /***********************************************/
 /* handle special commands for this protocol.  */
-/* Examples are call independant services like */
+/* Examples are call independent services like */
 /* remote operations with dummy  callref.      */
 /***********************************************/
 static int l3dss1_cmd_global(struct PStack *st, isdn_ctrl *ic)
@@ -2943,7 +2943,7 @@ global_handler(struct PStack *st, int mt, struct sk_buff *skb)
 static void
 dss1up(struct PStack *st, int pr, void *arg)
 {
-	int i, mt, cr, cause, callState;
+	int i, mt, cr, callState;
 	char *ptr;
 	u_char *p;
 	struct sk_buff *skb = arg;
@@ -3034,12 +3034,10 @@ dss1up(struct PStack *st, int pr, void *arg)
 				return;
 			}
 		} else if (mt == MT_STATUS) {
-			cause = 0;
 			if ((ptr = findie(skb->data, skb->len, IE_CAUSE, 0)) != NULL) {
 				ptr++;
 				if (*ptr++ == 2)
 					ptr++;
-				cause = *ptr & 0x7f;
 			}
 			callState = 0;
 			if ((ptr = findie(skb->data, skb->len, IE_CALL_STATE, 0)) != NULL) {

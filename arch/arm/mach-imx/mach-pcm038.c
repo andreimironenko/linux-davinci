@@ -36,12 +36,9 @@
 #include <mach/common.h>
 #include <mach/hardware.h>
 #include <mach/iomux-mx27.h>
-#include <mach/mxc_nand.h>
-#include <mach/mxc_ehci.h>
 #include <mach/ulpi.h>
 
 #include "devices-imx27.h"
-#include "devices.h"
 
 static const int pcm038_pins[] __initconst = {
 	/* UART1 */
@@ -172,16 +169,16 @@ pcm038_nand_board_info __initconst = {
 
 static struct platform_device *platform_devices[] __initdata = {
 	&pcm038_nor_mtd_device,
-	&mxc_w1_master_device,
 	&pcm038_sram_mtd_device,
-	&mxc_wdt,
 };
 
 /* On pcm038 there's a sram attached to CS1, we enable the chipselect here and
  * setup other stuffs to access the sram. */
 static void __init pcm038_init_sram(void)
 {
-	mx27_setup_weimcs(1, 0x0000d843, 0x22252521, 0x22220a00);
+	__raw_writel(0x0000d843, MX27_IO_ADDRESS(MX27_WEIM_CSCRxU(1)));
+	__raw_writel(0x22252521, MX27_IO_ADDRESS(MX27_WEIM_CSCRxL(1)));
+	__raw_writel(0x22220a00, MX27_IO_ADDRESS(MX27_WEIM_CSCRxA(1)));
 }
 
 static const struct imxi2c_platform_data pcm038_i2c1_data __initconst = {
@@ -214,7 +211,7 @@ static const struct spi_imx_master pcm038_spi0_data __initconst = {
 
 static struct regulator_consumer_supply sdhc1_consumers[] = {
 	{
-		.dev	= &mxc_sdhc_device1.dev,
+		.dev_name = "mxc-mmc.1",
 		.supply	= "sdhc_vcc",
 	},
 };
@@ -256,21 +253,22 @@ static struct regulator_init_data cam_data = {
 	.consumer_supplies = cam_consumers,
 };
 
-static struct mc13783_regulator_init_data pcm038_regulators[] = {
+static struct mc13xxx_regulator_init_data pcm038_regulators[] = {
 	{
-		.id = MC13783_REGU_VCAM,
+		.id = MC13783_REG_VCAM,
 		.init_data = &cam_data,
 	}, {
-		.id = MC13783_REGU_VMMC1,
+		.id = MC13783_REG_VMMC1,
 		.init_data = &sdhc1_data,
 	},
 };
 
-static struct mc13783_platform_data pcm038_pmic = {
-	.regulators = pcm038_regulators,
-	.num_regulators = ARRAY_SIZE(pcm038_regulators),
-	.flags = MC13783_USE_ADC | MC13783_USE_REGULATOR |
-		 MC13783_USE_TOUCHSCREEN,
+static struct mc13xxx_platform_data pcm038_pmic = {
+	.regulators = {
+		.regulators = pcm038_regulators,
+		.num_regulators = ARRAY_SIZE(pcm038_regulators),
+	},
+	.flags = MC13XXX_USE_ADC | MC13XXX_USE_TOUCHSCREEN,
 };
 
 static struct spi_board_info pcm038_spi_board_info[] __initdata = {
@@ -285,13 +283,21 @@ static struct spi_board_info pcm038_spi_board_info[] __initdata = {
 	}
 };
 
-static struct mxc_usbh_platform_data usbh2_pdata = {
+static int pcm038_usbh2_init(struct platform_device *pdev)
+{
+	return mx27_initialize_usb_hw(pdev->id, MXC_EHCI_POWER_PINS_ENABLED |
+			MXC_EHCI_INTERFACE_DIFF_UNI);
+}
+
+static const struct mxc_usbh_platform_data usbh2_pdata __initconst = {
+	.init	= pcm038_usbh2_init,
 	.portsc	= MXC_EHCI_MODE_ULPI,
-	.flags	= MXC_EHCI_POWER_PINS_ENABLED | MXC_EHCI_INTERFACE_DIFF_UNI,
 };
 
 static void __init pcm038_init(void)
 {
+	imx27_soc_init();
+
 	mxc_gpio_setup_multiple_pins(pcm038_pins, ARRAY_SIZE(pcm038_pins),
 			"PCM038");
 
@@ -322,10 +328,12 @@ static void __init pcm038_init(void)
 	spi_register_board_info(pcm038_spi_board_info,
 				ARRAY_SIZE(pcm038_spi_board_info));
 
-	mxc_register_device(&mxc_usbh2, &usbh2_pdata);
+	imx27_add_mxc_ehci_hs(2, &usbh2_pdata);
 
 	imx27_add_fec(NULL);
 	platform_add_devices(platform_devices, ARRAY_SIZE(platform_devices));
+	imx27_add_imx2_wdt(NULL);
+	imx27_add_mxc_w1(NULL);
 
 #ifdef CONFIG_MACH_PCM970_BASEBOARD
 	pcm970_baseboard_init();
@@ -342,9 +350,12 @@ static struct sys_timer pcm038_timer = {
 };
 
 MACHINE_START(PCM038, "phyCORE-i.MX27")
-	.boot_params    = MX27_PHYS_OFFSET + 0x100,
-	.map_io         = mx27_map_io,
-	.init_irq       = mx27_init_irq,
-	.init_machine   = pcm038_init,
-	.timer          = &pcm038_timer,
+	.atag_offset = 0x100,
+	.map_io = mx27_map_io,
+	.init_early = imx27_init_early,
+	.init_irq = mx27_init_irq,
+	.handle_irq = imx27_handle_irq,
+	.timer = &pcm038_timer,
+	.init_machine = pcm038_init,
+	.restart	= mxc_restart,
 MACHINE_END

@@ -31,7 +31,7 @@
  *		Jeff Garzik	:	PCI cleanups
  *		Tigran Aivazian	:	Restructured wdtpci_init_one() to handle
  *					failures
- *		Joel Becker 	:	Added WDIOC_GET/SETTIMEOUT
+ *		Joel Becker	:	Added WDIOC_GET/SETTIMEOUT
  *		Zwane Mwaikambo	:	Magic char closing, locking changes,
  *					cleanups
  *		Matt Domsch	:	nowayout module option
@@ -643,7 +643,7 @@ static int __devinit wdtpci_init_one(struct pci_dev *dev,
 	irq = dev->irq;
 	io = pci_resource_start(dev, 2);
 
-	if (request_irq(irq, wdtpci_interrupt, IRQF_DISABLED | IRQF_SHARED,
+	if (request_irq(irq, wdtpci_interrupt, IRQF_SHARED,
 			 "wdt_pci", &wdtpci_miscdev)) {
 		printk(KERN_ERR PFX "IRQ %d is not free\n", irq);
 		goto out_reg;
@@ -727,7 +727,7 @@ static void __devexit wdtpci_remove_one(struct pci_dev *pdev)
 }
 
 
-static struct pci_device_id wdtpci_pci_tbl[] = {
+static DEFINE_PCI_DEVICE_TABLE(wdtpci_pci_tbl) = {
 	{
 		.vendor	   = PCI_VENDOR_ID_ACCESSIO,
 		.device	   = PCI_DEVICE_ID_ACCESSIO_WDG_CSM,
@@ -764,7 +764,7 @@ static void __exit wdtpci_cleanup(void)
 
 
 /**
- * 	wdtpci_init:
+ *	wdtpci_init:
  *
  *	Set up the WDT watchdog board. All we have to do is grab the
  *	resources we require and bitch if anyone beat us to them.

@@ -311,8 +311,9 @@ int iommu_map_sg(struct device *dev, struct iommu_table *tbl,
 		/* Handle failure */
 		if (unlikely(entry == DMA_ERROR_CODE)) {
 			if (printk_ratelimit())
-				printk(KERN_INFO "iommu_alloc failed, tbl %p vaddr %lx"
-				       " npages %lx\n", tbl, vaddr, npages);
+				dev_info(dev, "iommu_alloc failed, tbl %p "
+					 "vaddr %lx npages %lu\n", tbl, vaddr,
+					 npages);
 			goto failure;
 		}
 
@@ -500,6 +501,14 @@ struct iommu_table *iommu_init_table(struct iommu_table *tbl, int nid)
 	tbl->it_map = page_address(page);
 	memset(tbl->it_map, 0, sz);
 
+	/*
+	 * Reserve page 0 so it will not be used for any mappings.
+	 * This avoids buggy drivers that consider page 0 to be invalid
+	 * to crash the machine or even lose data.
+	 */
+	if (tbl->it_offset == 0)
+		set_bit(0, tbl->it_map);
+
 	tbl->it_hint = 0;
 	tbl->it_largehint = tbl->it_halfpoint;
 	spin_lock_init(&tbl->it_lock);
@@ -579,9 +588,9 @@ dma_addr_t iommu_map_page(struct device *dev, struct iommu_table *tbl,
 					 attrs);
 		if (dma_handle == DMA_ERROR_CODE) {
 			if (printk_ratelimit())  {
-				printk(KERN_INFO "iommu_alloc failed, "
-						"tbl %p vaddr %p npages %d\n",
-						tbl, vaddr, npages);
+				dev_info(dev, "iommu_alloc failed, tbl %p "
+					 "vaddr %p npages %d\n", tbl, vaddr,
+					 npages);
 			}
 		} else
 			dma_handle |= (uaddr & ~IOMMU_PAGE_MASK);
@@ -627,7 +636,8 @@ void *iommu_alloc_coherent(struct device *dev, struct iommu_table *tbl,
 	 * the tce tables.
 	 */
 	if (order >= IOMAP_MAX_ORDER) {
-		printk("iommu_alloc_consistent size too large: 0x%lx\n", size);
+		dev_info(dev, "iommu_alloc_consistent size too large: 0x%lx\n",
+			 size);
 		return NULL;
 	}
 

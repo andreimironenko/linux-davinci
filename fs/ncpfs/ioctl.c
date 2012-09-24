@@ -20,11 +20,9 @@
 #include <linux/vmalloc.h>
 #include <linux/sched.h>
 
-#include <linux/ncp_fs.h>
-
 #include <asm/uaccess.h>
 
-#include "ncplib_kernel.h"
+#include "ncp_fs.h"
 
 /* maximum limit for ncp_objectname_ioctl */
 #define NCP_OBJECT_NAME_MAX_LEN	4096
@@ -903,7 +901,7 @@ long ncp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	ret = __ncp_ioctl(inode, cmd, arg);
 outDropWrite:
 	if (need_drop_write)
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 out:
 	return ret;
 }

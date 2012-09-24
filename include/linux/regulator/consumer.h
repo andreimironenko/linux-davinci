@@ -122,6 +122,9 @@ struct regulator;
 struct regulator_bulk_data {
 	const char *supply;
 	struct regulator *consumer;
+
+	/* private: Internal use */
+	int ret;
 };
 
 #if defined(CONFIG_REGULATOR)
@@ -138,12 +141,15 @@ int regulator_enable(struct regulator *regulator);
 int regulator_disable(struct regulator *regulator);
 int regulator_force_disable(struct regulator *regulator);
 int regulator_is_enabled(struct regulator *regulator);
+int regulator_disable_deferred(struct regulator *regulator, int ms);
 
 int regulator_bulk_get(struct device *dev, int num_consumers,
 		       struct regulator_bulk_data *consumers);
 int regulator_bulk_enable(int num_consumers,
 			  struct regulator_bulk_data *consumers);
 int regulator_bulk_disable(int num_consumers,
+			   struct regulator_bulk_data *consumers);
+int regulator_bulk_force_disable(int num_consumers,
 			   struct regulator_bulk_data *consumers);
 void regulator_bulk_free(int num_consumers,
 			 struct regulator_bulk_data *consumers);
@@ -153,7 +159,10 @@ int regulator_list_voltage(struct regulator *regulator, unsigned selector);
 int regulator_is_supported_voltage(struct regulator *regulator,
 				   int min_uV, int max_uV);
 int regulator_set_voltage(struct regulator *regulator, int min_uV, int max_uV);
+int regulator_set_voltage_time(struct regulator *regulator,
+			       int old_uV, int new_uV);
 int regulator_get_voltage(struct regulator *regulator);
+int regulator_sync_voltage(struct regulator *regulator);
 int regulator_set_current_limit(struct regulator *regulator,
 			       int min_uA, int max_uA);
 int regulator_get_current_limit(struct regulator *regulator);
@@ -205,6 +214,17 @@ static inline int regulator_disable(struct regulator *regulator)
 	return 0;
 }
 
+static inline int regulator_force_disable(struct regulator *regulator)
+{
+	return 0;
+}
+
+static inline int regulator_disable_deferred(struct regulator *regulator,
+					     int ms)
+{
+	return 0;
+}
+
 static inline int regulator_is_enabled(struct regulator *regulator)
 {
 	return 1;
@@ -225,6 +245,12 @@ static inline int regulator_bulk_enable(int num_consumers,
 
 static inline int regulator_bulk_disable(int num_consumers,
 					 struct regulator_bulk_data *consumers)
+{
+	return 0;
+}
+
+static inline int regulator_bulk_force_disable(int num_consumers,
+					struct regulator_bulk_data *consumers)
 {
 	return 0;
 }

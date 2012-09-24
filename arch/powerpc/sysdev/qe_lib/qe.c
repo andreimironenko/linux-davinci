@@ -216,7 +216,7 @@ int qe_setbrg(enum qe_clock brg, unsigned int rate, unsigned int multiplier)
 	/* Errata QE_General4, which affects some MPC832x and MPC836x SOCs, says
 	   that the BRG divisor must be even if you're not using divide-by-16
 	   mode. */
-	if (!div16 && (divisor & 1))
+	if (!div16 && (divisor & 1) && (divisor > 3))
 		divisor++;
 
 	tempval = ((divisor - 1) << QE_BRGC_DIVISOR_SHIFT) |
@@ -382,7 +382,7 @@ static void qe_upload_microcode(const void *base,
 /*
  * Upload a microcode to the I-RAM at a specific address.
  *
- * See Documentation/powerpc/qe-firmware.txt for information on QE microcode
+ * See Documentation/powerpc/qe_firmware.txt for information on QE microcode
  * uploading.
  *
  * Currently, only version 1 is supported, so the 'version' field must be
@@ -659,8 +659,7 @@ static int qe_resume(struct platform_device *ofdev)
 	return 0;
 }
 
-static int qe_probe(struct platform_device *ofdev,
-		    const struct of_device_id *id)
+static int qe_probe(struct platform_device *ofdev)
 {
 	return 0;
 }
@@ -670,7 +669,7 @@ static const struct of_device_id qe_ids[] = {
 	{ },
 };
 
-static struct of_platform_driver qe_driver = {
+static struct platform_driver qe_driver = {
 	.driver = {
 		.name = "fsl-qe",
 		.owner = THIS_MODULE,
@@ -682,7 +681,7 @@ static struct of_platform_driver qe_driver = {
 
 static int __init qe_drv_init(void)
 {
-	return of_register_platform_driver(&qe_driver);
+	return platform_driver_register(&qe_driver);
 }
 device_initcall(qe_drv_init);
 #endif /* defined(CONFIG_SUSPEND) && defined(CONFIG_PPC_85xx) */

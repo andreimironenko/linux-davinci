@@ -20,6 +20,8 @@
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/concat.h>
 #include <linux/io.h>
+#include <linux/mfd/davinci_aemif.h>
+#include <linux/cpufreq.h>
 
 #define MAX_RESOURCES		4
 
@@ -27,11 +29,55 @@ struct physmap_flash_info {
 	struct mtd_info		*mtd[MAX_RESOURCES];
 	struct mtd_info		*cmtd;
 	struct map_info		map[MAX_RESOURCES];
-#ifdef CONFIG_MTD_PARTITIONS
-	int			nr_parts;
-	struct mtd_partition	*parts;
+	unsigned int			cs;
+	struct davinci_aemif_timing	*timing;
+#ifdef CONFIG_CPU_FREQ
+	struct notifier_block	freq_transition;
 #endif
 };
+
+#ifdef CONFIG_CPU_FREQ
+static int nor_davinci_cpufreq_transition(struct notifier_block *nb,
+		unsigned long val, void *data)
+{
+	struct physmap_flash_info *info;
+
+	info = container_of(nb, struct physmap_flash_info, freq_transition);
+
+	if (val == CPUFREQ_POSTCHANGE)
+		davinci_aemif_setup_timing(info->timing, info->map[0].virt,
+				info->cs);
+	return 0;
+}
+
+static inline int nor_davinci_cpufreq_register(struct physmap_flash_info
+			*info)
+{
+	info->freq_transition.notifier_call = nor_davinci_cpufreq_transition;
+	return cpufreq_register_notifier(&info->freq_transition,
+			CPUFREQ_TRANSITION_NOTIFIER);
+}
+
+static inline void nor_davinci_cpufreq_deregister(struct physmap_flash_info
+			*info)
+{
+	cpufreq_unregister_notifier(&info->freq_transition,
+			CPUFREQ_TRANSITION_NOTIFIER);
+}
+#else
+static inline int nor_davinci_cpufreq_register(struct physmap_flash_info
+			*info)
+{
+	return 0;
+}
+
+static inline void nor_davinci_cpufreq_deregister(struct physmap_flash_info
+			*info)
+{
+	return;
+}
+#endif
+
 
 static int physmap_flash_remove(struct platform_device *dev)
 {
@@ -47,29 +93,33 @@ static int physmap_flash_remove(struct platform_device *dev)
 	physmap_data = dev->dev.platform_data;
 
 	if (info->cmtd) {
-#ifdef CONFIG_MTD_PARTITIONS
-		if (info->nr_parts || physmap_data->nr_parts) {
-			del_mtd_partitions(info->cmtd);
-
-			if (info->nr_parts)
-				kfree(info->parts);
-		} else {
-			del_mtd_device(info->cmtd);
-		}
-#else
-		del_mtd_device(info->cmtd);
-#endif
-#ifdef CONFIG_MTD_CONCAT
+		mtd_device_unregister(info->cmtd);
 		if (info->cmtd != info->mtd[0])
 			mtd_concat_destroy(info->cmtd);
-#endif
 	}
 
 	for (i = 0; i < MAX_RESOURCES; i++) {
 		if (info->mtd[i] != NULL)
 			map_destroy(info->mtd[i]);
 	}
+	nor_davinci_cpufreq_deregister(info);
+
+	if (physmap_data->exit)
+		physmap_data->exit(dev);
+
 	return 0;
+}
+
+static void physmap_set_vpp(struct map_info *map, int state)
+{
+	struct platform_device *pdev;
+	struct physmap_flash_data *physmap_data;
+
+	pdev = (struct platform_device *)map->map_priv_1;
+	physmap_data = pdev->dev.platform_data;
+
+	if (physmap_data->set_vpp)
+		physmap_data->set_vpp(pdev, state);
 }
 
 static const char *rom_probe_types[] = {
@@ -78,15 +128,15 @@ static const char *rom_probe_types[] = {
 					"qinfo_probe",
 					"map_rom",
 					NULL };
-#ifdef CONFIG_MTD_PARTITIONS
-static const char *part_probe_types[] = { "cmdlinepart", "RedBoot", NULL };
-#endif
+static const char *part_probe_types[] = { "cmdlinepart", "RedBoot", "afs",
+					  NULL };
 
 static int physmap_flash_probe(struct platform_device *dev)
 {
 	struct physmap_flash_data *physmap_data;
 	struct physmap_flash_info *info;
 	const char **probe_type;
+	const char **part_types;
 	int err = 0;
 	int i;
 	int devices_found = 0;
@@ -100,6 +150,12 @@ static int physmap_flash_probe(struct platform_device *dev)
 	if (info == NULL) {
 		err = -ENOMEM;
 		goto err_out;
+	}
+
+	if (physmap_data->init) {
+		err = physmap_data->init(dev);
+		if (err)
+			goto err_out;
 	}
 
 	platform_set_drvdata(dev, info);
@@ -122,8 +178,9 @@ static int physmap_flash_probe(struct platform_device *dev)
 		info->map[i].phys = dev->resource[i].start;
 		info->map[i].size = resource_size(&dev->resource[i]);
 		info->map[i].bankwidth = physmap_data->width;
-		info->map[i].set_vpp = physmap_data->set_vpp;
+		info->map[i].set_vpp = physmap_set_vpp;
 		info->map[i].pfow_base = physmap_data->pfow_base;
+		info->map[i].map_priv_1 = (unsigned long)dev;
 
 		info->map[i].virt = devm_ioremap(&dev->dev, info->map[i].phys,
 						 info->map[i].size);
@@ -152,6 +209,8 @@ static int physmap_flash_probe(struct platform_device *dev)
 		info->mtd[i]->owner = THIS_MODULE;
 		info->mtd[i]->dev.parent = &dev->dev;
 	}
+		info->cs = dev->id;
+		info->timing = physmap_data->timing;
 
 	if (devices_found == 1) {
 		info->cmtd = info->mtd[0];
@@ -159,39 +218,35 @@ static int physmap_flash_probe(struct platform_device *dev)
 		/*
 		 * We detected multiple devices. Concatenate them together.
 		 */
-#ifdef CONFIG_MTD_CONCAT
 		info->cmtd = mtd_concat_create(info->mtd, devices_found, dev_name(&dev->dev));
 		if (info->cmtd == NULL)
 			err = -ENXIO;
-#else
-		printk(KERN_ERR "physmap-flash: multiple devices "
-		       "found but MTD concat support disabled.\n");
-		err = -ENXIO;
-#endif
 	}
 	if (err)
 		goto err_out;
 
-#ifdef CONFIG_MTD_PARTITIONS
-	err = parse_mtd_partitions(info->cmtd, part_probe_types,
-				&info->parts, 0);
-	if (err > 0) {
-		add_mtd_partitions(info->cmtd, info->parts, err);
-		info->nr_parts = err;
-		return 0;
+	part_types = physmap_data->part_probe_types ? : part_probe_types;
+
+	if (info->timing)
+		err = davinci_aemif_setup_timing(info->timing,
+				info->map[0].virt, info->cs);
+	if (err < 0) {
+		dev_dbg(&dev->dev, "NOR timing values setup fail\n");
+		goto err_timing;
 	}
 
-	if (physmap_data->nr_parts) {
-		printk(KERN_NOTICE "Using physmap partition information\n");
-		add_mtd_partitions(info->cmtd, physmap_data->parts,
-				   physmap_data->nr_parts);
-		return 0;
+	err = nor_davinci_cpufreq_register(info);
+	if (err) {
+		dev_err(&dev->dev, "failed to register cpufreq\n");
+		goto err_cpu_freq_fail;
 	}
-#endif
 
-	add_mtd_device(info->cmtd);
+	mtd_device_parse_register(info->cmtd, part_types, 0,
+				  physmap_data->parts, physmap_data->nr_parts);
 	return 0;
 
+err_cpu_freq_fail:
+err_timing:
 err_out:
 	physmap_flash_remove(dev);
 	return err;
@@ -204,9 +259,8 @@ static void physmap_flash_shutdown(struct platform_device *dev)
 	int i;
 
 	for (i = 0; i < MAX_RESOURCES && info->mtd[i]; i++)
-		if (info->mtd[i]->suspend && info->mtd[i]->resume)
-			if (info->mtd[i]->suspend(info->mtd[i]) == 0)
-				info->mtd[i]->resume(info->mtd[i]);
+		if (mtd_suspend(info->mtd[i]) == 0)
+			mtd_resume(info->mtd[i]);
 }
 #else
 #define physmap_flash_shutdown NULL
@@ -243,23 +297,6 @@ static struct platform_device physmap_flash = {
 	.num_resources	= 1,
 	.resource	= &physmap_flash_resource,
 };
-
-void physmap_configure(unsigned long addr, unsigned long size,
-		int bankwidth, void (*set_vpp)(struct map_info *, int))
-{
-	physmap_flash_resource.start = addr;
-	physmap_flash_resource.end = addr + size - 1;
-	physmap_flash_data.width = bankwidth;
-	physmap_flash_data.set_vpp = set_vpp;
-}
-
-#ifdef CONFIG_MTD_PARTITIONS
-void physmap_set_partitions(struct mtd_partition *parts, int num_parts)
-{
-	physmap_flash_data.nr_parts = num_parts;
-	physmap_flash_data.parts = parts;
-}
-#endif
 #endif
 
 static int __init physmap_init(void)

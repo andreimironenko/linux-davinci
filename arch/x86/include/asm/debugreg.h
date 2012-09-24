@@ -94,12 +94,34 @@ static inline void hw_breakpoint_disable(void)
 
 static inline int hw_breakpoint_active(void)
 {
-	return __get_cpu_var(cpu_dr7) & DR_GLOBAL_ENABLE_MASK;
+	return __this_cpu_read(cpu_dr7) & DR_GLOBAL_ENABLE_MASK;
 }
 
 extern void aout_dump_debugregs(struct user *dump);
 
 extern void hw_breakpoint_restore(void);
+
+#ifdef CONFIG_X86_64
+DECLARE_PER_CPU(int, debug_stack_usage);
+static inline void debug_stack_usage_inc(void)
+{
+	__get_cpu_var(debug_stack_usage)++;
+}
+static inline void debug_stack_usage_dec(void)
+{
+	__get_cpu_var(debug_stack_usage)--;
+}
+int is_debug_stack(unsigned long addr);
+void debug_stack_set_zero(void);
+void debug_stack_reset(void);
+#else /* !X86_64 */
+static inline int is_debug_stack(unsigned long addr) { return 0; }
+static inline void debug_stack_set_zero(void) { }
+static inline void debug_stack_reset(void) { }
+static inline void debug_stack_usage_inc(void) { }
+static inline void debug_stack_usage_dec(void) { }
+#endif /* X86_64 */
+
 
 #endif	/* __KERNEL__ */
 

@@ -32,13 +32,16 @@
 #include <linux/irq.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
+#include <linux/export.h>
 
 #include <asm/sizes.h>
 #include <asm/mach/pci.h>
 
-#include <mach/pinmux.h>
 #include <mach/iomap.h>
 #include <mach/clk.h>
+#include <mach/powergate.h>
+
+#include "board.h"
 
 /* register definitions */
 #define AFI_OFFSET	0x3800
@@ -149,9 +152,9 @@
 static void __iomem *reg_pmc_base = IO_ADDRESS(TEGRA_PMC_BASE);
 
 #define pmc_writel(value, reg) \
-	__raw_writel(value, (u32)reg_pmc_base + (reg))
+	__raw_writel(value, reg_pmc_base + (reg))
 #define pmc_readl(reg) \
-	__raw_readl((u32)reg_pmc_base + (reg))
+	__raw_readl(reg_pmc_base + (reg))
 
 /*
  * Tegra2 defines 1GB in the AXI address map for PCIe.
@@ -405,7 +408,7 @@ static int tegra_pcie_setup(int nr, struct pci_sys_data *sys)
 	pp->res[0].flags = IORESOURCE_IO;
 	if (request_resource(&ioport_resource, &pp->res[0]))
 		panic("Request PCIe IO resource failed\n");
-	sys->resource[0] = &pp->res[0];
+	pci_add_resource(&sys->resources, &pp->res[0]);
 
 	/*
 	 * IORESOURCE_MEM
@@ -424,7 +427,7 @@ static int tegra_pcie_setup(int nr, struct pci_sys_data *sys)
 	pp->res[1].flags = IORESOURCE_MEM;
 	if (request_resource(&iomem_resource, &pp->res[1]))
 		panic("Request PCIe Memory resource failed\n");
-	sys->resource[1] = &pp->res[1];
+	pci_add_resource(&sys->resources, &pp->res[1]);
 
 	/*
 	 * IORESOURCE_MEM | IORESOURCE_PREFETCH
@@ -443,12 +446,12 @@ static int tegra_pcie_setup(int nr, struct pci_sys_data *sys)
 	pp->res[2].flags = IORESOURCE_MEM | IORESOURCE_PREFETCH;
 	if (request_resource(&iomem_resource, &pp->res[2]))
 		panic("Request PCIe Prefetch Memory resource failed\n");
-	sys->resource[2] = &pp->res[2];
+	pci_add_resource(&sys->resources, &pp->res[2]);
 
 	return 1;
 }
 
-static int tegra_pcie_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
+static int tegra_pcie_map_irq(const struct pci_dev *dev, u8 slot, u8 pin)
 {
 	return INT_PCIE_INTR;
 }
@@ -459,12 +462,13 @@ static struct pci_bus __init *tegra_pcie_scan_bus(int nr,
 	struct tegra_pcie_port *pp;
 
 	if (nr >= tegra_pcie.num_ports)
-		return 0;
+		return NULL;
 
 	pp = tegra_pcie.port + nr;
 	pp->root_bus_nr = sys->busnr;
 
-	return pci_scan_bus(sys->busnr, &tegra_pcie_ops, sys);
+	return pci_scan_root_bus(NULL, sys->busnr, &tegra_pcie_ops, sys,
+				 &sys->resources);
 }
 
 static struct hw_pci tegra_pcie_hw __initdata = {
@@ -682,24 +686,41 @@ static void tegra_pcie_xclk_clamp(bool clamp)
 	pmc_writel(reg, PMC_SCRATCH42);
 }
 
-static int tegra_pcie_power_on(void)
-{
-	tegra_pcie_xclk_clamp(true);
-	tegra_periph_reset_assert(tegra_pcie.pcie_xclk);
-	tegra_pcie_xclk_clamp(false);
-
-	clk_enable(tegra_pcie.afi_clk);
-	clk_enable(tegra_pcie.pex_clk);
-	return clk_enable(tegra_pcie.pll_e);
-}
-
 static void tegra_pcie_power_off(void)
 {
 	tegra_periph_reset_assert(tegra_pcie.pcie_xclk);
 	tegra_periph_reset_assert(tegra_pcie.afi_clk);
 	tegra_periph_reset_assert(tegra_pcie.pex_clk);
 
+	tegra_powergate_power_off(TEGRA_POWERGATE_PCIE);
 	tegra_pcie_xclk_clamp(true);
+}
+
+static int tegra_pcie_power_regate(void)
+{
+	int err;
+
+	tegra_pcie_power_off();
+
+	tegra_pcie_xclk_clamp(true);
+
+	tegra_periph_reset_assert(tegra_pcie.pcie_xclk);
+	tegra_periph_reset_assert(tegra_pcie.afi_clk);
+
+	err = tegra_powergate_sequence_power_up(TEGRA_POWERGATE_PCIE,
+						tegra_pcie.pex_clk);
+	if (err) {
+		pr_err("PCIE: powerup sequence failed: %d\n", err);
+		return err;
+	}
+
+	tegra_periph_reset_deassert(tegra_pcie.afi_clk);
+
+	tegra_pcie_xclk_clamp(false);
+
+	clk_enable(tegra_pcie.afi_clk);
+	clk_enable(tegra_pcie.pex_clk);
+	return clk_enable(tegra_pcie.pll_e);
 }
 
 static int tegra_pcie_clocks_get(void)
@@ -759,7 +780,7 @@ static int __init tegra_pcie_get_resources(void)
 		return err;
 	}
 
-	err = tegra_pcie_power_on();
+	err = tegra_pcie_power_regate();
 	if (err) {
 		pr_err("PCIE: failed to power up: %d\n", err);
 		goto err_pwr_on;
@@ -893,6 +914,8 @@ int __init tegra_pcie_init(bool init_port0, bool init_port1)
 
 	if (!(init_port0 || init_port1))
 		return -ENODEV;
+
+	pcibios_min_mem = 0;
 
 	err = tegra_pcie_get_resources();
 	if (err)

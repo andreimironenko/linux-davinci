@@ -34,7 +34,7 @@
 #include <linux/slab.h>
 #include <linux/time.h>
 #include <linux/wait.h>
-#include <linux/moduleparam.h>
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <sound/core.h>
 #include <sound/control.h>
@@ -51,7 +51,7 @@ MODULE_SUPPORTED_DEVICE("{{ALSA,Loopback soundcard}}");
 
 static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
 static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
-static int enable[SNDRV_CARDS] = {1, [1 ... (SNDRV_CARDS - 1)] = 0};
+static bool enable[SNDRV_CARDS] = {1, [1 ... (SNDRV_CARDS - 1)] = 0};
 static int pcm_substreams[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 8};
 static int pcm_notify[SNDRV_CARDS];
 
@@ -482,8 +482,9 @@ static unsigned int loopback_pos_update(struct loopback_cable *cable)
 			cable->streams[SNDRV_PCM_STREAM_CAPTURE];
 	unsigned long delta_play = 0, delta_capt = 0;
 	unsigned int running;
+	unsigned long flags;
 
-	spin_lock(&cable->lock);	
+	spin_lock_irqsave(&cable->lock, flags);
 	running = cable->running ^ cable->pause;
 	if (running & (1 << SNDRV_PCM_STREAM_PLAYBACK)) {
 		delta_play = jiffies - dpcm_play->last_jiffies;
@@ -495,10 +496,8 @@ static unsigned int loopback_pos_update(struct loopback_cable *cable)
 		dpcm_capt->last_jiffies += delta_capt;
 	}
 
-	if (delta_play == 0 && delta_capt == 0) {
-		spin_unlock(&cable->lock);
-		return running;
-	}
+	if (delta_play == 0 && delta_capt == 0)
+		goto unlock;
 		
 	if (delta_play > delta_capt) {
 		loopback_bytepos_update(dpcm_play, delta_play - delta_capt,
@@ -510,14 +509,14 @@ static unsigned int loopback_pos_update(struct loopback_cable *cable)
 		delta_capt = delta_play;
 	}
 
-	if (delta_play == 0 && delta_capt == 0) {
-		spin_unlock(&cable->lock);
-		return running;
-	}
+	if (delta_play == 0 && delta_capt == 0)
+		goto unlock;
+
 	/* note delta_capt == delta_play at this moment */
 	loopback_bytepos_update(dpcm_capt, delta_capt, BYTEPOS_UPDATE_COPY);
 	loopback_bytepos_update(dpcm_play, delta_play, BYTEPOS_UPDATE_POSONLY);
-	spin_unlock(&cable->lock);
+ unlock:
+	spin_unlock_irqrestore(&cable->lock, flags);
 	return running;
 }
 
@@ -576,7 +575,8 @@ static void loopback_runtime_free(struct snd_pcm_runtime *runtime)
 static int loopback_hw_params(struct snd_pcm_substream *substream,
 			      struct snd_pcm_hw_params *params)
 {
-	return snd_pcm_lib_malloc_pages(substream, params_buffer_bytes(params));
+	return snd_pcm_lib_alloc_vmalloc_buffer(substream,
+						params_buffer_bytes(params));
 }
 
 static int loopback_hw_free(struct snd_pcm_substream *substream)
@@ -588,7 +588,7 @@ static int loopback_hw_free(struct snd_pcm_substream *substream)
 	mutex_lock(&dpcm->loopback->cable_lock);
 	cable->valid &= ~(1 << substream->stream);
 	mutex_unlock(&dpcm->loopback->cable_lock);
-	return snd_pcm_lib_free_pages(substream);
+	return snd_pcm_lib_free_vmalloc_buffer(substream);
 }
 
 static unsigned int get_cable_index(struct snd_pcm_substream *substream)
@@ -741,6 +741,8 @@ static struct snd_pcm_ops loopback_playback_ops = {
 	.prepare =	loopback_prepare,
 	.trigger =	loopback_trigger,
 	.pointer =	loopback_pointer,
+	.page =		snd_pcm_lib_get_vmalloc_page,
+	.mmap =		snd_pcm_lib_mmap_vmalloc,
 };
 
 static struct snd_pcm_ops loopback_capture_ops = {
@@ -752,6 +754,8 @@ static struct snd_pcm_ops loopback_capture_ops = {
 	.prepare =	loopback_prepare,
 	.trigger =	loopback_trigger,
 	.pointer =	loopback_pointer,
+	.page =		snd_pcm_lib_get_vmalloc_page,
+	.mmap =		snd_pcm_lib_mmap_vmalloc,
 };
 
 static int __devinit loopback_pcm_new(struct loopback *loopback,
@@ -772,10 +776,6 @@ static int __devinit loopback_pcm_new(struct loopback *loopback,
 	strcpy(pcm->name, "Loopback PCM");
 
 	loopback->pcm[device] = pcm;
-
-	snd_pcm_lib_preallocate_pages_for_all(pcm, SNDRV_DMA_TYPE_CONTINUOUS,
-			snd_dma_continuous_data(GFP_KERNEL),
-			0, 2 * 1024 * 1024);
 	return 0;
 }
 

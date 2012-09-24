@@ -77,6 +77,26 @@ rpc_timeout_upcall_queue(struct work_struct *work)
 	rpc_purge_list(rpci, &free_list, destroy_msg, -ETIMEDOUT);
 }
 
+ssize_t rpc_pipe_generic_upcall(struct file *filp, struct rpc_pipe_msg *msg,
+				char __user *dst, size_t buflen)
+{
+	char *data = (char *)msg->data + msg->copied;
+	size_t mlen = min(msg->len - msg->copied, buflen);
+	unsigned long left;
+
+	left = copy_to_user(dst, data, mlen);
+	if (left == mlen) {
+		msg->errno = -EFAULT;
+		return -EFAULT;
+	}
+
+	mlen -= left;
+	msg->copied += mlen;
+	msg->errno = 0;
+	return mlen;
+}
+EXPORT_SYMBOL_GPL(rpc_pipe_generic_upcall);
+
 /**
  * rpc_queue_upcall - queue an upcall message to userspace
  * @inode: inode of upcall pipe on which to queue given message
@@ -162,9 +182,16 @@ rpc_alloc_inode(struct super_block *sb)
 }
 
 static void
+rpc_i_callback(struct rcu_head *head)
+{
+	struct inode *inode = container_of(head, struct inode, i_rcu);
+	kmem_cache_free(rpc_inode_cachep, RPC_I(inode));
+}
+
+static void
 rpc_destroy_inode(struct inode *inode)
 {
-	kmem_cache_free(rpc_inode_cachep, RPC_I(inode));
+	call_rcu(&inode->i_rcu, rpc_i_callback);
 }
 
 static int
@@ -430,7 +457,7 @@ void rpc_put_mount(void)
 }
 EXPORT_SYMBOL_GPL(rpc_put_mount);
 
-static int rpc_delete_dentry(struct dentry *dentry)
+static int rpc_delete_dentry(const struct dentry *dentry)
 {
 	return 1;
 }
@@ -448,13 +475,13 @@ rpc_get_inode(struct super_block *sb, umode_t mode)
 	inode->i_ino = get_next_ino();
 	inode->i_mode = mode;
 	inode->i_atime = inode->i_mtime = inode->i_ctime = CURRENT_TIME;
-	switch(mode & S_IFMT) {
-		case S_IFDIR:
-			inode->i_fop = &simple_dir_operations;
-			inode->i_op = &simple_dir_inode_operations;
-			inc_nlink(inode);
-		default:
-			break;
+	switch (mode & S_IFMT) {
+	case S_IFDIR:
+		inode->i_fop = &simple_dir_operations;
+		inode->i_op = &simple_dir_inode_operations;
+		inc_nlink(inode);
+	default:
+		break;
 	}
 	return inode;
 }
@@ -466,7 +493,7 @@ static int __rpc_create_common(struct inode *dir, struct dentry *dentry,
 {
 	struct inode *inode;
 
-	BUG_ON(!d_unhashed(dentry));
+	d_drop(dentry);
 	inode = rpc_get_inode(dir->i_sb, mode);
 	if (!inode)
 		goto out_err;
@@ -583,7 +610,7 @@ static struct dentry *__rpc_lookup_create(struct dentry *parent,
 		}
 	}
 	if (!dentry->d_inode)
-		dentry->d_op = &rpc_dentry_operations;
+		d_set_d_op(dentry, &rpc_dentry_operations);
 out_err:
 	return dentry;
 }
@@ -926,7 +953,7 @@ static void rpc_cachedir_depopulate(struct dentry *dentry)
 }
 
 struct dentry *rpc_create_cache_dir(struct dentry *parent, struct qstr *name,
-				    mode_t umode, struct cache_detail *cd)
+				    umode_t umode, struct cache_detail *cd)
 {
 	return rpc_mkdir_populate(parent, name, umode, NULL,
 			rpc_cachedir_populate, cd);
@@ -1076,3 +1103,6 @@ void unregister_rpc_pipefs(void)
 	kmem_cache_destroy(rpc_inode_cachep);
 	unregister_filesystem(&rpc_pipe_fs_type);
 }
+
+/* Make 'mount -t rpc_pipefs ...' autoload this module. */
+MODULE_ALIAS("rpc_pipefs");

@@ -21,10 +21,13 @@
  * 02110-1301 USA.
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/hwmon.h>
+#include <linux/hwmon-vid.h>
 #include <linux/sysfs.h>
 #include <linux/hwmon-sysfs.h>
 #include <linux/err.h>
@@ -46,8 +49,10 @@ enum { SHOW_TEMP, SHOW_LABEL, SHOW_NAME };
 struct via_cputemp_data {
 	struct device *hwmon_dev;
 	const char *name;
+	u8 vrm;
 	u32 id;
-	u32 msr;
+	u32 msr_temp;
+	u32 msr_vid;
 };
 
 /*
@@ -75,11 +80,25 @@ static ssize_t show_temp(struct device *dev,
 	u32 eax, edx;
 	int err;
 
-	err = rdmsr_safe_on_cpu(data->id, data->msr, &eax, &edx);
+	err = rdmsr_safe_on_cpu(data->id, data->msr_temp, &eax, &edx);
 	if (err)
 		return -EAGAIN;
 
 	return sprintf(buf, "%lu\n", ((unsigned long)eax & 0xffffff) * 1000);
+}
+
+static ssize_t show_cpu_vid(struct device *dev,
+			    struct device_attribute *devattr, char *buf)
+{
+	struct via_cputemp_data *data = dev_get_drvdata(dev);
+	u32 eax, edx;
+	int err;
+
+	err = rdmsr_safe_on_cpu(data->id, data->msr_vid, &eax, &edx);
+	if (err)
+		return -EAGAIN;
+
+	return sprintf(buf, "%d\n", vid_from_reg(~edx & 0x7f, data->vrm));
 }
 
 static SENSOR_DEVICE_ATTR(temp1_input, S_IRUGO, show_temp, NULL,
@@ -97,6 +116,9 @@ static struct attribute *via_cputemp_attributes[] = {
 static const struct attribute_group via_cputemp_group = {
 	.attrs = via_cputemp_attributes,
 };
+
+/* Optional attributes */
+static DEVICE_ATTR(cpu0_vid, S_IRUGO, show_cpu_vid, NULL);
 
 static int __devinit via_cputemp_probe(struct platform_device *pdev)
 {
@@ -120,11 +142,12 @@ static int __devinit via_cputemp_probe(struct platform_device *pdev)
 		/* C7 A */
 	case 0xD:
 		/* C7 D */
-		data->msr = 0x1169;
+		data->msr_temp = 0x1169;
+		data->msr_vid = 0x198;
 		break;
 	case 0xF:
 		/* Nano */
-		data->msr = 0x1423;
+		data->msr_temp = 0x1423;
 		break;
 	default:
 		err = -ENODEV;
@@ -132,7 +155,7 @@ static int __devinit via_cputemp_probe(struct platform_device *pdev)
 	}
 
 	/* test if we can access the TEMPERATURE MSR */
-	err = rdmsr_safe_on_cpu(data->id, data->msr, &eax, &edx);
+	err = rdmsr_safe_on_cpu(data->id, data->msr_temp, &eax, &edx);
 	if (err) {
 		dev_err(&pdev->dev,
 			"Unable to access TEMPERATURE MSR, giving up\n");
@@ -145,6 +168,15 @@ static int __devinit via_cputemp_probe(struct platform_device *pdev)
 	if (err)
 		goto exit_free;
 
+	if (data->msr_vid)
+		data->vrm = vid_which_vrm();
+
+	if (data->vrm) {
+		err = device_create_file(&pdev->dev, &dev_attr_cpu0_vid);
+		if (err)
+			goto exit_remove;
+	}
+
 	data->hwmon_dev = hwmon_device_register(&pdev->dev);
 	if (IS_ERR(data->hwmon_dev)) {
 		err = PTR_ERR(data->hwmon_dev);
@@ -156,6 +188,8 @@ static int __devinit via_cputemp_probe(struct platform_device *pdev)
 	return 0;
 
 exit_remove:
+	if (data->vrm)
+		device_remove_file(&pdev->dev, &dev_attr_cpu0_vid);
 	sysfs_remove_group(&pdev->dev.kobj, &via_cputemp_group);
 exit_free:
 	platform_set_drvdata(pdev, NULL);
@@ -169,6 +203,8 @@ static int __devexit via_cputemp_remove(struct platform_device *pdev)
 	struct via_cputemp_data *data = platform_get_drvdata(pdev);
 
 	hwmon_device_unregister(data->hwmon_dev);
+	if (data->vrm)
+		device_remove_file(&pdev->dev, &dev_attr_cpu0_vid);
 	sysfs_remove_group(&pdev->dev.kobj, &via_cputemp_group);
 	platform_set_drvdata(pdev, NULL);
 	kfree(data);
@@ -202,7 +238,7 @@ static int __cpuinit via_cputemp_device_add(unsigned int cpu)
 	pdev = platform_device_alloc(DRVNAME, cpu);
 	if (!pdev) {
 		err = -ENOMEM;
-		printk(KERN_ERR DRVNAME ": Device allocation failed\n");
+		pr_err("Device allocation failed\n");
 		goto exit;
 	}
 
@@ -214,8 +250,7 @@ static int __cpuinit via_cputemp_device_add(unsigned int cpu)
 
 	err = platform_device_add(pdev);
 	if (err) {
-		printk(KERN_ERR DRVNAME ": Device addition failed (%d)\n",
-		       err);
+		pr_err("Device addition failed (%d)\n", err);
 		goto exit_device_free;
 	}
 
@@ -237,13 +272,16 @@ exit:
 
 static void __cpuinit via_cputemp_device_remove(unsigned int cpu)
 {
-	struct pdev_entry *p, *n;
+	struct pdev_entry *p;
+
 	mutex_lock(&pdev_list_mutex);
-	list_for_each_entry_safe(p, n, &pdev_list, list) {
+	list_for_each_entry(p, &pdev_list, list) {
 		if (p->cpu == cpu) {
 			platform_device_unregister(p->pdev);
 			list_del(&p->list);
+			mutex_unlock(&pdev_list_mutex);
 			kfree(p);
+			return;
 		}
 	}
 	mutex_unlock(&pdev_list_mutex);
@@ -273,7 +311,6 @@ static struct notifier_block via_cputemp_cpu_notifier __refdata = {
 static int __init via_cputemp_init(void)
 {
 	int i, err;
-	struct pdev_entry *p, *n;
 
 	if (cpu_data(0).x86_vendor != X86_VENDOR_CENTAUR) {
 		printk(KERN_DEBUG DRVNAME ": Not a VIA CPU\n");
@@ -295,33 +332,27 @@ static int __init via_cputemp_init(void)
 			continue;
 
 		if (c->x86_model > 0x0f) {
-			printk(KERN_WARNING DRVNAME ": Unknown CPU "
-				"model 0x%x\n", c->x86_model);
+			pr_warn("Unknown CPU model 0x%x\n", c->x86_model);
 			continue;
 		}
 
-		err = via_cputemp_device_add(i);
-		if (err)
-			goto exit_devices_unreg;
+		via_cputemp_device_add(i);
 	}
+
+#ifndef CONFIG_HOTPLUG_CPU
 	if (list_empty(&pdev_list)) {
 		err = -ENODEV;
 		goto exit_driver_unreg;
 	}
+#endif
 
 	register_hotcpu_notifier(&via_cputemp_cpu_notifier);
 	return 0;
 
-exit_devices_unreg:
-	mutex_lock(&pdev_list_mutex);
-	list_for_each_entry_safe(p, n, &pdev_list, list) {
-		platform_device_unregister(p->pdev);
-		list_del(&p->list);
-		kfree(p);
-	}
-	mutex_unlock(&pdev_list_mutex);
+#ifndef CONFIG_HOTPLUG_CPU
 exit_driver_unreg:
 	platform_driver_unregister(&via_cputemp_driver);
+#endif
 exit:
 	return err;
 }

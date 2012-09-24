@@ -1,5 +1,5 @@
 /*
- * spi.c - SPI init/core code
+ * SPI init/core code
  *
  * Copyright (C) 2005 David Brownell
  *
@@ -28,6 +28,8 @@
 #include <linux/mod_devicetable.h>
 #include <linux/spi/spi.h>
 #include <linux/of_spi.h>
+#include <linux/pm_runtime.h>
+#include <linux/export.h>
 
 static void spidev_release(struct device *dev)
 {
@@ -100,9 +102,8 @@ static int spi_uevent(struct device *dev, struct kobj_uevent_env *env)
 	return 0;
 }
 
-#ifdef	CONFIG_PM
-
-static int spi_suspend(struct device *dev, pm_message_t message)
+#ifdef CONFIG_PM_SLEEP
+static int spi_legacy_suspend(struct device *dev, pm_message_t message)
 {
 	int			value = 0;
 	struct spi_driver	*drv = to_spi_driver(dev->driver);
@@ -117,7 +118,7 @@ static int spi_suspend(struct device *dev, pm_message_t message)
 	return value;
 }
 
-static int spi_resume(struct device *dev)
+static int spi_legacy_resume(struct device *dev)
 {
 	int			value = 0;
 	struct spi_driver	*drv = to_spi_driver(dev->driver);
@@ -132,18 +133,94 @@ static int spi_resume(struct device *dev)
 	return value;
 }
 
+static int spi_pm_suspend(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	if (pm)
+		return pm_generic_suspend(dev);
+	else
+		return spi_legacy_suspend(dev, PMSG_SUSPEND);
+}
+
+static int spi_pm_resume(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	if (pm)
+		return pm_generic_resume(dev);
+	else
+		return spi_legacy_resume(dev);
+}
+
+static int spi_pm_freeze(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	if (pm)
+		return pm_generic_freeze(dev);
+	else
+		return spi_legacy_suspend(dev, PMSG_FREEZE);
+}
+
+static int spi_pm_thaw(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	if (pm)
+		return pm_generic_thaw(dev);
+	else
+		return spi_legacy_resume(dev);
+}
+
+static int spi_pm_poweroff(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	if (pm)
+		return pm_generic_poweroff(dev);
+	else
+		return spi_legacy_suspend(dev, PMSG_HIBERNATE);
+}
+
+static int spi_pm_restore(struct device *dev)
+{
+	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
+
+	if (pm)
+		return pm_generic_restore(dev);
+	else
+		return spi_legacy_resume(dev);
+}
 #else
-#define spi_suspend	NULL
-#define spi_resume	NULL
+#define spi_pm_suspend	NULL
+#define spi_pm_resume	NULL
+#define spi_pm_freeze	NULL
+#define spi_pm_thaw	NULL
+#define spi_pm_poweroff	NULL
+#define spi_pm_restore	NULL
 #endif
+
+static const struct dev_pm_ops spi_pm = {
+	.suspend = spi_pm_suspend,
+	.resume = spi_pm_resume,
+	.freeze = spi_pm_freeze,
+	.thaw = spi_pm_thaw,
+	.poweroff = spi_pm_poweroff,
+	.restore = spi_pm_restore,
+	SET_RUNTIME_PM_OPS(
+		pm_generic_runtime_suspend,
+		pm_generic_runtime_resume,
+		pm_generic_runtime_idle
+	)
+};
 
 struct bus_type spi_bus_type = {
 	.name		= "spi",
 	.dev_attrs	= spi_dev_attrs,
 	.match		= spi_match_device,
 	.uevent		= spi_uevent,
-	.suspend	= spi_suspend,
-	.resume		= spi_resume,
+	.pm		= &spi_pm,
 };
 EXPORT_SYMBOL_GPL(spi_bus_type);
 
@@ -242,7 +319,7 @@ struct spi_device *spi_alloc_device(struct spi_master *master)
 	}
 
 	spi->master = master;
-	spi->dev.parent = dev;
+	spi->dev.parent = &master->dev;
 	spi->dev.bus = &spi_bus_type;
 	spi->dev.release = spidev_release;
 	device_initialize(&spi->dev);
@@ -881,7 +958,7 @@ EXPORT_SYMBOL_GPL(spi_sync);
  * drivers may DMA directly into and out of the message buffers.
  *
  * This call should be used by drivers that require exclusive access to the
- * SPI bus. It has to be preceeded by a spi_bus_lock call. The SPI bus must
+ * SPI bus. It has to be preceded by a spi_bus_lock call. The SPI bus must
  * be released by a spi_bus_unlock call when the exclusive access is over.
  *
  * It returns zero on success, else a negative error code.
@@ -971,8 +1048,8 @@ static u8	*buf;
  * spi_{async,sync}() calls with dma-safe buffers.
  */
 int spi_write_then_read(struct spi_device *spi,
-		const u8 *txbuf, unsigned n_tx,
-		u8 *rxbuf, unsigned n_rx)
+		const void *txbuf, unsigned n_tx,
+		void *rxbuf, unsigned n_rx)
 {
 	static DEFINE_MUTEX(lock);
 

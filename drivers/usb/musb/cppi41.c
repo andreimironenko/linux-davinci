@@ -60,6 +60,7 @@ static struct {
 	u8 mem_rgn;
 	u16 q_mgr;
 	u16 q_num;
+	u32 num_desc;
 } dma_teardown[CPPI41_NUM_DMA_BLOCK];
 
 struct cppi41_dma_sched_tbl_t {
@@ -81,9 +82,11 @@ struct cppi41_dma_sched_tbl_t dma_sched_tbl[MAX_SCHED_TBL_ENTRY] = {
 	{ 7,    3,      1,      1}
 };
 
-extern struct cppi41_queue_mgr cppi41_queue_mgr[CPPI41_NUM_QUEUE_MGR];
+struct cppi41_queue_mgr cppi41_queue_mgr[CPPI41_NUM_QUEUE_MGR];
+EXPORT_SYMBOL(cppi41_queue_mgr);
 
-extern struct cppi41_dma_block cppi41_dma_block[CPPI41_NUM_DMA_BLOCK];
+struct cppi41_dma_block cppi41_dma_block[CPPI41_NUM_DMA_BLOCK];
+EXPORT_SYMBOL(cppi41_dma_block);
 /******************** CPPI 4.1 Functions (External Interface) *****************/
 
 int cppi41_queue_mgr_init(u8 q_mgr, dma_addr_t rgn0_base, u16 rgn0_size)
@@ -106,19 +109,19 @@ int cppi41_queue_mgr_init(u8 q_mgr, dma_addr_t rgn0_base, u16 rgn0_size)
 	linking_ram[q_mgr].virt_addr = ptr;
 	linking_ram[q_mgr].size = rgn0_size * 4;
 
-	__raw_writel(linking_ram[q_mgr].phys_addr,
+	cppi_writel(linking_ram[q_mgr].phys_addr,
 			q_mgr_regs + QMGR_LINKING_RAM_RGN0_BASE_REG);
 	DBG("Linking RAM region 0 base @ %p, value: %x\n",
 	    q_mgr_regs + QMGR_LINKING_RAM_RGN0_BASE_REG,
-	    __raw_readl(q_mgr_regs + QMGR_LINKING_RAM_RGN0_BASE_REG));
+	    cppi_readl(q_mgr_regs + QMGR_LINKING_RAM_RGN0_BASE_REG));
 
-	__raw_writel(rgn0_size, q_mgr_regs + QMGR_LINKING_RAM_RGN0_SIZE_REG);
+	cppi_writel(rgn0_size, q_mgr_regs + QMGR_LINKING_RAM_RGN0_SIZE_REG);
 	DBG("Linking RAM region 0 size @ %p, value: %x\n",
 	    q_mgr_regs + QMGR_LINKING_RAM_RGN0_SIZE_REG,
-	    __raw_readl(q_mgr_regs + QMGR_LINKING_RAM_RGN0_SIZE_REG));
+	    cppi_readl(q_mgr_regs + QMGR_LINKING_RAM_RGN0_SIZE_REG));
 
-	ptr = kzalloc(BITS_TO_LONGS(cppi41_queue_mgr[q_mgr].num_queue),
-		      GFP_KERNEL);
+	ptr = kzalloc(BITS_TO_LONGS(cppi41_queue_mgr[q_mgr].num_queue) *
+			sizeof(long), GFP_KERNEL);
 	if (ptr == NULL) {
 		printk(KERN_ERR "ERROR: %s: Unable to allocate queue bitmap.\n",
 		       __func__);
@@ -132,6 +135,28 @@ int cppi41_queue_mgr_init(u8 q_mgr, dma_addr_t rgn0_base, u16 rgn0_size)
 	return 0;
 }
 EXPORT_SYMBOL(cppi41_queue_mgr_init);
+
+int cppi41_queue_mgr_uninit(u8 q_mgr)
+{
+	void __iomem *q_mgr_regs;
+
+	if (q_mgr >= cppi41_num_queue_mgr)
+		return -EINVAL;
+
+	q_mgr_regs = cppi41_queue_mgr[q_mgr].q_mgr_rgn_base;
+
+	/* free the Queue Mgr linking ram space */
+	cppi_writel(0,	q_mgr_regs + QMGR_LINKING_RAM_RGN0_BASE_REG);
+	cppi_writel(0, q_mgr_regs + QMGR_LINKING_RAM_RGN0_SIZE_REG);
+	dma_free_coherent(NULL, linking_ram[q_mgr].size,
+			linking_ram[q_mgr].virt_addr,
+			linking_ram[q_mgr].phys_addr);
+
+	/* free the allocated queues */
+	kfree(allocated_queues[q_mgr]);
+	return 0;
+}
+EXPORT_SYMBOL(cppi41_queue_mgr_uninit);
 
 int cppi41_dma_sched_tbl_init(u8 dma_num, u8 q_mgr,
 			u32 *sched_tbl, u8 tbl_size)
@@ -151,7 +176,7 @@ int cppi41_dma_sched_tbl_init(u8 dma_num, u8 q_mgr,
 		}
 #endif
 		val = sched_tbl[i];
-		__raw_writel(val, dma_block->sched_table_base +
+		cppi_writel(val, dma_block->sched_table_base +
 			DMA_SCHED_TABLE_WORD_REG(i));
 		DBG("DMA scheduler table @ %p, value written: %x\n",
 		dma_block->sched_table_base + DMA_SCHED_TABLE_WORD_REG(i),
@@ -185,7 +210,7 @@ int cppi41_schedtbl_add_dma_ch(u8 dmanum, u8 qmgr, u8 dma_ch, u8 is_tx)
 			j++;
 		}
 		if (num_ch % 4 == 0) {
-			__raw_writel(val, dma_block->sched_table_base +
+			cppi_writel(val, dma_block->sched_table_base +
 				DMA_SCHED_TABLE_WORD_REG(tbl_index));
 			tbl_index++;
 			val = j = 0;
@@ -193,7 +218,7 @@ int cppi41_schedtbl_add_dma_ch(u8 dmanum, u8 qmgr, u8 dma_ch, u8 is_tx)
 	}
 
 	if (num_ch % 4) {
-		__raw_writel(val, dma_block->sched_table_base +
+		cppi_writel(val, dma_block->sched_table_base +
 			DMA_SCHED_TABLE_WORD_REG(tbl_index));
 	}
 	return num_ch;
@@ -223,7 +248,7 @@ int cppi41_schedtbl_remove_dma_ch(u8 dmanum, u8 qmgr, u8 dma_ch, u8 is_tx)
 			j++;
 		}
 		if (num_ch % 4 == 0) {
-			__raw_writel(val, dma_block->sched_table_base +
+			cppi_writel(val, dma_block->sched_table_base +
 				DMA_SCHED_TABLE_WORD_REG(tbl_index));
 			tbl_index++;
 			val = j = 0;
@@ -231,7 +256,7 @@ int cppi41_schedtbl_remove_dma_ch(u8 dmanum, u8 qmgr, u8 dma_ch, u8 is_tx)
 	}
 
 	if (num_ch % 4) {
-		__raw_writel(val, dma_block->sched_table_base +
+		cppi_writel(val, dma_block->sched_table_base +
 			DMA_SCHED_TABLE_WORD_REG(tbl_index));
 	}
 	return num_ch;
@@ -242,8 +267,6 @@ int cppi41_dma_block_init(u8 dma_num, u8 q_mgr, u8 num_order,
 				 u32 *sched_tbl, u8 tbl_size)
 {
 	const struct cppi41_dma_block *dma_block;
-	struct cppi41_teardown_desc *curr_td;
-	dma_addr_t td_addr;
 	unsigned num_desc, num_reg;
 	void *ptr;
 	int error, i;
@@ -270,13 +293,13 @@ int cppi41_dma_block_init(u8 dma_num, u8 q_mgr, u8 num_order,
 	 * queue manager and queue number.
 	 */
 	dma_block = &cppi41_dma_block[dma_num];
-	__raw_writel((q_mgr << DMA_TD_DESC_QMGR_SHIFT) |
+	cppi_writel((q_mgr << DMA_TD_DESC_QMGR_SHIFT) |
 		     (q_num << DMA_TD_DESC_QNUM_SHIFT),
 		     dma_block->global_ctrl_base +
 		     DMA_TEARDOWN_FREE_DESC_CTRL_REG);
 	DBG("Teardown free descriptor control @ %p, value: %x\n",
 	    dma_block->global_ctrl_base + DMA_TEARDOWN_FREE_DESC_CTRL_REG,
-	    __raw_readl(dma_block->global_ctrl_base +
+	    cppi_readl(dma_block->global_ctrl_base +
 			DMA_TEARDOWN_FREE_DESC_CTRL_REG));
 
 	num_desc = 1 << num_order;
@@ -312,36 +335,30 @@ int cppi41_dma_block_init(u8 dma_num, u8 q_mgr, u8 num_order,
 
 	dma_teardown[dma_num].q_num = q_num;
 	dma_teardown[dma_num].q_mgr = q_mgr;
+	dma_teardown[dma_num].num_desc = num_desc;
 	/*
 	 * Push all teardown descriptors to the free teardown queue
 	 * for the CPPI 4.1 system.
 	 */
-	curr_td = dma_teardown[dma_num].virt_addr;
-	td_addr = dma_teardown[dma_num].phys_addr;
-
-	for (i = 0; i < num_desc; i++) {
-		cppi41_queue_push(&dma_teardown[dma_num].queue_obj, td_addr,
-				  sizeof(*curr_td), 0);
-		td_addr += sizeof(*curr_td);
-	}
+	cppi41_init_teardown_queue(dma_num);
 
 	/* Initialize the DMA scheduler. */
 	num_reg = (tbl_size + 3) / 4;
 	for (i = 0; i < num_reg; i++) {
 		val = sched_tbl[i];
-		__raw_writel(val, dma_block->sched_table_base +
+		cppi_writel(val, dma_block->sched_table_base +
 			     DMA_SCHED_TABLE_WORD_REG(i));
 		DBG("DMA scheduler table @ %p, value written: %x\n",
 		    dma_block->sched_table_base + DMA_SCHED_TABLE_WORD_REG(i),
 		    val);
 	}
 
-	__raw_writel((tbl_size - 1) << DMA_SCHED_LAST_ENTRY_SHIFT |
+	cppi_writel((tbl_size - 1) << DMA_SCHED_LAST_ENTRY_SHIFT |
 		     DMA_SCHED_ENABLE_MASK,
 		     dma_block->sched_ctrl_base + DMA_SCHED_CTRL_REG);
 	DBG("DMA scheduler control @ %p, value: %x\n",
 	    dma_block->sched_ctrl_base + DMA_SCHED_CTRL_REG,
-	    __raw_readl(dma_block->sched_ctrl_base + DMA_SCHED_CTRL_REG));
+	    cppi_readl(dma_block->sched_ctrl_base + DMA_SCHED_CTRL_REG));
 
 	return 0;
 
@@ -357,6 +374,43 @@ free_queue:
 }
 EXPORT_SYMBOL(cppi41_dma_block_init);
 
+int cppi41_dma_block_uninit(u8 dma_num, u8 q_mgr, u8 num_order,
+				 u32 *sched_tbl, u8 tbl_size)
+{
+	const struct cppi41_dma_block *dma_block;
+	unsigned num_reg;
+	int i;
+
+	/* popout all teardown descriptors */
+	cppi41_free_teardown_queue(dma_num);
+
+	/* free queue mgr region */
+	cppi41_mem_rgn_free(q_mgr, dma_teardown[dma_num].mem_rgn);
+	/* free the allocated teardown descriptors */
+	dma_free_coherent(NULL, dma_teardown[dma_num].rgn_size,
+			dma_teardown[dma_num].virt_addr,
+			dma_teardown[dma_num].phys_addr);
+
+	/* free the teardown queue*/
+	cppi41_queue_free(dma_teardown[dma_num].q_mgr,
+			dma_teardown[dma_num].q_num);
+
+	dma_block = (struct cppi41_dma_block *)&cppi41_dma_block[dma_num];
+	/* disable the dma schedular */
+	num_reg = (tbl_size + 3) / 4;
+	for (i = 0; i < num_reg; i++) {
+		cppi_writel(0, dma_block->sched_table_base +
+			     DMA_SCHED_TABLE_WORD_REG(i));
+		DBG("DMA scheduler table @ %p, value written: %x\n",
+		    dma_block->sched_table_base + DMA_SCHED_TABLE_WORD_REG(i),
+		    0);
+	}
+
+	cppi_writel(0,	dma_block->sched_ctrl_base + DMA_SCHED_CTRL_REG);
+
+	return 0;
+}
+EXPORT_SYMBOL(cppi41_dma_block_uninit);
 /*
  * cppi41_mem_rgn_alloc - allocate a memory region within the queue manager
  */
@@ -387,10 +441,10 @@ int cppi41_mem_rgn_alloc(u8 q_mgr, dma_addr_t rgn_addr, u8 size_order,
 	desc_mem_regs = cppi41_queue_mgr[q_mgr].desc_mem_rgn_base;
 
 	/* Write the base register */
-	__raw_writel(rgn_addr, desc_mem_regs + QMGR_MEM_RGN_BASE_REG(rgn));
+	cppi_writel(rgn_addr, desc_mem_regs + QMGR_MEM_RGN_BASE_REG(rgn));
 	DBG("Descriptor region base @ %p, value: %x\n",
 	    desc_mem_regs + QMGR_MEM_RGN_BASE_REG(rgn),
-	    __raw_readl(desc_mem_regs + QMGR_MEM_RGN_BASE_REG(rgn)));
+	    cppi_readl(desc_mem_regs + QMGR_MEM_RGN_BASE_REG(rgn)));
 
 	/* Write the control register */
 	ctrl = ((index << QMGR_MEM_RGN_INDEX_SHIFT) &
@@ -399,10 +453,10 @@ int cppi41_mem_rgn_alloc(u8 q_mgr, dma_addr_t rgn_addr, u8 size_order,
 		QMGR_MEM_RGN_DESC_SIZE_MASK) |
 	       (((num_order - 5) << QMGR_MEM_RGN_SIZE_SHIFT) &
 		QMGR_MEM_RGN_SIZE_MASK);
-	__raw_writel(ctrl, desc_mem_regs + QMGR_MEM_RGN_CTRL_REG(rgn));
+	cppi_writel(ctrl, desc_mem_regs + QMGR_MEM_RGN_CTRL_REG(rgn));
 	DBG("Descriptor region control @ %p, value: %x\n",
 	    desc_mem_regs + QMGR_MEM_RGN_CTRL_REG(rgn),
-	    __raw_readl(desc_mem_regs + QMGR_MEM_RGN_CTRL_REG(rgn)));
+	    cppi_readl(desc_mem_regs + QMGR_MEM_RGN_CTRL_REG(rgn)));
 
 	*mem_rgn = rgn;
 	return 0;
@@ -423,11 +477,11 @@ int cppi41_mem_rgn_free(u8 q_mgr, u8 mem_rgn)
 
 	desc_mem_regs = cppi41_queue_mgr[q_mgr].desc_mem_rgn_base;
 
-	if (__raw_readl(desc_mem_regs + QMGR_MEM_RGN_BASE_REG(mem_rgn)) == 0)
+	if (cppi_readl(desc_mem_regs + QMGR_MEM_RGN_BASE_REG(mem_rgn)) == 0)
 		return -ENOENT;
 
-	__raw_writel(0, desc_mem_regs + QMGR_MEM_RGN_BASE_REG(mem_rgn));
-	__raw_writel(0, desc_mem_regs + QMGR_MEM_RGN_CTRL_REG(mem_rgn));
+	cppi_writel(0, desc_mem_regs + QMGR_MEM_RGN_BASE_REG(mem_rgn));
+	cppi_writel(0, desc_mem_regs + QMGR_MEM_RGN_CTRL_REG(mem_rgn));
 
 	return 0;
 }
@@ -449,7 +503,7 @@ int cppi41_tx_ch_init(struct cppi41_dma_ch_obj *tx_ch_obj,
 	/* Populate the channel object structure */
 	tx_ch_obj->base_addr  = cppi41_dma_block[dma_num].ch_ctrl_stat_base +
 				DMA_CH_TX_GLOBAL_CFG_REG(ch_num);
-	tx_ch_obj->global_cfg = __raw_readl(tx_ch_obj->base_addr);
+	tx_ch_obj->global_cfg = cppi_readl(tx_ch_obj->base_addr);
 	return 0;
 }
 EXPORT_SYMBOL(cppi41_tx_ch_init);
@@ -470,7 +524,7 @@ int cppi41_rx_ch_init(struct cppi41_dma_ch_obj *rx_ch_obj,
 	/* Populate the channel object structure */
 	rx_ch_obj->base_addr  = cppi41_dma_block[dma_num].ch_ctrl_stat_base +
 				DMA_CH_RX_GLOBAL_CFG_REG(ch_num);
-	rx_ch_obj->global_cfg = __raw_readl(rx_ch_obj->base_addr);
+	rx_ch_obj->global_cfg = cppi_readl(rx_ch_obj->base_addr);
 	return 0;
 }
 EXPORT_SYMBOL(cppi41_rx_ch_init);
@@ -503,11 +557,11 @@ void cppi41_dma_ch_default_queue(struct cppi41_dma_ch_obj *dma_ch_obj,
 		DMA_CH_TX_DEFAULT_QNUM_MASK);
 
 	/* Get the current state of the enable bit. */
-	dma_ch_obj->global_cfg = val |= __raw_readl(dma_ch_obj->base_addr);
-	__raw_writel(val, dma_ch_obj->base_addr);
+	dma_ch_obj->global_cfg = val |= cppi_readl(dma_ch_obj->base_addr);
+	cppi_writel(val, dma_ch_obj->base_addr);
 	DBG("Channel global configuration @ %p, value written: %x, "
 	    "value read: %x\n", dma_ch_obj->base_addr, val,
-	    __raw_readl(dma_ch_obj->base_addr));
+	    cppi_readl(dma_ch_obj->base_addr));
 
 }
 EXPORT_SYMBOL(cppi41_dma_ch_default_queue);
@@ -519,7 +573,7 @@ void cppi41_rx_ch_configure(struct cppi41_dma_ch_obj *rx_ch_obj,
 			    struct cppi41_rx_ch_cfg  *cfg)
 {
 	void __iomem *base = rx_ch_obj->base_addr;
-	u32 val = __raw_readl(rx_ch_obj->base_addr);
+	u32 val = cppi_readl(rx_ch_obj->base_addr);
 
 	val |= ((cfg->sop_offset << DMA_CH_RX_SOP_OFFSET_SHIFT) &
 		DMA_CH_RX_SOP_OFFSET_MASK) |
@@ -532,10 +586,13 @@ void cppi41_rx_ch_configure(struct cppi41_dma_ch_obj *rx_ch_obj,
 	       ((cfg->rx_queue.q_num << DMA_CH_RX_DEFAULT_RQ_QNUM_SHIFT) &
 		DMA_CH_RX_DEFAULT_RQ_QNUM_MASK);
 
+	val &= ~(0x7 << DMA_CH_RX_MAX_BUF_CNT_SHIFT);
+	val |= (cfg->rx_max_buf_cnt << DMA_CH_RX_MAX_BUF_CNT_SHIFT);
+
 	rx_ch_obj->global_cfg = val;
-	__raw_writel(val, base);
+	cppi_writel(val, base);
 	DBG("Rx channel global configuration @ %p, value written: %x, "
-	    "value read: %x\n", base, val, __raw_readl(base));
+	    "value read: %x\n", base, val, cppi_readl(base));
 
 	base -= DMA_CH_RX_GLOBAL_CFG_REG(0);
 
@@ -558,7 +615,7 @@ void cppi41_rx_ch_configure(struct cppi41_dma_ch_obj *rx_ch_obj,
 			DMA_CH_RX_EMBED_SOP_SLOT_SHIFT) &
 		       DMA_CH_RX_EMBED_SOP_SLOT_MASK);
 
-		__raw_writel(val, base + DMA_CH_RX_EMBED_PKT_CFG_REG_B(0));
+		cppi_writel(val, base + DMA_CH_RX_EMBED_PKT_CFG_REG_B(0));
 		DBG("Rx channel embedded packet configuration B @ %p, "
 		    "value written: %x\n",
 		    base + DMA_CH_RX_EMBED_PKT_CFG_REG_B(0), val);
@@ -588,7 +645,7 @@ void cppi41_rx_ch_configure(struct cppi41_dma_ch_obj *rx_ch_obj,
 			DMA_CH_RX_EMBED_FBP_BMGR_SHIFT(3)) &
 		       DMA_CH_RX_EMBED_FBP_BMGR_MASK(3));
 
-		__raw_writel(val, base + DMA_CH_RX_EMBED_PKT_CFG_REG_A(0));
+		cppi_writel(val, base + DMA_CH_RX_EMBED_PKT_CFG_REG_A(0));
 		DBG("Rx channel embedded packet configuration A @ %p, "
 		    "value written: %x\n",
 		    base + DMA_CH_RX_EMBED_PKT_CFG_REG_A(0), val);
@@ -607,7 +664,7 @@ void cppi41_rx_ch_configure(struct cppi41_dma_ch_obj *rx_ch_obj,
 			DMA_CH_RX_HOST_FDQ_QMGR_SHIFT(1)) &
 		       DMA_CH_RX_HOST_FDQ_QMGR_MASK(1));
 
-		__raw_writel(val, base + DMA_CH_RX_HOST_PKT_CFG_REG_A(0));
+		cppi_writel(val, base + DMA_CH_RX_HOST_PKT_CFG_REG_A(0));
 		DBG("Rx channel host packet configuration A @ %p, "
 		    "value written: %x\n",
 		    base + DMA_CH_RX_HOST_PKT_CFG_REG_A(0), val);
@@ -625,7 +682,7 @@ void cppi41_rx_ch_configure(struct cppi41_dma_ch_obj *rx_ch_obj,
 			DMA_CH_RX_HOST_FDQ_QMGR_SHIFT(3)) &
 		       DMA_CH_RX_HOST_FDQ_QMGR_MASK(3));
 
-		__raw_writel(val, base + DMA_CH_RX_HOST_PKT_CFG_REG_B(0));
+		cppi_writel(val, base + DMA_CH_RX_HOST_PKT_CFG_REG_B(0));
 		DBG("Rx channel host packet configuration B @ %p, "
 		    "value written: %x\n",
 		    base + DMA_CH_RX_HOST_PKT_CFG_REG_B(0), val);
@@ -641,7 +698,7 @@ void cppi41_rx_ch_configure(struct cppi41_dma_ch_obj *rx_ch_obj,
 			DMA_CH_RX_MONO_SOP_OFFSET_SHIFT) &
 		       DMA_CH_RX_MONO_SOP_OFFSET_MASK);
 
-		__raw_writel(val, base + DMA_CH_RX_MONO_PKT_CFG_REG(0));
+		cppi_writel(val, base + DMA_CH_RX_MONO_PKT_CFG_REG(0));
 		DBG("Rx channel monolithic packet configuration @ %p, "
 		    "value written: %x\n",
 		    base + DMA_CH_RX_MONO_PKT_CFG_REG(0), val);
@@ -650,19 +707,37 @@ void cppi41_rx_ch_configure(struct cppi41_dma_ch_obj *rx_ch_obj,
 }
 EXPORT_SYMBOL(cppi41_rx_ch_configure);
 
+void cppi41_rx_ch_set_maxbufcnt(struct cppi41_dma_ch_obj *rx_ch_obj,
+			    u8 rx_max_buf_cnt)
+{
+	void __iomem *base = rx_ch_obj->base_addr;
+	u32 val = cppi_readl(rx_ch_obj->base_addr);
+
+	val = rx_ch_obj->global_cfg;
+	val &= ~(0x7 << DMA_CH_RX_MAX_BUF_CNT_SHIFT);
+	val |= (rx_max_buf_cnt << DMA_CH_RX_MAX_BUF_CNT_SHIFT);
+
+	rx_ch_obj->global_cfg = val;
+	cppi_writel(val, base);
+
+	DBG("%s: rx-global-cfg @ %p, value written: %x, "
+	    "value read: %x\n", __func__, base, val, cppi_readl(base));
+
+}
+EXPORT_SYMBOL(cppi41_rx_ch_set_maxbufcnt);
 /*
  * cppi41_dma_ch_teardown - teardown a given Tx/Rx channel
  */
 void cppi41_dma_ch_teardown(struct cppi41_dma_ch_obj *dma_ch_obj)
 {
-	u32 val = __raw_readl(dma_ch_obj->base_addr);
+	u32 val = cppi_readl(dma_ch_obj->base_addr);
 
 	/* Initiate channel teardown. */
 	val |= dma_ch_obj->global_cfg & ~DMA_CH_TX_ENABLE_MASK;
 	dma_ch_obj->global_cfg = val |= DMA_CH_TX_TEARDOWN_MASK;
-	__raw_writel(val, dma_ch_obj->base_addr);
+	cppi_writel(val, dma_ch_obj->base_addr);
 	DBG("Tear down channel @ %p, value written: %x, value read: %x\n",
-	    dma_ch_obj->base_addr, val, __raw_readl(dma_ch_obj->base_addr));
+	    dma_ch_obj->base_addr, val, cppi_readl(dma_ch_obj->base_addr));
 }
 EXPORT_SYMBOL(cppi41_dma_ch_teardown);
 
@@ -677,9 +752,9 @@ void cppi41_dma_ch_enable(struct cppi41_dma_ch_obj *dma_ch_obj)
 
 	/* Teardown bit remains set after completion, so clear it now... */
 	dma_ch_obj->global_cfg = val &= ~DMA_CH_TX_TEARDOWN_MASK;
-	__raw_writel(val, dma_ch_obj->base_addr);
+	cppi_writel(val, dma_ch_obj->base_addr);
 	DBG("Enable channel @ %p, value written: %x, value read: %x\n",
-	    dma_ch_obj->base_addr, val, __raw_readl(dma_ch_obj->base_addr));
+	    dma_ch_obj->base_addr, val, cppi_readl(dma_ch_obj->base_addr));
 }
 EXPORT_SYMBOL(cppi41_dma_ch_enable);
 
@@ -689,57 +764,44 @@ EXPORT_SYMBOL(cppi41_dma_ch_enable);
 void cppi41_dma_ch_disable(struct cppi41_dma_ch_obj *dma_ch_obj)
 {
 	dma_ch_obj->global_cfg &= ~DMA_CH_TX_ENABLE_MASK;
-	__raw_writel(dma_ch_obj->global_cfg, dma_ch_obj->base_addr);
+	cppi_writel(dma_ch_obj->global_cfg, dma_ch_obj->base_addr);
 	DBG("Disable channel @ %p, value written: %x, value read: %x\n",
 	    dma_ch_obj->base_addr, dma_ch_obj->global_cfg,
-	    __raw_readl(dma_ch_obj->base_addr));
+	    cppi_readl(dma_ch_obj->base_addr));
 }
 EXPORT_SYMBOL(cppi41_dma_ch_disable);
+
+void cppi41_init_teardown_queue(int dma_num)
+{
+	dma_addr_t td_addr;
+	struct cppi41_teardown_desc *curr_td;
+	u32 num_desc = dma_teardown[dma_num].num_desc;
+	int i;
+
+	curr_td = dma_teardown[dma_num].virt_addr;
+	td_addr = dma_teardown[dma_num].phys_addr;
+
+	for (i = 0; i < num_desc; i++) {
+		cppi41_queue_push(&dma_teardown[dma_num].queue_obj, td_addr,
+				  sizeof(*curr_td), 0);
+		td_addr += sizeof(*curr_td);
+	}
+}
+EXPORT_SYMBOL(cppi41_init_teardown_queue);
 
 void cppi41_free_teardown_queue(int dma_num)
 {
 	unsigned long td_addr;
+	u32 num_desc = dma_teardown[dma_num].num_desc;
 
-	while ((td_addr =
-		cppi41_queue_pop(&dma_teardown[dma_num].queue_obj)) != 0)
-		DBG("pop tdDesc(%p) from tdQueue\n", td_addr);
+	while (num_desc--) {
+		td_addr = cppi41_queue_pop(&dma_teardown[dma_num].queue_obj);
+
+		if (td_addr == 0)
+			break;
+	}
 }
 EXPORT_SYMBOL(cppi41_free_teardown_queue);
-
-void cppi41_exit(void)
-{
-	int i;
-	for (i = 0; i < CPPI41_NUM_QUEUE_MGR; i++) {
-		if (linking_ram[i].virt_addr != NULL) {
-			dma_free_coherent(NULL, linking_ram[i].size,
-				linking_ram[i].virt_addr,
-				linking_ram[i].phys_addr);
-			linking_ram[i].virt_addr = 0;
-			linking_ram[i].phys_addr = 0;
-		}
-		if (allocated_queues[i] != NULL) {
-			kfree(allocated_queues[i]);
-			allocated_queues[i] = 0;
-		}
-	}
-
-	/*
-	 * pop all the teardwon descriptor queued to tdQueue
-	 */
-	cppi41_free_teardown_queue(0);
-
-	for (i = 0; i < CPPI41_NUM_DMA_BLOCK; i++)
-		if (dma_teardown[i].virt_addr != NULL) {
-
-			cppi41_mem_rgn_free(0,  dma_teardown[i].mem_rgn);
-			dma_free_coherent(NULL, dma_teardown[i].rgn_size,
-					dma_teardown[i].virt_addr,
-					dma_teardown[i].phys_addr);
-			dma_teardown[i].virt_addr = 0;
-			dma_teardown[i].phys_addr = 0;
-		}
-}
-EXPORT_SYMBOL(cppi41_exit);
 
 /**
  * alloc_queue - allocate a queue in the given range
@@ -887,7 +949,7 @@ void cppi41_queue_push(const struct cppi41_queue_obj *queue_obj, u32 desc_addr,
 	if (pkt_size)
 		val = (pkt_size << QMGR_QUEUE_PKT_SIZE_SHIFT) &
 		      QMGR_QUEUE_PKT_SIZE_MASK;
-	__raw_writel(val, queue_obj->base_addr + QMGR_QUEUE_REG_C(0));
+	cppi_writel(val, queue_obj->base_addr + QMGR_QUEUE_REG_C(0));
 #endif
 
 	val = (((desc_size - 24) >> (2 - QMGR_QUEUE_DESC_SIZE_SHIFT)) &
@@ -896,7 +958,7 @@ void cppi41_queue_push(const struct cppi41_queue_obj *queue_obj, u32 desc_addr,
 
 	DBG("Pushing value %x to queue @ %p\n", val, queue_obj->base_addr);
 
-	__raw_writel(val, queue_obj->base_addr + QMGR_QUEUE_REG_D(0));
+	cppi_writel(val, queue_obj->base_addr + QMGR_QUEUE_REG_D(0));
 }
 EXPORT_SYMBOL(cppi41_queue_push);
 
@@ -905,7 +967,7 @@ EXPORT_SYMBOL(cppi41_queue_push);
  */
 unsigned long cppi41_queue_pop(const struct cppi41_queue_obj *queue_obj)
 {
-	u32 val = __raw_readl(queue_obj->base_addr + QMGR_QUEUE_REG_D(0));
+	u32 val = cppi_readl(queue_obj->base_addr + QMGR_QUEUE_REG_D(0));
 
 	DBG("Popping value %x from queue @ %p\n", val, queue_obj->base_addr);
 
@@ -953,6 +1015,109 @@ int cppi41_get_teardown_info(unsigned long addr, u32 *info)
 	return 0;
 }
 EXPORT_SYMBOL(cppi41_get_teardown_info);
+
+/*
+ * cppi41_save_context - save regsiter context before going to suspend.
+ */
+void cppi41_save_context(u8 dma_num)
+{
+	const struct cppi41_dma_block *dma_block;
+	struct cppi41_dma_regs *cppi41;
+	struct cppi41_queue_manager *qmgr;
+	void __iomem *q_mgr_regs, *desc_mem_regs;
+	u8 i, q_mgr = 0;
+
+	dma_block = (struct cppi41_dma_block *)&cppi41_dma_block[dma_num];
+	cppi41 = (struct cppi41_dma_regs *)&dma_block->cppi41_regs;
+	qmgr = &cppi41->qmgr;
+	q_mgr_regs = cppi41_queue_mgr[q_mgr].q_mgr_rgn_base;
+	desc_mem_regs = cppi41_queue_mgr[q_mgr].desc_mem_rgn_base;
+
+	/* popout all teardown descriptors */
+	cppi41_free_teardown_queue(dma_num);
+
+	cppi41->teardn_fdq_ctrl = cppi_readl(dma_block->global_ctrl_base +
+			DMA_TEARDOWN_FREE_DESC_CTRL_REG);
+	cppi41->emulation_ctrl = cppi_readl(dma_block->global_ctrl_base +
+			DMA_EMULATION_CTRL_REG);
+
+	qmgr->link_ram_rgn0_base = cppi_readl(q_mgr_regs +
+				QMGR_LINKING_RAM_RGN0_BASE_REG);
+	qmgr->link_ram_rgn0_size = cppi_readl(q_mgr_regs +
+				QMGR_LINKING_RAM_RGN0_SIZE_REG);
+	qmgr->link_ram_rgn1_base = cppi_readl(q_mgr_regs +
+				QMGR_LINKING_RAM_RGN1_BASE_REG);
+
+	for (i = 0 ; i < 8 ; i++) {
+		qmgr->memr_base[i] = cppi_readl(desc_mem_regs +
+				QMGR_MEM_RGN_BASE_REG(i));
+		qmgr->memr_ctrl[i] = cppi_readl(desc_mem_regs +
+				QMGR_MEM_RGN_CTRL_REG(i));
+	}
+
+	cppi41->sched_ctrl = cppi_readl(dma_block->sched_ctrl_base +
+				DMA_SCHED_CTRL_REG);
+
+}
+EXPORT_SYMBOL(cppi41_save_context);
+
+/*
+ * cppi41_restore_context - restore regsiter context after resume.
+ */
+void cppi41_restore_context(u8 dma_num, u32 *sched_tbl)
+{
+	const struct cppi41_dma_block *dma_block;
+	struct cppi41_dma_regs *cppi41;
+	struct cppi41_queue_manager *qmgr;
+	void __iomem *q_mgr_regs, *desc_mem_regs;
+	unsigned num_reg;
+	u32 val;
+	u8 tbl_size;
+	u8 i, q_mgr = 0;
+
+	dma_block = (struct cppi41_dma_block *)&cppi41_dma_block[dma_num];
+	cppi41 = (struct cppi41_dma_regs *)&dma_block->cppi41_regs;
+	qmgr = &cppi41->qmgr;
+	q_mgr_regs = cppi41_queue_mgr[q_mgr].q_mgr_rgn_base;
+	desc_mem_regs = cppi41_queue_mgr[q_mgr].desc_mem_rgn_base;
+	tbl_size = dma_block->num_max_ch;
+
+	cppi_writel(cppi41->teardn_fdq_ctrl, dma_block->global_ctrl_base +
+			DMA_TEARDOWN_FREE_DESC_CTRL_REG);
+	cppi_writel(cppi41->emulation_ctrl, dma_block->global_ctrl_base +
+			DMA_EMULATION_CTRL_REG);
+
+	cppi_writel(qmgr->link_ram_rgn0_base, q_mgr_regs +
+				QMGR_LINKING_RAM_RGN0_BASE_REG);
+	cppi_writel(qmgr->link_ram_rgn0_size, q_mgr_regs +
+				QMGR_LINKING_RAM_RGN0_SIZE_REG);
+	cppi_writel(qmgr->link_ram_rgn1_base, q_mgr_regs +
+				QMGR_LINKING_RAM_RGN1_BASE_REG);
+
+	for (i = 0 ; i < 8 ; i++) {
+		cppi_writel(qmgr->memr_base[i], desc_mem_regs +
+				QMGR_MEM_RGN_BASE_REG(i));
+		cppi_writel(qmgr->memr_ctrl[i], desc_mem_regs +
+				QMGR_MEM_RGN_CTRL_REG(i));
+	}
+
+	/*
+	 * Push all teardown descriptors to the free teardown queue
+	 * for the CPPI 4.1 system.
+	 */
+	cppi41_init_teardown_queue(dma_num);
+
+	/* Initialize the DMA scheduler. */
+	num_reg = (tbl_size + 3) / 4;
+	for (i = 0; i < num_reg; i++) {
+		val = sched_tbl[i];
+		cppi_writel(val, dma_block->sched_table_base +
+			     DMA_SCHED_TABLE_WORD_REG(i));
+	}
+	cppi_writel(cppi41->sched_ctrl, dma_block->sched_ctrl_base +
+				DMA_SCHED_CTRL_REG);
+}
+EXPORT_SYMBOL(cppi41_restore_context);
 
 MODULE_DESCRIPTION("TI CPPI 4.1 support");
 MODULE_AUTHOR("MontaVista Software");

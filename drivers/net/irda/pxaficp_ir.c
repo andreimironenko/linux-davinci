@@ -12,6 +12,8 @@
  * Infra-red driver (SIR/FIR) for the PXA2xx embedded microprocessor
  *
  */
+#include <linux/dma-mapping.h>
+#include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
@@ -40,7 +42,7 @@
 
 #define ICCR0_AME	(1 << 7)	/* Address match enable */
 #define ICCR0_TIE	(1 << 6)	/* Transmit FIFO interrupt enable */
-#define ICCR0_RIE	(1 << 5)	/* Recieve FIFO interrupt enable */
+#define ICCR0_RIE	(1 << 5)	/* Receive FIFO interrupt enable */
 #define ICCR0_RXE	(1 << 4)	/* Receive enable */
 #define ICCR0_TXE	(1 << 3)	/* Transmit enable */
 #define ICCR0_TUS	(1 << 2)	/* Transmit FIFO underrun select */
@@ -483,7 +485,7 @@ static irqreturn_t pxa_irda_fir_irq(int irq, void *dev_id)
 	}
 
 	if (icsr0 & ICSR0_EIF) {
-		/* An error in FIFO occured, or there is a end of frame */
+		/* An error in FIFO occurred, or there is a end of frame */
 		pxa_irda_fir_irq_eif(si, dev, icsr0);
 	}
 
@@ -964,18 +966,7 @@ static struct platform_driver pxa_ir_driver = {
 	.resume		= pxa_irda_resume,
 };
 
-static int __init pxa_irda_init(void)
-{
-	return platform_driver_register(&pxa_ir_driver);
-}
-
-static void __exit pxa_irda_exit(void)
-{
-	platform_driver_unregister(&pxa_ir_driver);
-}
-
-module_init(pxa_irda_init);
-module_exit(pxa_irda_exit);
+module_platform_driver(pxa_ir_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:pxa2xx-ir");

@@ -23,6 +23,8 @@
  *
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #define MODULE_NAME "pac207"
 
 #include <linux/input.h>
@@ -39,14 +41,14 @@ MODULE_LICENSE("GPL");
 #define PAC207_BRIGHTNESS_DEFAULT	46
 
 #define PAC207_EXPOSURE_MIN		3
-#define PAC207_EXPOSURE_MAX		26
+#define PAC207_EXPOSURE_MAX		90 /* 1 sec expo time / 1 fps */
 #define PAC207_EXPOSURE_DEFAULT		5 /* power on default: 3 */
-#define PAC207_EXPOSURE_KNEE		8 /* 4 = 30 fps, 11 = 8, 15 = 6 */
+#define PAC207_EXPOSURE_KNEE		9 /* fps: 90 / exposure -> 9: 10 fps */
 
 #define PAC207_GAIN_MIN			0
 #define PAC207_GAIN_MAX			31
-#define PAC207_GAIN_DEFAULT		9 /* power on default: 9 */
-#define PAC207_GAIN_KNEE		31
+#define PAC207_GAIN_DEFAULT		7 /* power on default: 9 */
+#define PAC207_GAIN_KNEE		15
 
 #define PAC207_AUTOGAIN_DEADZONE	30
 
@@ -162,7 +164,7 @@ static const __u8 pac207_sensor_init[][8] = {
 	{0x10, 0x12, 0x0d, 0x12, 0x0c, 0x01, 0x29, 0x84},
 	{0x49, 0x64, 0x64, 0x64, 0x04, 0x10, 0xf0, 0x30},
 	{0x00, 0x00, 0x00, 0x70, 0xa0, 0xf8, 0x00, 0x00},
-	{0x32, 0x00, 0x96, 0x00, 0xA2, 0x02, 0xaf, 0x00},
+	{0x32, 0x00, 0x96, 0x00, 0xa2, 0x02, 0xaf, 0x00},
 };
 
 static int pac207_write_regs(struct gspca_dev *gspca_dev, u16 index,
@@ -178,8 +180,8 @@ static int pac207_write_regs(struct gspca_dev *gspca_dev, u16 index,
 			0x00, index,
 			gspca_dev->usb_buf, length, PAC207_CTRL_TIMEOUT);
 	if (err < 0)
-		err("Failed to write registers to index 0x%04X, error %d)",
-			index, err);
+		pr_err("Failed to write registers to index 0x%04X, error %d\n",
+		       index, err);
 
 	return err;
 }
@@ -194,8 +196,8 @@ static int pac207_write_reg(struct gspca_dev *gspca_dev, u16 index, u16 value)
 			USB_DIR_OUT | USB_TYPE_VENDOR | USB_RECIP_INTERFACE,
 			value, index, NULL, 0, PAC207_CTRL_TIMEOUT);
 	if (err)
-		err("Failed to write a register (index 0x%04X,"
-			" value 0x%02X, error %d)", index, value, err);
+		pr_err("Failed to write a register (index 0x%04X, value 0x%02X, error %d)\n",
+		       index, value, err);
 
 	return err;
 }
@@ -210,8 +212,8 @@ static int pac207_read_reg(struct gspca_dev *gspca_dev, u16 index)
 			0x00, index,
 			gspca_dev->usb_buf, 1, PAC207_CTRL_TIMEOUT);
 	if (res < 0) {
-		err("Failed to read a register (index 0x%04X, error %d)",
-			index, res);
+		pr_err("Failed to read a register (index 0x%04X, error %d)\n",
+		       index, res);
 		return res;
 	}
 
@@ -228,7 +230,7 @@ static int sd_config(struct gspca_dev *gspca_dev,
 
 	idreg[0] = pac207_read_reg(gspca_dev, 0x0000);
 	idreg[1] = pac207_read_reg(gspca_dev, 0x0001);
-	idreg[0] = ((idreg[0] & 0x0F) << 4) | ((idreg[1] & 0xf0) >> 4);
+	idreg[0] = ((idreg[0] & 0x0f) << 4) | ((idreg[1] & 0xf0) >> 4);
 	idreg[1] = idreg[1] & 0x0f;
 	PDEBUG(D_PROBE, "Pixart Sensor ID 0x%02X Chips ID 0x%02X",
 		idreg[0], idreg[1]);
@@ -330,7 +332,7 @@ static void pac207_do_auto_gain(struct gspca_dev *gspca_dev)
 	if (sd->autogain_ignore_frames > 0)
 		sd->autogain_ignore_frames--;
 	else if (gspca_auto_gain_n_exposure(gspca_dev, avg_lum,
-			100, PAC207_AUTOGAIN_DEADZONE,
+			90, PAC207_AUTOGAIN_DEADZONE,
 			PAC207_GAIN_KNEE, PAC207_EXPOSURE_KNEE))
 		sd->autogain_ignore_frames = PAC_AUTOGAIN_IGNORE_FRAMES;
 }
@@ -530,7 +532,7 @@ static const struct sd_desc sd_desc = {
 };
 
 /* -- module initialisation -- */
-static const __devinitdata struct usb_device_id device_table[] = {
+static const struct usb_device_id device_table[] = {
 	{USB_DEVICE(0x041e, 0x4028)},
 	{USB_DEVICE(0x093a, 0x2460)},
 	{USB_DEVICE(0x093a, 0x2461)},
@@ -567,15 +569,4 @@ static struct usb_driver sd_driver = {
 #endif
 };
 
-/* -- module insert / remove -- */
-static int __init sd_mod_init(void)
-{
-	return usb_register(&sd_driver);
-}
-static void __exit sd_mod_exit(void)
-{
-	usb_deregister(&sd_driver);
-}
-
-module_init(sd_mod_init);
-module_exit(sd_mod_exit);
+module_usb_driver(sd_driver);

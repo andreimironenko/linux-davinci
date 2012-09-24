@@ -16,14 +16,12 @@
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/i2c.h>
-#include <linux/platform_device.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-#include <sound/soc-dapm.h>
 #include <sound/initval.h>
 #include <sound/tlv.h>
 #include <sound/wm8955.h>
@@ -177,7 +175,7 @@ static int wm8995_pll_factors(struct device *dev,
 	return 0;
 }
 
-/* Lookup table specifiying SRATE (table 25 in datasheet); some of the
+/* Lookup table specifying SRATE (table 25 in datasheet); some of the
  * output frequencies have been rounded to the standard frequencies
  * they are intended to match where the error is slight. */
 static struct {
@@ -576,13 +574,14 @@ static const struct snd_soc_dapm_route wm8955_intercon[] = {
 
 static int wm8955_add_widgets(struct snd_soc_codec *codec)
 {
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
+
 	snd_soc_add_controls(codec, wm8955_snd_controls,
 			     ARRAY_SIZE(wm8955_snd_controls));
 
-	snd_soc_dapm_new_controls(codec, wm8955_dapm_widgets,
+	snd_soc_dapm_new_controls(dapm, wm8955_dapm_widgets,
 				  ARRAY_SIZE(wm8955_dapm_widgets));
-
-	snd_soc_dapm_add_routes(codec, wm8955_intercon,
+	snd_soc_dapm_add_routes(dapm, wm8955_intercon,
 				ARRAY_SIZE(wm8955_intercon));
 
 	return 0;
@@ -786,7 +785,7 @@ static int wm8955_set_bias_level(struct snd_soc_codec *codec,
 		break;
 
 	case SND_SOC_BIAS_STANDBY:
-		if (codec->bias_level == SND_SOC_BIAS_OFF) {
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF) {
 			ret = regulator_bulk_enable(ARRAY_SIZE(wm8955->supplies),
 						    wm8955->supplies);
 			if (ret != 0) {
@@ -850,7 +849,7 @@ static int wm8955_set_bias_level(struct snd_soc_codec *codec,
 				       wm8955->supplies);
 		break;
 	}
-	codec->bias_level = level;
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -859,7 +858,7 @@ static int wm8955_set_bias_level(struct snd_soc_codec *codec,
 #define WM8955_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE |\
 			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
 
-static struct snd_soc_dai_ops wm8955_dai_ops = {
+static const struct snd_soc_dai_ops wm8955_dai_ops = {
 	.set_sysclk = wm8955_set_sysclk,
 	.set_fmt = wm8955_set_fmt,
 	.hw_params = wm8955_hw_params,
@@ -879,7 +878,7 @@ static struct snd_soc_dai_driver wm8955_dai = {
 };
 
 #ifdef CONFIG_PM
-static int wm8955_suspend(struct snd_soc_codec *codec, pm_message_t state)
+static int wm8955_suspend(struct snd_soc_codec *codec)
 {
 	wm8955_set_bias_level(codec, SND_SOC_BIAS_OFF);
 
@@ -934,16 +933,27 @@ static int wm8955_probe(struct snd_soc_codec *codec)
 	}
 
 	/* Change some default settings - latch VU and enable ZC */
-	reg_cache[WM8955_LEFT_DAC_VOLUME] |= WM8955_LDVU;
-	reg_cache[WM8955_RIGHT_DAC_VOLUME] |= WM8955_RDVU;
-	reg_cache[WM8955_LOUT1_VOLUME] |= WM8955_LO1VU | WM8955_LO1ZC;
-	reg_cache[WM8955_ROUT1_VOLUME] |= WM8955_RO1VU | WM8955_RO1ZC;
-	reg_cache[WM8955_LOUT2_VOLUME] |= WM8955_LO2VU | WM8955_LO2ZC;
-	reg_cache[WM8955_ROUT2_VOLUME] |= WM8955_RO2VU | WM8955_RO2ZC;
-	reg_cache[WM8955_MONOOUT_VOLUME] |= WM8955_MOZC;
+	snd_soc_update_bits(codec, WM8955_LEFT_DAC_VOLUME,
+			    WM8955_LDVU, WM8955_LDVU);
+	snd_soc_update_bits(codec, WM8955_RIGHT_DAC_VOLUME,
+			    WM8955_RDVU, WM8955_RDVU);
+	snd_soc_update_bits(codec, WM8955_LOUT1_VOLUME,
+			    WM8955_LO1VU | WM8955_LO1ZC,
+			    WM8955_LO1VU | WM8955_LO1ZC);
+	snd_soc_update_bits(codec, WM8955_ROUT1_VOLUME,
+			    WM8955_RO1VU | WM8955_RO1ZC,
+			    WM8955_RO1VU | WM8955_RO1ZC);
+	snd_soc_update_bits(codec, WM8955_LOUT2_VOLUME,
+			    WM8955_LO2VU | WM8955_LO2ZC,
+			    WM8955_LO2VU | WM8955_LO2ZC);
+	snd_soc_update_bits(codec, WM8955_ROUT2_VOLUME,
+			    WM8955_RO2VU | WM8955_RO2ZC,
+			    WM8955_RO2VU | WM8955_RO2ZC);
+	snd_soc_update_bits(codec, WM8955_MONOOUT_VOLUME,
+			    WM8955_MOZC, WM8955_MOZC);
 
 	/* Also enable adaptive bass boost by default */
-	reg_cache[WM8955_BASS_CONTROL] |= WM8955_BB;
+	snd_soc_update_bits(codec, WM8955_BASS_CONTROL, WM8955_BB, WM8955_BB);
 
 	/* Set platform data values */
 	if (pdata) {
@@ -1027,7 +1037,7 @@ MODULE_DEVICE_TABLE(i2c, wm8955_i2c_id);
 
 static struct i2c_driver wm8955_i2c_driver = {
 	.driver = {
-		.name = "wm8955-codec",
+		.name = "wm8955",
 		.owner = THIS_MODULE,
 	},
 	.probe =    wm8955_i2c_probe,

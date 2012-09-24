@@ -9,6 +9,12 @@
 struct dma_map_ops;
 struct device_node;
 
+/*
+ * Arch extensions to struct device.
+ *
+ * When adding fields, consider macio_add_one_device in
+ * drivers/macintosh/macio_asic.c
+ */
 struct dev_archdata {
 	/* DMA operations on that device */
 	struct dma_map_ops	*dma_ops;
@@ -30,5 +36,7 @@ struct dev_archdata {
 struct pdev_archdata {
 	u64 dma_mask;
 };
+
+#define ARCH_HAS_DMA_GET_REQUIRED_MASK
 
 #endif /* _ASM_POWERPC_DEVICE_H */

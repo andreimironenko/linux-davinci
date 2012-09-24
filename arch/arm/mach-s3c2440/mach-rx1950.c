@@ -24,7 +24,7 @@
 #include <linux/serial_core.h>
 #include <linux/input.h>
 #include <linux/gpio_keys.h>
-#include <linux/sysdev.h>
+#include <linux/device.h>
 #include <linux/pda_power.h>
 #include <linux/pwm_backlight.h>
 #include <linux/pwm.h>
@@ -43,6 +43,7 @@
 
 #include <mach/regs-gpio.h>
 #include <mach/regs-gpioj.h>
+#include <mach/regs-lcd.h>
 #include <mach/h1940.h>
 #include <mach/fb.h>
 
@@ -61,19 +62,12 @@
 
 #include <sound/uda1380.h>
 
+#include "common.h"
+
 #define LCD_PWM_PERIOD 192960
 #define LCD_PWM_DUTY 127353
 
 static struct map_desc rx1950_iodesc[] __initdata = {
-};
-
-static struct s3c24xx_uart_clksrc rx1950_serial_clocks[] = {
-	[0] = {
-	       .name = "fclk",
-	       .divisor = 0x0a,
-	       .min_baud = 0,
-	       .max_baud = 0,
-	},
 };
 
 static struct s3c2410_uartcfg rx1950_uartcfgs[] __initdata = {
@@ -83,8 +77,7 @@ static struct s3c2410_uartcfg rx1950_uartcfgs[] __initdata = {
 	       .ucon = 0x3c5,
 	       .ulcon = 0x03,
 	       .ufcon = 0x51,
-	       .clocks = rx1950_serial_clocks,
-	       .clocks_size = ARRAY_SIZE(rx1950_serial_clocks),
+		.clk_sel = S3C2410_UCON_CLKSEL3,
 	},
 	[1] = {
 	       .hwport = 1,
@@ -92,8 +85,7 @@ static struct s3c2410_uartcfg rx1950_uartcfgs[] __initdata = {
 	       .ucon = 0x3c5,
 	       .ulcon = 0x03,
 	       .ufcon = 0x51,
-	       .clocks = rx1950_serial_clocks,
-	       .clocks_size = ARRAY_SIZE(rx1950_serial_clocks),
+		.clk_sel = S3C2410_UCON_CLKSEL3,
 	},
 	/* IR port */
 	[2] = {
@@ -102,8 +94,7 @@ static struct s3c2410_uartcfg rx1950_uartcfgs[] __initdata = {
 	       .ucon = 0x3c5,
 	       .ulcon = 0x43,
 	       .ufcon = 0xf1,
-	       .clocks = rx1950_serial_clocks,
-	       .clocks_size = ARRAY_SIZE(rx1950_serial_clocks),
+		.clk_sel = S3C2410_UCON_CLKSEL3,
 	},
 };
 
@@ -263,27 +254,78 @@ void rx1950_disable_charger(void)
 	gpio_direction_output(S3C2410_GPJ(3), 0);
 }
 
+DEFINE_SPINLOCK(rx1950_blink_spin);
+
+static int rx1950_led_blink_set(unsigned gpio, int state,
+	unsigned long *delay_on, unsigned long *delay_off)
+{
+	int blink_gpio, check_gpio;
+
+	switch (gpio) {
+	case S3C2410_GPA(6):
+		blink_gpio = S3C2410_GPA(4);
+		check_gpio = S3C2410_GPA(3);
+		break;
+	case S3C2410_GPA(7):
+		blink_gpio = S3C2410_GPA(3);
+		check_gpio = S3C2410_GPA(4);
+		break;
+	default:
+		return -EINVAL;
+		break;
+	}
+
+	if (delay_on && delay_off && !*delay_on && !*delay_off)
+		*delay_on = *delay_off = 500;
+
+	spin_lock(&rx1950_blink_spin);
+
+	switch (state) {
+	case GPIO_LED_NO_BLINK_LOW:
+	case GPIO_LED_NO_BLINK_HIGH:
+		if (!gpio_get_value(check_gpio))
+			gpio_set_value(S3C2410_GPJ(6), 0);
+		gpio_set_value(blink_gpio, 0);
+		gpio_set_value(gpio, state);
+		break;
+	case GPIO_LED_BLINK:
+		gpio_set_value(gpio, 0);
+		gpio_set_value(S3C2410_GPJ(6), 1);
+		gpio_set_value(blink_gpio, 1);
+		break;
+	}
+
+	spin_unlock(&rx1950_blink_spin);
+
+	return 0;
+}
+
 static struct gpio_led rx1950_leds_desc[] = {
 	{
-		.name				= "Green",
-		.default_trigger	= "main-battery-charging-or-full",
-		.gpio				= S3C2410_GPA(6),
-	},
-	{
-		.name				= "Red",
+		.name			= "Green",
 		.default_trigger	= "main-battery-full",
-		.gpio				= S3C2410_GPA(7),
+		.gpio			= S3C2410_GPA(6),
+		.retain_state_suspended	= 1,
 	},
 	{
-		.name				= "Blue",
+		.name			= "Red",
+		.default_trigger
+			= "main-battery-charging-blink-full-solid",
+		.gpio			= S3C2410_GPA(7),
+		.retain_state_suspended	= 1,
+	},
+	{
+		.name			= "Blue",
 		.default_trigger	= "rx1950-acx-mem",
-		.gpio				= S3C2410_GPA(11),
+		.gpio			= S3C2410_GPA(11),
+		.retain_state_suspended	= 1,
 	},
 };
 
 static struct gpio_led_platform_data rx1950_leds_pdata = {
 	.num_leds	= ARRAY_SIZE(rx1950_leds_desc),
 	.leds		= rx1950_leds_desc,
+	.gpio_blink_set	= rx1950_led_blink_set,
 };
 
 static struct platform_device rx1950_leds = {
@@ -566,26 +608,10 @@ static struct s3c2410_platform_nand rx1950_nand_info = {
 	.sets = rx1950_nand_sets,
 };
 
-static void rx1950_udc_pullup(enum s3c2410_udc_cmd_e cmd)
-{
-	switch (cmd) {
-	case S3C2410_UDC_P_ENABLE:
-		gpio_direction_output(S3C2410_GPJ(5), 1);
-		break;
-	case S3C2410_UDC_P_DISABLE:
-		gpio_direction_output(S3C2410_GPJ(5), 0);
-		break;
-	case S3C2410_UDC_P_RESET:
-		break;
-	default:
-		break;
-	}
-}
-
 static struct s3c2410_udc_mach_info rx1950_udc_cfg __initdata = {
-	.udc_command = rx1950_udc_pullup,
 	.vbus_pin = S3C2410_GPG(5),
 	.vbus_pin_inverted = 1,
+	.pullup_pin = S3C2410_GPJ(5),
 };
 
 static struct s3c2410_ts_mach_info rx1950_ts_cfg __initdata = {
@@ -692,7 +718,7 @@ static struct platform_device *rx1950_devices[] __initdata = {
 	&s3c_device_wdt,
 	&s3c_device_i2c0,
 	&s3c_device_iis,
-	&s3c_device_pcm,
+	&samsung_asoc_dma,
 	&s3c_device_usbgadget,
 	&s3c_device_rtc,
 	&s3c_device_nand,
@@ -750,9 +776,6 @@ static void __init rx1950_init_machine(void)
 						S3C2410_MISCCR_USBSUSPND0 |
 						S3C2410_MISCCR_USBSUSPND1, 0x0);
 
-	WARN_ON(gpio_request(S3C2410_GPJ(5), "UDC pullup"));
-	gpio_direction_output(S3C2410_GPJ(5), 0);
-
 	/* mmc power is disabled by default */
 	WARN_ON(gpio_request(S3C2410_GPJ(1), "MMC power"));
 	gpio_direction_output(S3C2410_GPJ(1), 0);
@@ -771,6 +794,13 @@ static void __init rx1950_init_machine(void)
 
 	WARN_ON(gpio_request(S3C2410_GPB(1), "LCD power"));
 
+	WARN_ON(gpio_request(S3C2410_GPA(3), "Red blink"));
+	WARN_ON(gpio_request(S3C2410_GPA(4), "Green blink"));
+	WARN_ON(gpio_request(S3C2410_GPJ(6), "LED blink"));
+	gpio_direction_output(S3C2410_GPA(3), 0);
+	gpio_direction_output(S3C2410_GPA(4), 0);
+	gpio_direction_output(S3C2410_GPJ(6), 0);
+
 	platform_add_devices(rx1950_devices, ARRAY_SIZE(rx1950_devices));
 
 	i2c_register_board_info(0, rx1950_i2c_devices,
@@ -786,10 +816,11 @@ static void __init rx1950_reserve(void)
 
 MACHINE_START(RX1950, "HP iPAQ RX1950")
     /* Maintainers: Vasily Khoruzhick */
-	.boot_params = S3C2410_SDRAM_PA + 0x100,
+	.atag_offset = 0x100,
 	.map_io = rx1950_map_io,
 	.reserve	= rx1950_reserve,
 	.init_irq = s3c24xx_init_irq,
 	.init_machine = rx1950_init_machine,
 	.timer = &s3c24xx_timer,
+	.restart	= s3c244x_restart,
 MACHINE_END

@@ -197,7 +197,7 @@ static ssize_t adt7411_set_bit(struct device *dev,
 	int ret;
 	unsigned long flag;
 
-	ret = strict_strtoul(buf, 0, &flag);
+	ret = kstrtoul(buf, 0, &flag);
 	if (ret || flag > 1)
 		return -EINVAL;
 
@@ -334,6 +334,7 @@ static const struct i2c_device_id adt7411_id[] = {
 	{ "adt7411", 0 },
 	{ }
 };
+MODULE_DEVICE_TABLE(i2c, adt7411_id);
 
 static struct i2c_driver adt7411_driver = {
 	.driver		= {

@@ -14,6 +14,7 @@
 #include <linux/interrupt.h>
 #include <linux/of_device.h>
 #include <linux/slab.h>
+#include <linux/of_i2c.h>
 #include <sound/soc.h>
 #include <asm/fsl_guts.h>
 
@@ -53,9 +54,8 @@ struct mpc8610_hpcd_data {
  *
  * Here we program the DMACR and PMUXCR registers.
  */
-static int mpc8610_hpcd_machine_probe(struct platform_device *sound_device)
+static int mpc8610_hpcd_machine_probe(struct snd_soc_card *card)
 {
-	struct snd_soc_card *card = platform_get_drvdata(sound_device);
 	struct mpc8610_hpcd_data *machine_data =
 		container_of(card, struct mpc8610_hpcd_data, card);
 	struct ccsr_guts_86xx __iomem *guts;
@@ -138,9 +138,8 @@ static int mpc8610_hpcd_startup(struct snd_pcm_substream *substream)
  * This function is called to remove the sound device for one SSI.  We
  * de-program the DMACR and PMUXCR register.
  */
-static int mpc8610_hpcd_machine_remove(struct platform_device *sound_device)
+static int mpc8610_hpcd_machine_remove(struct snd_soc_card *card)
 {
-	struct snd_soc_card *card = platform_get_drvdata(sound_device);
 	struct mpc8610_hpcd_data *machine_data =
 		container_of(card, struct mpc8610_hpcd_data, card);
 	struct ccsr_guts_86xx __iomem *guts;
@@ -235,7 +234,7 @@ static int get_parent_cell_index(struct device_node *np)
 	if (!iprop)
 		return -1;
 
-	return *iprop;
+	return be32_to_cpup(iprop);
 }
 
 /**
@@ -251,8 +250,9 @@ static int get_parent_cell_index(struct device_node *np)
 static int codec_node_dev_name(struct device_node *np, char *buf, size_t len)
 {
 	const u32 *iprop;
-	int bus, addr;
+	int addr;
 	char temp[DAI_NAME_SIZE];
+	struct i2c_client *i2c;
 
 	of_modalias_node(np, temp, DAI_NAME_SIZE);
 
@@ -260,13 +260,14 @@ static int codec_node_dev_name(struct device_node *np, char *buf, size_t len)
 	if (!iprop)
 		return -EINVAL;
 
-	addr = *iprop;
+	addr = be32_to_cpup(iprop);
 
-	bus = get_parent_cell_index(np);
-	if (bus < 0)
-		return bus;
+	/* We need the adapter number */
+	i2c = of_find_i2c_device_by_node(np);
+	if (!i2c)
+		return -ENODEV;
 
-	snprintf(buf, len, "%s-codec.%u-%04x", temp, bus, addr);
+	snprintf(buf, len, "%s-codec.%u-%04x", temp, i2c->adapter->nr, addr);
 
 	return 0;
 }
@@ -307,7 +308,7 @@ static int get_dma_channel(struct device_node *ssi_np,
 		return -EINVAL;
 	}
 
-	*dma_channel_id = *iprop;
+	*dma_channel_id = be32_to_cpup(iprop);
 	*dma_id = get_parent_cell_index(dma_channel_np);
 	of_node_put(dma_channel_np);
 
@@ -347,8 +348,10 @@ static int mpc8610_hpcd_probe(struct platform_device *pdev)
 	}
 
 	machine_data = kzalloc(sizeof(struct mpc8610_hpcd_data), GFP_KERNEL);
-	if (!machine_data)
-		return -ENOMEM;
+	if (!machine_data) {
+		ret = -ENOMEM;
+		goto error_alloc;
+	}
 
 	machine_data->dai[0].cpu_dai_name = dev_name(&ssi_pdev->dev);
 	machine_data->dai[0].ops = &mpc8610_hpcd_ops;
@@ -381,7 +384,7 @@ static int mpc8610_hpcd_probe(struct platform_device *pdev)
 		ret = -EINVAL;
 		goto error;
 	}
-	machine_data->ssi_id = *iprop;
+	machine_data->ssi_id = be32_to_cpup(iprop);
 
 	/* Get the serial format and clock direction. */
 	sprop = of_get_property(np, "fsl,mode", NULL);
@@ -392,7 +395,8 @@ static int mpc8610_hpcd_probe(struct platform_device *pdev)
 	}
 
 	if (strcasecmp(sprop, "i2s-slave") == 0) {
-		machine_data->dai_format = SND_SOC_DAIFMT_I2S;
+		machine_data->dai_format =
+			SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM;
 		machine_data->codec_clk_direction = SND_SOC_CLOCK_OUT;
 		machine_data->cpu_clk_direction = SND_SOC_CLOCK_IN;
 
@@ -407,33 +411,40 @@ static int mpc8610_hpcd_probe(struct platform_device *pdev)
 			ret = -EINVAL;
 			goto error;
 		}
-		machine_data->clk_frequency = *iprop;
+		machine_data->clk_frequency = be32_to_cpup(iprop);
 	} else if (strcasecmp(sprop, "i2s-master") == 0) {
-		machine_data->dai_format = SND_SOC_DAIFMT_I2S;
+		machine_data->dai_format =
+			SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS;
 		machine_data->codec_clk_direction = SND_SOC_CLOCK_IN;
 		machine_data->cpu_clk_direction = SND_SOC_CLOCK_OUT;
 	} else if (strcasecmp(sprop, "lj-slave") == 0) {
-		machine_data->dai_format = SND_SOC_DAIFMT_LEFT_J;
+		machine_data->dai_format =
+			SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_CBM_CFM;
 		machine_data->codec_clk_direction = SND_SOC_CLOCK_OUT;
 		machine_data->cpu_clk_direction = SND_SOC_CLOCK_IN;
 	} else if (strcasecmp(sprop, "lj-master") == 0) {
-		machine_data->dai_format = SND_SOC_DAIFMT_LEFT_J;
+		machine_data->dai_format =
+			SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_CBS_CFS;
 		machine_data->codec_clk_direction = SND_SOC_CLOCK_IN;
 		machine_data->cpu_clk_direction = SND_SOC_CLOCK_OUT;
 	} else if (strcasecmp(sprop, "rj-slave") == 0) {
-		machine_data->dai_format = SND_SOC_DAIFMT_RIGHT_J;
+		machine_data->dai_format =
+			SND_SOC_DAIFMT_RIGHT_J | SND_SOC_DAIFMT_CBM_CFM;
 		machine_data->codec_clk_direction = SND_SOC_CLOCK_OUT;
 		machine_data->cpu_clk_direction = SND_SOC_CLOCK_IN;
 	} else if (strcasecmp(sprop, "rj-master") == 0) {
-		machine_data->dai_format = SND_SOC_DAIFMT_RIGHT_J;
+		machine_data->dai_format =
+			SND_SOC_DAIFMT_RIGHT_J | SND_SOC_DAIFMT_CBS_CFS;
 		machine_data->codec_clk_direction = SND_SOC_CLOCK_IN;
 		machine_data->cpu_clk_direction = SND_SOC_CLOCK_OUT;
 	} else if (strcasecmp(sprop, "ac97-slave") == 0) {
-		machine_data->dai_format = SND_SOC_DAIFMT_AC97;
+		machine_data->dai_format =
+			SND_SOC_DAIFMT_AC97 | SND_SOC_DAIFMT_CBM_CFM;
 		machine_data->codec_clk_direction = SND_SOC_CLOCK_OUT;
 		machine_data->cpu_clk_direction = SND_SOC_CLOCK_IN;
 	} else if (strcasecmp(sprop, "ac97-master") == 0) {
-		machine_data->dai_format = SND_SOC_DAIFMT_AC97;
+		machine_data->dai_format =
+			SND_SOC_DAIFMT_AC97 | SND_SOC_DAIFMT_CBS_CFS;
 		machine_data->codec_clk_direction = SND_SOC_CLOCK_IN;
 		machine_data->cpu_clk_direction = SND_SOC_CLOCK_OUT;
 	} else {
@@ -496,7 +507,7 @@ static int mpc8610_hpcd_probe(struct platform_device *pdev)
 	ret = platform_device_add(sound_device);
 	if (ret) {
 		dev_err(&pdev->dev, "platform device add failed\n");
-		goto error;
+		goto error_sound;
 	}
 	dev_set_drvdata(&pdev->dev, sound_device);
 
@@ -504,14 +515,12 @@ static int mpc8610_hpcd_probe(struct platform_device *pdev)
 
 	return 0;
 
+error_sound:
+	platform_device_put(sound_device);
 error:
-	of_node_put(codec_np);
-
-	if (sound_device)
-		platform_device_unregister(sound_device);
-
 	kfree(machine_data);
-
+error_alloc:
+	of_node_put(codec_np);
 	return ret;
 }
 

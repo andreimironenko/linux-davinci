@@ -30,117 +30,8 @@
 #include <mach/irqs.h>
 #include <mach/am35xx.h>
 #include <plat/usb.h>
-#include "control.h"
-
-#if defined(CONFIG_USB_MUSB_OMAP2PLUS) || defined (CONFIG_USB_MUSB_AM35X)
-
-static void am35x_musb_reset(void)
-{
-	u32	regval;
-
-	/* Reset the musb interface */
-	regval = omap_ctrl_readl(AM35XX_CONTROL_IP_SW_RESET);
-
-	regval |= AM35XX_USBOTGSS_SW_RST;
-	omap_ctrl_writel(regval, AM35XX_CONTROL_IP_SW_RESET);
-
-	regval &= ~AM35XX_USBOTGSS_SW_RST;
-	omap_ctrl_writel(regval, AM35XX_CONTROL_IP_SW_RESET);
-
-	regval = omap_ctrl_readl(AM35XX_CONTROL_IP_SW_RESET);
-}
-
-static void am35x_musb_phy_power(u8 on)
-{
-	unsigned long timeout = jiffies + msecs_to_jiffies(100);
-	u32 devconf2;
-
-	if (on) {
-		/*
-		 * Start the on-chip PHY and its PLL.
-		 */
-		devconf2 = omap_ctrl_readl(AM35XX_CONTROL_DEVCONF2);
-
-		devconf2 &= ~(CONF2_RESET | CONF2_PHYPWRDN | CONF2_OTGPWRDN);
-		devconf2 |= CONF2_PHY_PLLON;
-
-		omap_ctrl_writel(devconf2, AM35XX_CONTROL_DEVCONF2);
-
-		pr_info(KERN_INFO "Waiting for PHY clock good...\n");
-		while (!(omap_ctrl_readl(AM35XX_CONTROL_DEVCONF2)
-				& CONF2_PHYCLKGD)) {
-			cpu_relax();
-
-			if (time_after(jiffies, timeout)) {
-				pr_err(KERN_ERR "musb PHY clock good timed out\n");
-				break;
-			}
-		}
-	} else {
-		/*
-		 * Power down the on-chip PHY.
-		 */
-		devconf2 = omap_ctrl_readl(AM35XX_CONTROL_DEVCONF2);
-
-		devconf2 &= ~CONF2_PHY_PLLON;
-		devconf2 |=  CONF2_PHYPWRDN | CONF2_OTGPWRDN;
-		omap_ctrl_writel(devconf2, AM35XX_CONTROL_DEVCONF2);
-	}
-}
-
-static void am35x_musb_clear_irq(void)
-{
-	u32 regval;
-
-	regval = omap_ctrl_readl(AM35XX_CONTROL_LVL_INTR_CLEAR);
-	regval |= AM35XX_USBOTGSS_INT_CLR;
-	omap_ctrl_writel(regval, AM35XX_CONTROL_LVL_INTR_CLEAR);
-	regval = omap_ctrl_readl(AM35XX_CONTROL_LVL_INTR_CLEAR);
-}
-
-static void am35x_musb_set_mode(u8 musb_mode)
-{
-	u32 devconf2 = omap_ctrl_readl(AM35XX_CONTROL_DEVCONF2);
-
-	devconf2 &= ~CONF2_OTGMODE;
-	switch (musb_mode) {
-#ifdef	CONFIG_USB_MUSB_HDRC_HCD
-	case MUSB_HOST:		/* Force VBUS valid, ID = 0 */
-		devconf2 |= CONF2_FORCE_HOST;
-		break;
-#endif
-#ifdef	CONFIG_USB_GADGET_MUSB_HDRC
-	case MUSB_PERIPHERAL:	/* Force VBUS valid, ID = 1 */
-		devconf2 |= CONF2_FORCE_DEVICE;
-		break;
-#endif
-#ifdef	CONFIG_USB_MUSB_OTG
-	case MUSB_OTG:		/* Don't override the VBUS/ID comparators */
-		devconf2 |= CONF2_NO_OVERRIDE;
-		break;
-#endif
-	default:
-		pr_info(KERN_INFO "Unsupported mode %u\n", musb_mode);
-	}
-
-	omap_ctrl_writel(devconf2, AM35XX_CONTROL_DEVCONF2);
-}
-
-static struct resource musb_resources[] = {
-	[0] = { /* start and end set dynamically */
-		.flags	= IORESOURCE_MEM,
-	},
-	[1] = {	/* general IRQ */
-		.start	= INT_243X_HS_USB_MC,
-		.flags	= IORESOURCE_IRQ,
-		.name	= "mc",
-	},
-	[2] = {	/* DMA IRQ */
-		.start	= INT_243X_HS_USB_DMA,
-		.flags	= IORESOURCE_IRQ,
-		.name	= "dma",
-	},
-};
+#include <plat/omap_device.h>
+#include "mux.h"
 
 static struct musb_hdrc_config musb_config = {
 	.fifo_mode	= 4,
@@ -150,71 +41,48 @@ static struct musb_hdrc_config musb_config = {
 	.ram_bits	= 12,
 };
 
-static struct musb_hdrc_platform_data musb_plat = {
-#ifdef CONFIG_USB_MUSB_OTG
-	.mode		= MUSB_OTG,
-#elif defined(CONFIG_USB_MUSB_HDRC_HCD)
-	.mode		= MUSB_HOST,
-#elif defined(CONFIG_USB_GADGET_MUSB_HDRC)
-	.mode		= MUSB_PERIPHERAL,
-#endif
-	/* .clock is set dynamically */
-	.config		= &musb_config,
-
-	/* REVISIT charge pump on TWL4030 can supply up to
-	 * 100 mA ... but this value is board-specific, like
-	 * "mode", and should be passed to usb_musb_init().
-	 */
-	.power		= 50,			/* up to 100 mA */
+static struct musb_hdrc_platform_data musb_plat[] = {
+	{
+		.config         = &musb_config,
+		.clock          = "ick",
+	},
+	{
+		.config         = &musb_config,
+		.clock          = "ick",
+	},
 };
 
 static u64 musb_dmamask = DMA_BIT_MASK(32);
 
-static struct platform_device musb_device = {
-	.name		= "musb-omap2430",
-	.id		= -1,
-	.dev = {
-		.dma_mask		= &musb_dmamask,
-		.coherent_dma_mask	= DMA_BIT_MASK(32),
-		.platform_data		= &musb_plat,
-	},
-	.num_resources	= ARRAY_SIZE(musb_resources),
-	.resource	= musb_resources,
+static struct omap_musb_board_data musb_default_board_data = {
+	.interface_type		= MUSB_INTERFACE_ULPI,
+	.mode			= MUSB_OTG,
+	.power			= 100,
 };
 
-void __init usb_musb_init(struct omap_musb_board_data *board_data)
+void __init usb_musb_init(struct omap_musb_board_data *musb_board_data)
 {
-	if (cpu_is_omap243x()) {
-		musb_resources[0].start = OMAP243X_HS_BASE;
-	} else if (cpu_is_omap3517() || cpu_is_omap3505()) {
-		musb_device.name = "musb-am35x";
-		musb_resources[0].start = AM35XX_IPSS_USBOTGSS_BASE;
-		musb_resources[1].start = INT_35XX_USBOTG_IRQ;
-		board_data->set_phy_power = am35x_musb_phy_power;
-		board_data->clear_irq = am35x_musb_clear_irq;
-		board_data->set_mode = am35x_musb_set_mode;
-		board_data->reset = am35x_musb_reset;
-	} else if (cpu_is_omap34xx()) {
-		musb_resources[0].start = OMAP34XX_HSUSB_OTG_BASE;
-	} else if (cpu_is_omap44xx()) {
-		musb_resources[0].start = OMAP44XX_HSUSB_OTG_BASE;
-		musb_resources[1].start = OMAP44XX_IRQ_HS_USB_MC_N;
-		musb_resources[2].start = OMAP44XX_IRQ_HS_USB_DMA_N;
-	}
-	if (cpu_is_omap3517() || cpu_is_omap3505())
-		musb_resources[0].end = musb_resources[0].start + SZ_32K - 1;
+	struct omap_hwmod		*oh;
+	struct platform_device		*pdev;
+	struct device			*dev;
+	int				bus_id = -1;
+	const char			*oh_name, *name;
+	struct omap_musb_board_data	*board_data;
+
+	if (musb_board_data)
+		board_data = musb_board_data;
 	else
-		musb_resources[0].end = musb_resources[0].start + SZ_4K - 1;
+		board_data = &musb_default_board_data;
 
 	/*
 	 * REVISIT: This line can be removed once all the platforms using
 	 * musb_core.c have been converted to use use clkdev.
 	 */
-	musb_plat.clock = "ick";
-	musb_plat.board_data = board_data;
-	musb_plat.power = board_data->power >> 1;
-	musb_plat.mode = board_data->mode;
-	musb_plat.extvbus = board_data->extvbus;
+	musb_plat[0].clock = "ick";
+	musb_plat[0].board_data = board_data;
+	musb_plat[0].power = board_data->power >> 1;
+	musb_plat[0].mode = board_data->mode;
+	musb_plat[0].extvbus = board_data->extvbus;
 
 	/*
 	 * OMAP3630/AM35x platform has MUSB RTL-1.8 which has the fix for the
@@ -224,12 +92,37 @@ void __init usb_musb_init(struct omap_musb_board_data *board_data)
 	if (cpu_is_omap3430())
 		musb_config.fifo_mode = 5;
 
-	if (platform_device_register(&musb_device) < 0)
-		printk(KERN_ERR "Unable to register HS-USB (MUSB) device\n");
-}
+	if (cpu_is_omap3517() || cpu_is_omap3505()) {
+		oh_name = "am35x_otg_hs";
+		name = "musb-am35x";
+	} else if (cpu_is_ti81xx() || cpu_is_am33xx()) {
+		board_data->set_phy_power = ti81xx_musb_phy_power;
+		oh_name = "usb_otg_hs";
+		name = "musb-ti81xx";
+	} else {
+		oh_name = "usb_otg_hs";
+		name = "musb-omap2430";
+	}
 
-#else
-void __init usb_musb_init(struct omap_musb_board_data *board_data)
-{
+        oh = omap_hwmod_lookup(oh_name);
+        if (WARN(!oh, "%s: could not find omap_hwmod for %s\n",
+                 __func__, oh_name))
+                return;
+
+	pdev = omap_device_build(name, bus_id, oh, &musb_plat,
+			       sizeof(musb_plat), NULL, 0, false);
+	if (IS_ERR(pdev)) {
+		pr_err("Could not build omap_device for %s %s\n",
+						name, oh_name);
+		return;
+	}
+
+	dev = &pdev->dev;
+	get_device(dev);
+	dev->dma_mask = &musb_dmamask;
+	dev->coherent_dma_mask = musb_dmamask;
+	put_device(dev);
+
+	if (cpu_is_omap44xx())
+		omap4430_phy_init(dev);
 }
-#endif /* CONFIG_USB_MUSB_SOC */

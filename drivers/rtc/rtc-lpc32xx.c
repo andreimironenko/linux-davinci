@@ -240,7 +240,7 @@ static int __devinit lpc32xx_rtc_probe(struct platform_device *pdev)
 	spin_lock_init(&rtc->lock);
 
 	/*
-	 * The RTC is on a seperate power domain and can keep it's state
+	 * The RTC is on a separate power domain and can keep it's state
 	 * across a chip power cycle. If the RTC has never been previously
 	 * setup, then set it up now for the first time.
 	 */
@@ -396,17 +396,7 @@ static struct platform_driver lpc32xx_rtc_driver = {
 	},
 };
 
-static int __init lpc32xx_rtc_init(void)
-{
-	return platform_driver_register(&lpc32xx_rtc_driver);
-}
-module_init(lpc32xx_rtc_init);
-
-static void __exit lpc32xx_rtc_exit(void)
-{
-	platform_driver_unregister(&lpc32xx_rtc_driver);
-}
-module_exit(lpc32xx_rtc_exit);
+module_platform_driver(lpc32xx_rtc_driver);
 
 MODULE_AUTHOR("Kevin Wells <wellsk40@gmail.com");
 MODULE_DESCRIPTION("RTC driver for the LPC32xx SoC");

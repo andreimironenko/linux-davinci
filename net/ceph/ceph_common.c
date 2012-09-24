@@ -5,6 +5,8 @@
 #include <linux/fs.h>
 #include <linux/inet.h>
 #include <linux/in6.h>
+#include <linux/key.h>
+#include <keys/ceph-type.h>
 #include <linux/module.h>
 #include <linux/mount.h>
 #include <linux/parser.h>
@@ -20,6 +22,7 @@
 #include <linux/ceph/decode.h>
 #include <linux/ceph/mon_client.h>
 #include <linux/ceph/auth.h>
+#include "crypto.h"
 
 
 
@@ -62,6 +65,7 @@ const char *ceph_msg_type_name(int type)
 	case CEPH_MSG_OSD_MAP: return "osd_map";
 	case CEPH_MSG_OSD_OP: return "osd_op";
 	case CEPH_MSG_OSD_OPREPLY: return "osd_opreply";
+	case CEPH_MSG_WATCH_NOTIFY: return "watch_notify";
 	default: return "unknown";
 	}
 }
@@ -81,8 +85,6 @@ int ceph_check_fsid(struct ceph_client *client, struct ceph_fsid *fsid)
 	} else {
 		pr_info("client%lld fsid %pU\n", ceph_client_id(client), fsid);
 		memcpy(&client->fsid, fsid, sizeof(*fsid));
-		ceph_debugfs_client_init(client);
-		client->have_fsid = true;
 	}
 	return 0;
 }
@@ -116,9 +118,29 @@ int ceph_compare_options(struct ceph_options *new_opt,
 	if (ret)
 		return ret;
 
-	ret = strcmp_null(opt1->secret, opt2->secret);
-	if (ret)
-		return ret;
+	if (opt1->key && !opt2->key)
+		return -1;
+	if (!opt1->key && opt2->key)
+		return 1;
+	if (opt1->key && opt2->key) {
+		if (opt1->key->type != opt2->key->type)
+			return -1;
+		if (opt1->key->created.tv_sec != opt2->key->created.tv_sec)
+			return -1;
+		if (opt1->key->created.tv_nsec != opt2->key->created.tv_nsec)
+			return -1;
+		if (opt1->key->len != opt2->key->len)
+			return -1;
+		if (opt1->key->key && !opt2->key->key)
+			return -1;
+		if (!opt1->key->key && opt2->key->key)
+			return 1;
+		if (opt1->key->key && opt2->key->key) {
+			ret = memcmp(opt1->key->key, opt2->key->key, opt1->key->len);
+			if (ret)
+				return ret;
+		}
+	}
 
 	/* any matching mon ip implies a match */
 	for (i = 0; i < opt1->num_mon; i++) {
@@ -175,6 +197,7 @@ enum {
 	Opt_fsid,
 	Opt_name,
 	Opt_secret,
+	Opt_key,
 	Opt_ip,
 	Opt_last_string,
 	/* string args above */
@@ -191,6 +214,7 @@ static match_table_t opt_tokens = {
 	{Opt_fsid, "fsid=%s"},
 	{Opt_name, "name=%s"},
 	{Opt_secret, "secret=%s"},
+	{Opt_key, "key=%s"},
 	{Opt_ip, "ip=%s"},
 	/* string args above */
 	{Opt_noshare, "noshare"},
@@ -202,10 +226,56 @@ void ceph_destroy_options(struct ceph_options *opt)
 {
 	dout("destroy_options %p\n", opt);
 	kfree(opt->name);
-	kfree(opt->secret);
+	if (opt->key) {
+		ceph_crypto_key_destroy(opt->key);
+		kfree(opt->key);
+	}
+	kfree(opt->mon_addr);
 	kfree(opt);
 }
 EXPORT_SYMBOL(ceph_destroy_options);
+
+/* get secret from key store */
+static int get_secret(struct ceph_crypto_key *dst, const char *name) {
+	struct key *ukey;
+	int key_err;
+	int err = 0;
+	struct ceph_crypto_key *ckey;
+
+	ukey = request_key(&key_type_ceph, name, NULL);
+	if (!ukey || IS_ERR(ukey)) {
+		/* request_key errors don't map nicely to mount(2)
+		   errors; don't even try, but still printk */
+		key_err = PTR_ERR(ukey);
+		switch (key_err) {
+		case -ENOKEY:
+			pr_warning("ceph: Mount failed due to key not found: %s\n", name);
+			break;
+		case -EKEYEXPIRED:
+			pr_warning("ceph: Mount failed due to expired key: %s\n", name);
+			break;
+		case -EKEYREVOKED:
+			pr_warning("ceph: Mount failed due to revoked key: %s\n", name);
+			break;
+		default:
+			pr_warning("ceph: Mount failed due to unknown key error"
+			       " %d: %s\n", key_err, name);
+		}
+		err = -EPERM;
+		goto out;
+	}
+
+	ckey = ukey->payload.data;
+	err = ceph_crypto_key_clone(dst, ckey);
+	if (err)
+		goto out_key;
+	/* pass through, err is 0 */
+
+out_key:
+	key_put(ukey);
+out:
+	return err;
+}
 
 int ceph_parse_options(struct ceph_options **popt, char *options,
 		       const char *dev_name, const char *dev_name_end,
@@ -294,9 +364,24 @@ int ceph_parse_options(struct ceph_options **popt, char *options,
 					      GFP_KERNEL);
 			break;
 		case Opt_secret:
-			opt->secret = kstrndup(argstr[0].from,
-						argstr[0].to-argstr[0].from,
-						GFP_KERNEL);
+		        opt->key = kzalloc(sizeof(*opt->key), GFP_KERNEL);
+			if (!opt->key) {
+				err = -ENOMEM;
+				goto out;
+			}
+			err = ceph_crypto_key_unarmor(opt->key, argstr[0].from);
+			if (err < 0)
+				goto out;
+			break;
+		case Opt_key:
+		        opt->key = kzalloc(sizeof(*opt->key), GFP_KERNEL);
+			if (!opt->key) {
+				err = -ENOMEM;
+				goto out;
+			}
+			err = get_secret(opt->key, argstr[0].from);
+			if (err < 0)
+				goto out;
 			break;
 
 			/* misc */
@@ -345,9 +430,12 @@ EXPORT_SYMBOL(ceph_client_id);
 /*
  * create a fresh client instance
  */
-struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private)
+struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private,
+				       unsigned supported_features,
+				       unsigned required_features)
 {
 	struct ceph_client *client;
+	struct ceph_entity_addr *myaddr = NULL;
 	int err = -ENOMEM;
 
 	client = kzalloc(sizeof(*client), GFP_KERNEL);
@@ -362,15 +450,27 @@ struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private)
 	client->auth_err = 0;
 
 	client->extra_mon_dispatch = NULL;
-	client->supported_features = CEPH_FEATURE_SUPPORTED_DEFAULT;
-	client->required_features = CEPH_FEATURE_REQUIRED_DEFAULT;
+	client->supported_features = CEPH_FEATURE_SUPPORTED_DEFAULT |
+		supported_features;
+	client->required_features = CEPH_FEATURE_REQUIRED_DEFAULT |
+		required_features;
 
-	client->msgr = NULL;
+	/* msgr */
+	if (ceph_test_opt(client, MYIP))
+		myaddr = &client->options->my_addr;
+	client->msgr = ceph_messenger_create(myaddr,
+					     client->supported_features,
+					     client->required_features);
+	if (IS_ERR(client->msgr)) {
+		err = PTR_ERR(client->msgr);
+		goto fail;
+	}
+	client->msgr->nocrc = ceph_test_opt(client, NOCRC);
 
 	/* subsystems */
 	err = ceph_monc_init(&client->monc, client);
 	if (err < 0)
-		goto fail;
+		goto fail_msgr;
 	err = ceph_osdc_init(&client->osdc, client);
 	if (err < 0)
 		goto fail_monc;
@@ -379,6 +479,8 @@ struct ceph_client *ceph_create_client(struct ceph_options *opt, void *private)
 
 fail_monc:
 	ceph_monc_stop(&client->monc);
+fail_msgr:
+	ceph_messenger_destroy(client->msgr);
 fail:
 	kfree(client);
 	return ERR_PTR(err);
@@ -393,8 +495,8 @@ void ceph_destroy_client(struct ceph_client *client)
 	ceph_osdc_stop(&client->osdc);
 
 	/*
-	 * make sure mds and osd connections close out before destroying
-	 * the auth module, which is needed to free those connections'
+	 * make sure osd connections close out before destroying the
+	 * auth module, which is needed to free those connections'
 	 * ceph_authorizers.
 	 */
 	ceph_msgr_flush();
@@ -403,8 +505,7 @@ void ceph_destroy_client(struct ceph_client *client)
 
 	ceph_debugfs_client_cleanup(client);
 
-	if (client->msgr)
-		ceph_messenger_destroy(client->msgr);
+	ceph_messenger_destroy(client->msgr);
 
 	ceph_destroy_options(client->options);
 
@@ -427,23 +528,8 @@ static int have_mon_and_osd_map(struct ceph_client *client)
  */
 int __ceph_open_session(struct ceph_client *client, unsigned long started)
 {
-	struct ceph_entity_addr *myaddr = NULL;
 	int err;
 	unsigned long timeout = client->options->mount_timeout * HZ;
-
-	/* initialize the messenger */
-	if (client->msgr == NULL) {
-		if (ceph_test_opt(client, MYIP))
-			myaddr = &client->options->my_addr;
-		client->msgr = ceph_messenger_create(myaddr,
-					client->supported_features,
-					client->required_features);
-		if (IS_ERR(client->msgr)) {
-			client->msgr = NULL;
-			return PTR_ERR(client->msgr);
-		}
-		client->msgr->nocrc = ceph_test_opt(client, NOCRC);
-	}
 
 	/* open session, and wait for mon and osd maps */
 	err = ceph_monc_open_session(&client->monc);
@@ -495,9 +581,13 @@ static int __init init_ceph_lib(void)
 	if (ret < 0)
 		goto out;
 
-	ret = ceph_msgr_init();
+	ret = ceph_crypto_init();
 	if (ret < 0)
 		goto out_debugfs;
+
+	ret = ceph_msgr_init();
+	if (ret < 0)
+		goto out_crypto;
 
 	pr_info("loaded (mon/osd proto %d/%d, osdmap %d/%d %d/%d)\n",
 		CEPH_MONC_PROTOCOL, CEPH_OSDC_PROTOCOL,
@@ -506,6 +596,8 @@ static int __init init_ceph_lib(void)
 
 	return 0;
 
+out_crypto:
+	ceph_crypto_shutdown();
 out_debugfs:
 	ceph_debugfs_cleanup();
 out:
@@ -516,6 +608,7 @@ static void __exit exit_ceph_lib(void)
 {
 	dout("exit_ceph_lib\n");
 	ceph_msgr_exit();
+	ceph_crypto_shutdown();
 	ceph_debugfs_cleanup();
 }
 

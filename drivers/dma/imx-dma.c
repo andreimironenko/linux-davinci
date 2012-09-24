@@ -14,6 +14,7 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 #include <linux/init.h>
+#include <linux/module.h>
 #include <linux/types.h>
 #include <linux/mm.h>
 #include <linux/interrupt.h>
@@ -23,6 +24,7 @@
 #include <linux/slab.h>
 #include <linux/platform_device.h>
 #include <linux/dmaengine.h>
+#include <linux/module.h>
 
 #include <asm/irq.h>
 #include <mach/dma-v1.h>
@@ -49,6 +51,7 @@ struct imxdma_channel {
 
 struct imxdma_engine {
 	struct device			*dev;
+	struct device_dma_parameters	dma_parms;
 	struct dma_device		dma_device;
 	struct imxdma_channel		channel[MAX_DMA_CHANNELS];
 };
@@ -104,7 +107,7 @@ static int imxdma_control(struct dma_chan *chan, enum dma_ctrl_cmd cmd,
 		imx_dma_disable(imxdmac->imxdma_channel);
 		return 0;
 	case DMA_SLAVE_CONFIG:
-		if (dmaengine_cfg->direction == DMA_FROM_DEVICE) {
+		if (dmaengine_cfg->direction == DMA_DEV_TO_MEM) {
 			imxdmac->per_address = dmaengine_cfg->src_addr;
 			imxdmac->watermark_level = dmaengine_cfg->src_maxburst;
 			imxdmac->word_size = dmaengine_cfg->src_addr_width;
@@ -134,7 +137,8 @@ static int imxdma_control(struct dma_chan *chan, enum dma_ctrl_cmd cmd,
 		if (ret)
 			return ret;
 
-		imx_dma_config_burstlen(imxdmac->imxdma_channel, imxdmac->watermark_level);
+		imx_dma_config_burstlen(imxdmac->imxdma_channel,
+				imxdmac->watermark_level * imxdmac->word_size);
 
 		return 0;
 	default:
@@ -220,7 +224,7 @@ static void imxdma_free_chan_resources(struct dma_chan *chan)
 
 static struct dma_async_tx_descriptor *imxdma_prep_slave_sg(
 		struct dma_chan *chan, struct scatterlist *sgl,
-		unsigned int sg_len, enum dma_data_direction direction,
+		unsigned int sg_len, enum dma_transfer_direction direction,
 		unsigned long flags)
 {
 	struct imxdma_channel *imxdmac = to_imxdma_chan(chan);
@@ -237,10 +241,25 @@ static struct dma_async_tx_descriptor *imxdma_prep_slave_sg(
 		dma_length += sg->length;
 	}
 
-	if (direction == DMA_FROM_DEVICE)
+	if (direction == DMA_DEV_TO_MEM)
 		dmamode = DMA_MODE_READ;
 	else
 		dmamode = DMA_MODE_WRITE;
+
+	switch (imxdmac->word_size) {
+	case DMA_SLAVE_BUSWIDTH_4_BYTES:
+		if (sgl->length & 3 || sgl->dma_address & 3)
+			return NULL;
+		break;
+	case DMA_SLAVE_BUSWIDTH_2_BYTES:
+		if (sgl->length & 1 || sgl->dma_address & 1)
+			return NULL;
+		break;
+	case DMA_SLAVE_BUSWIDTH_1_BYTE:
+		break;
+	default:
+		return NULL;
+	}
 
 	ret = imx_dma_setup_sg(imxdmac->imxdma_channel, sgl, sg_len,
 		 dma_length, imxdmac->per_address, dmamode);
@@ -252,7 +271,7 @@ static struct dma_async_tx_descriptor *imxdma_prep_slave_sg(
 
 static struct dma_async_tx_descriptor *imxdma_prep_dma_cyclic(
 		struct dma_chan *chan, dma_addr_t dma_addr, size_t buf_len,
-		size_t period_len, enum dma_data_direction direction)
+		size_t period_len, enum dma_transfer_direction direction)
 {
 	struct imxdma_channel *imxdmac = to_imxdma_chan(chan);
 	struct imxdma_engine *imxdma = imxdmac->imxdma;
@@ -298,7 +317,7 @@ static struct dma_async_tx_descriptor *imxdma_prep_dma_cyclic(
 	imxdmac->sg_list[periods].page_link =
 		((unsigned long)imxdmac->sg_list | 0x01) & ~0x02;
 
-	if (direction == DMA_FROM_DEVICE)
+	if (direction == DMA_DEV_TO_MEM)
 		dmamode = DMA_MODE_READ;
 	else
 		dmamode = DMA_MODE_WRITE;
@@ -329,6 +348,9 @@ static int __init imxdma_probe(struct platform_device *pdev)
 
 	INIT_LIST_HEAD(&imxdma->dma_device.channels);
 
+	dma_cap_set(DMA_SLAVE, imxdma->dma_device.cap_mask);
+	dma_cap_set(DMA_CYCLIC, imxdma->dma_device.cap_mask);
+
 	/* Initialize channel parameters */
 	for (i = 0; i < MAX_DMA_CHANNELS; i++) {
 		struct imxdma_channel *imxdmac = &imxdma->channel[i];
@@ -346,11 +368,7 @@ static int __init imxdma_probe(struct platform_device *pdev)
 		imxdmac->imxdma = imxdma;
 		spin_lock_init(&imxdmac->lock);
 
-		dma_cap_set(DMA_SLAVE, imxdma->dma_device.cap_mask);
-		dma_cap_set(DMA_CYCLIC, imxdma->dma_device.cap_mask);
-
 		imxdmac->chan.device = &imxdma->dma_device;
-		imxdmac->chan.chan_id = i;
 		imxdmac->channel = i;
 
 		/* Add the channel to the DMAC list */
@@ -369,6 +387,9 @@ static int __init imxdma_probe(struct platform_device *pdev)
 	imxdma->dma_device.device_issue_pending = imxdma_issue_pending;
 
 	platform_set_drvdata(pdev, imxdma);
+
+	imxdma->dma_device.dev->dma_parms = &imxdma->dma_parms;
+	dma_set_max_seg_size(imxdma->dma_device.dev, 0xffffff);
 
 	ret = dma_async_device_register(&imxdma->dma_device);
 	if (ret) {

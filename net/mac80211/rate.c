@@ -11,6 +11,7 @@
 #include <linux/kernel.h>
 #include <linux/rtnetlink.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include "rate.h"
 #include "ieee80211_i.h"
 #include "debugfs.h"
@@ -199,7 +200,7 @@ static void rate_control_release(struct kref *kref)
 	kfree(ctrl_ref);
 }
 
-static bool rc_no_data_or_no_ack(struct ieee80211_tx_rate_control *txrc)
+static bool rc_no_data_or_no_ack_use_min(struct ieee80211_tx_rate_control *txrc)
 {
 	struct sk_buff *skb = txrc->skb;
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
@@ -208,10 +209,13 @@ static bool rc_no_data_or_no_ack(struct ieee80211_tx_rate_control *txrc)
 
 	fc = hdr->frame_control;
 
-	return (info->flags & IEEE80211_TX_CTL_NO_ACK) || !ieee80211_is_data(fc);
+	return (info->flags & (IEEE80211_TX_CTL_NO_ACK |
+			       IEEE80211_TX_CTL_USE_MINRATE)) ||
+		!ieee80211_is_data(fc);
 }
 
-static void rc_send_low_broadcast(s8 *idx, u32 basic_rates, u8 max_rate_idx)
+static void rc_send_low_broadcast(s8 *idx, u32 basic_rates,
+				  struct ieee80211_supported_band *sband)
 {
 	u8 i;
 
@@ -222,7 +226,7 @@ static void rc_send_low_broadcast(s8 *idx, u32 basic_rates, u8 max_rate_idx)
 	if (basic_rates & (1 << *idx))
 		return; /* selected rate is a basic rate */
 
-	for (i = *idx + 1; i <= max_rate_idx; i++) {
+	for (i = *idx + 1; i <= sband->n_bitrates; i++) {
 		if (basic_rates & (1 << i)) {
 			*idx = i;
 			return;
@@ -232,21 +236,57 @@ static void rc_send_low_broadcast(s8 *idx, u32 basic_rates, u8 max_rate_idx)
 	/* could not find a basic rate; use original selection */
 }
 
+static inline s8
+rate_lowest_non_cck_index(struct ieee80211_supported_band *sband,
+			  struct ieee80211_sta *sta)
+{
+	int i;
+
+	for (i = 0; i < sband->n_bitrates; i++) {
+		struct ieee80211_rate *srate = &sband->bitrates[i];
+		if ((srate->bitrate == 10) || (srate->bitrate == 20) ||
+		    (srate->bitrate == 55) || (srate->bitrate == 110))
+			continue;
+
+		if (rate_supported(sta, sband->band, i))
+			return i;
+	}
+
+	/* No matching rate found */
+	return 0;
+}
+
+
 bool rate_control_send_low(struct ieee80211_sta *sta,
 			   void *priv_sta,
 			   struct ieee80211_tx_rate_control *txrc)
 {
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(txrc->skb);
+	struct ieee80211_supported_band *sband = txrc->sband;
+	int mcast_rate;
 
-	if (!sta || !priv_sta || rc_no_data_or_no_ack(txrc)) {
-		info->control.rates[0].idx = rate_lowest_index(txrc->sband, sta);
+	if (!sta || !priv_sta || rc_no_data_or_no_ack_use_min(txrc)) {
+		if ((sband->band != IEEE80211_BAND_2GHZ) ||
+		    !(info->flags & IEEE80211_TX_CTL_NO_CCK_RATE))
+			info->control.rates[0].idx =
+				rate_lowest_index(txrc->sband, sta);
+		else
+			info->control.rates[0].idx =
+				rate_lowest_non_cck_index(txrc->sband, sta);
 		info->control.rates[0].count =
 			(info->flags & IEEE80211_TX_CTL_NO_ACK) ?
 			1 : txrc->hw->max_rate_tries;
-		if (!sta && txrc->ap)
+		if (!sta && txrc->bss) {
+			mcast_rate = txrc->bss_conf->mcast_rate[sband->band];
+			if (mcast_rate > 0) {
+				info->control.rates[0].idx = mcast_rate - 1;
+				return true;
+			}
+
 			rc_send_low_broadcast(&info->control.rates[0].idx,
 					      txrc->bss_conf->basic_rates,
-					      txrc->sband->n_bitrates);
+					      sband);
+		}
 		return true;
 	}
 	return false;
@@ -296,7 +336,7 @@ void rate_control_get_rate(struct ieee80211_sub_if_data *sdata,
 	int i;
 	u32 mask;
 
-	if (sta) {
+	if (sta && test_sta_flag(sta, WLAN_STA_RATE_CONTROL)) {
 		ista = &sta->sta;
 		priv_sta = sta->rate_ctrl_priv;
 	}
@@ -304,7 +344,7 @@ void rate_control_get_rate(struct ieee80211_sub_if_data *sdata,
 	for (i = 0; i < IEEE80211_TX_MAX_RATES; i++) {
 		info->control.rates[i].idx = -1;
 		info->control.rates[i].flags = 0;
-		info->control.rates[i].count = 1;
+		info->control.rates[i].count = 0;
 	}
 
 	if (sdata->local->hw.flags & IEEE80211_HW_HAS_RATE_CONTROL)

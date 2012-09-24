@@ -41,8 +41,7 @@ nv50_dac_disconnect(struct drm_encoder *encoder)
 {
 	struct nouveau_encoder *nv_encoder = nouveau_encoder(encoder);
 	struct drm_device *dev = encoder->dev;
-	struct drm_nouveau_private *dev_priv = dev->dev_private;
-	struct nouveau_channel *evo = dev_priv->evo;
+	struct nouveau_channel *evo = nv50_display(dev)->master;
 	int ret;
 
 	if (!nv_encoder->crtc)
@@ -201,11 +200,6 @@ nv50_dac_mode_fixup(struct drm_encoder *encoder, struct drm_display_mode *mode,
 }
 
 static void
-nv50_dac_prepare(struct drm_encoder *encoder)
-{
-}
-
-static void
 nv50_dac_commit(struct drm_encoder *encoder)
 {
 }
@@ -216,8 +210,7 @@ nv50_dac_mode_set(struct drm_encoder *encoder, struct drm_display_mode *mode,
 {
 	struct nouveau_encoder *nv_encoder = nouveau_encoder(encoder);
 	struct drm_device *dev = encoder->dev;
-	struct drm_nouveau_private *dev_priv = dev->dev_private;
-	struct nouveau_channel *evo = dev_priv->evo;
+	struct nouveau_channel *evo = nv50_display(dev)->master;
 	struct nouveau_crtc *crtc = nouveau_crtc(encoder->crtc);
 	uint32_t mode_ctl = 0, mode_ctl2 = 0;
 	int ret;
@@ -268,7 +261,7 @@ static const struct drm_encoder_helper_funcs nv50_dac_helper_funcs = {
 	.save = nv50_dac_save,
 	.restore = nv50_dac_restore,
 	.mode_fixup = nv50_dac_mode_fixup,
-	.prepare = nv50_dac_prepare,
+	.prepare = nv50_dac_disconnect,
 	.commit = nv50_dac_commit,
 	.mode_set = nv50_dac_mode_set,
 	.get_crtc = nv50_dac_crtc_get,

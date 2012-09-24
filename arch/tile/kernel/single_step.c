@@ -25,9 +25,8 @@
 #include <linux/types.h>
 #include <linux/err.h>
 #include <asm/cacheflush.h>
-#include <asm/opcode-tile.h>
-#include <asm/opcode_constants.h>
 #include <arch/abi.h>
+#include <arch/opcode.h>
 
 #define signExtend17(val) sign_extend((val), 17)
 #define TILE_X1_MASK (0xffffffffULL << 31)
@@ -56,7 +55,7 @@ enum mem_op {
 	MEMOP_STORE_POSTINCR
 };
 
-static inline tile_bundle_bits set_BrOff_X1(tile_bundle_bits n, int32_t offset)
+static inline tile_bundle_bits set_BrOff_X1(tile_bundle_bits n, s32 offset)
 {
 	tile_bundle_bits result;
 
@@ -118,7 +117,7 @@ static tile_bundle_bits rewrite_load_store_unaligned(
 	int val_reg, addr_reg, err, val;
 
 	/* Get address and value registers */
-	if (bundle & TILE_BUNDLE_Y_ENCODING_MASK) {
+	if (bundle & TILEPRO_BUNDLE_Y_ENCODING_MASK) {
 		addr_reg = get_SrcA_Y2(bundle);
 		val_reg = get_SrcBDest_Y2(bundle);
 	} else if (mem_op == MEMOP_LOAD || mem_op == MEMOP_LOAD_POSTINCR) {
@@ -186,6 +185,8 @@ static tile_bundle_bits rewrite_load_store_unaligned(
 			.si_code = SEGV_MAPERR,
 			.si_addr = addr
 		};
+		trace_unhandled_signal("segfault", regs,
+				       (unsigned long)addr, SIGSEGV);
 		force_sig_info(info.si_signo, &info, current);
 		return (tile_bundle_bits) 0;
 	}
@@ -196,6 +197,8 @@ static tile_bundle_bits rewrite_load_store_unaligned(
 			.si_code = BUS_ADRALN,
 			.si_addr = addr
 		};
+		trace_unhandled_signal("unaligned trap", regs,
+				       (unsigned long)addr, SIGBUS);
 		force_sig_info(info.si_signo, &info, current);
 		return (tile_bundle_bits) 0;
 	}
@@ -225,7 +228,7 @@ P("\n");
 	}
 	++unaligned_fixup_count;
 
-	if (bundle & TILE_BUNDLE_Y_ENCODING_MASK) {
+	if (bundle & TILEPRO_BUNDLE_Y_ENCODING_MASK) {
 		/* Convert the Y2 instruction to a prefetch. */
 		bundle &= ~(create_SrcBDest_Y2(-1) |
 			    create_Opcode_Y2(-1));
@@ -252,6 +255,18 @@ P("\n");
 	}
 
 	return bundle;
+}
+
+/*
+ * Called after execve() has started the new image.  This allows us
+ * to reset the info state.  Note that the the mmap'ed memory, if there
+ * was any, has already been unmapped by the exec.
+ */
+void single_step_execve(void)
+{
+	struct thread_info *ti = current_thread_info();
+	kfree(ti->step_state);
+	ti->step_state = NULL;
 }
 
 /**
@@ -305,6 +320,14 @@ void single_step_once(struct pt_regs *regs)
 "    j .\n"
 "    .popsection\n"
 	);
+
+	/*
+	 * Enable interrupts here to allow touching userspace and the like.
+	 * The callers expect this: do_trap() already has interrupts
+	 * enabled, and do_work_pending() handles functions that enable
+	 * interrupts internally.
+	 */
+	local_irq_enable();
 
 	if (state == NULL) {
 		/* allocate a page of writable, executable memory */
@@ -365,7 +388,7 @@ void single_step_once(struct pt_regs *regs)
 	state->branch_next_pc = 0;
 	state->update = 0;
 
-	if (!(bundle & TILE_BUNDLE_Y_ENCODING_MASK)) {
+	if (!(bundle & TILEPRO_BUNDLE_Y_ENCODING_MASK)) {
 		/* two wide, check for control flow */
 		int opcode = get_Opcode_X1(bundle);
 
@@ -373,7 +396,7 @@ void single_step_once(struct pt_regs *regs)
 		/* branches */
 		case BRANCH_OPCODE_X1:
 		{
-			int32_t offset = signExtend17(get_BrOff_X1(bundle));
+			s32 offset = signExtend17(get_BrOff_X1(bundle));
 
 			/*
 			 * For branches, we use a rewriting trick to let the
@@ -729,6 +752,11 @@ void single_step_once(struct pt_regs *regs)
 	control |= SPR_SINGLE_STEP_CONTROL_1__INHIBIT_MASK;
 	__insn_mtspr(SPR_SINGLE_STEP_CONTROL_K, control);
 	__insn_mtspr(SPR_SINGLE_STEP_EN_K_K, 1 << USER_PL);
+}
+
+void single_step_execve(void)
+{
+	/* Nothing */
 }
 
 #endif /* !__tilegx__ */

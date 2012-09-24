@@ -30,19 +30,21 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/nand.h>
 #include <linux/mtd/partitions.h>
+#include <linux/mfd/davinci_aemif.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
 #include <asm/mach/flash.h>
 
-#include <mach/dm644x.h>
 #include <mach/common.h>
 #include <mach/i2c.h>
 #include <mach/serial.h>
 #include <mach/mux.h>
 #include <mach/usb.h>
 
-#define SFFSDR_PHY_ID		"0:01"
+#include "davinci.h"
+
+#define SFFSDR_PHY_ID		"davinci_mdio-0:01"
 static struct mtd_partition davinci_sffsdr_nandflash_partition[] = {
 	/* U-Boot Environment: Block 0
 	 * UBL:                Block 1
@@ -81,14 +83,31 @@ static struct resource davinci_sffsdr_nandflash_resource[] = {
 	},
 };
 
-static struct platform_device davinci_sffsdr_nandflash_device = {
-	.name		= "davinci_nand", /* Name of driver */
-	.id		= 0,
-	.dev		= {
-		.platform_data	= &davinci_sffsdr_nandflash_data,
+static struct platform_device davinci_sffsdr_emif_devices[] __initdata = {
+	{
+		.name		= "davinci_nand",
+		.id		= 0,
+
+		.resource		= davinci_sffsdr_nandflash_resource,
+		.num_resources		=
+			ARRAY_SIZE(davinci_sffsdr_nandflash_resource),
+		.dev		= {
+			.platform_data	= &davinci_sffsdr_nandflash_data,
+		},
 	},
-	.num_resources	= ARRAY_SIZE(davinci_sffsdr_nandflash_resource),
-	.resource	= davinci_sffsdr_nandflash_resource,
+};
+
+static struct davinci_aemif_devices davinci_emif_devices = {
+	.devices	= davinci_sffsdr_emif_devices,
+	.num_devices	= ARRAY_SIZE(davinci_sffsdr_emif_devices),
+};
+
+static struct platform_device davinci_emif_device = {
+	.name	= "davinci_aemif",
+	.id	= -1,
+	.dev	= {
+		.platform_data	= &davinci_emif_devices,
+	},
 };
 
 static struct at24_platform_data eeprom_info = {
@@ -121,7 +140,7 @@ static void __init sffsdr_init_i2c(void)
 }
 
 static struct platform_device *davinci_sffsdr_devices[] __initdata = {
-	&davinci_sffsdr_nandflash_device,
+	&davinci_emif_device,
 };
 
 static struct davinci_uart_config uart_config __initdata = {
@@ -151,9 +170,11 @@ static __init void davinci_sffsdr_init(void)
 
 MACHINE_START(SFFSDR, "Lyrtech SFFSDR")
 	/* Maintainer: Hugo Villeneuve hugo.villeneuve@lyrtech.com */
-	.boot_params  = (DAVINCI_DDR_BASE + 0x100),
+	.atag_offset  = 0x100,
 	.map_io	      = davinci_sffsdr_map_io,
 	.init_irq     = davinci_irq_init,
 	.timer	      = &davinci_timer,
 	.init_machine = davinci_sffsdr_init,
+	.dma_zone_size	= SZ_128M,
+	.restart	= davinci_restart,
 MACHINE_END

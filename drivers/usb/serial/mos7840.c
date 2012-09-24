@@ -263,7 +263,7 @@ struct moschip_port {
 };
 
 
-static int debug;
+static bool debug;
 
 /*
  * mos7840_set_reg_sync
@@ -791,8 +791,6 @@ static void mos7840_bulk_in_callback(struct urb *urb)
 		return;
 	}
 
-
-	mos7840_port->read_urb->dev = serial->dev;
 
 	mos7840_port->read_urb_busy = true;
 	retval = usb_submit_urb(mos7840_port->read_urb, GFP_ATOMIC);
@@ -1644,7 +1642,7 @@ static void mos7840_unthrottle(struct tty_struct *tty)
 	}
 }
 
-static int mos7840_tiocmget(struct tty_struct *tty, struct file *file)
+static int mos7840_tiocmget(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
 	struct moschip_port *mos7840_port;
@@ -1674,7 +1672,7 @@ static int mos7840_tiocmget(struct tty_struct *tty, struct file *file)
 	return result;
 }
 
-static int mos7840_tiocmset(struct tty_struct *tty, struct file *file,
+static int mos7840_tiocmset(struct tty_struct *tty,
 			    unsigned int set, unsigned int clear)
 {
 	struct usb_serial_port *port = tty->driver_data;
@@ -2058,7 +2056,6 @@ static void mos7840_change_port_settings(struct tty_struct *tty,
 	mos7840_set_uart_reg(port, INTERRUPT_ENABLE_REGISTER, Data);
 
 	if (mos7840_port->read_urb_busy == false) {
-		mos7840_port->read_urb->dev = serial->dev;
 		mos7840_port->read_urb_busy = true;
 		status = usb_submit_urb(mos7840_port->read_urb, GFP_ATOMIC);
 		if (status) {
@@ -2130,7 +2127,6 @@ static void mos7840_set_termios(struct tty_struct *tty,
 	}
 
 	if (mos7840_port->read_urb_busy == false) {
-		mos7840_port->read_urb->dev = serial->dev;
 		mos7840_port->read_urb_busy = true;
 		status = usb_submit_urb(mos7840_port->read_urb, GFP_ATOMIC);
 		if (status) {
@@ -2235,7 +2231,7 @@ static int mos7840_get_icount(struct tty_struct *tty,
  *	this function handles any ioctl calls to the driver
  *****************************************************************************/
 
-static int mos7840_ioctl(struct tty_struct *tty, struct file *file,
+static int mos7840_ioctl(struct tty_struct *tty,
 			 unsigned int cmd, unsigned long arg)
 {
 	struct usb_serial_port *port = tty->driver_data;
@@ -2263,7 +2259,6 @@ static int mos7840_ioctl(struct tty_struct *tty, struct file *file,
 	case TIOCSERGETLSR:
 		dbg("%s (%d) TIOCSERGETLSR", __func__, port->number);
 		return mos7840_get_lsr_info(tty, argp);
-		return 0;
 
 	case TIOCGSERIAL:
 		dbg("%s (%d) TIOCGSERIAL", __func__, port->number);

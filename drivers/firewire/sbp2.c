@@ -66,7 +66,7 @@
  *
  * Concurrent logins are useful together with cluster filesystems.
  */
-static int sbp2_param_exclusive_login = 1;
+static bool sbp2_param_exclusive_login = 1;
 module_param_named(exclusive_login, sbp2_param_exclusive_login, bool, 0644);
 MODULE_PARM_DESC(exclusive_login, "Exclusive login to sbp2 device "
 		 "(default = Y, use N for concurrent initiators)");
@@ -125,9 +125,6 @@ MODULE_PARM_DESC(workarounds, "Work around device bugs (default = 0"
 	", override internal blacklist = " __stringify(SBP2_WORKAROUND_OVERRIDE)
 	", or a combination)");
 
-/* I don't know why the SCSI stack doesn't define something like this... */
-typedef void (*scsi_done_fn_t)(struct scsi_cmnd *);
-
 static const char sbp2_driver_name[] = "sbp2";
 
 /*
@@ -157,12 +154,16 @@ struct sbp2_logical_unit {
 	bool blocked;
 };
 
+static void sbp2_queue_work(struct sbp2_logical_unit *lu, unsigned long delay)
+{
+	queue_delayed_work(fw_workqueue, &lu->work, delay);
+}
+
 /*
  * We create one struct sbp2_target per IEEE 1212 Unit Directory
  * and one struct Scsi_Host per sbp2_target.
  */
 struct sbp2_target {
-	struct kref kref;
 	struct fw_unit *unit;
 	const char *bus_id;
 	struct list_head lu_list;
@@ -261,7 +262,6 @@ struct sbp2_orb {
 	struct kref kref;
 	dma_addr_t request_bus;
 	int rcode;
-	struct sbp2_pointer pointer;
 	void (*callback)(struct sbp2_orb * orb, struct sbp2_status * status);
 	struct list_head link;
 };
@@ -314,7 +314,6 @@ struct sbp2_command_orb {
 		u8 command_block[SBP2_MAX_CDB_SIZE];
 	} request;
 	struct scsi_cmnd *cmd;
-	scsi_done_fn_t done;
 	struct sbp2_logical_unit *lu;
 
 	struct sbp2_pointer page_table[SG_ALL] __attribute__((aligned(8)));
@@ -472,18 +471,12 @@ static void complete_transaction(struct fw_card *card, int rcode,
 	 * So this callback only sets the rcode if it hasn't already
 	 * been set and only does the cleanup if the transaction
 	 * failed and we didn't already get a status write.
-	 *
-	 * Here we treat RCODE_CANCELLED like RCODE_COMPLETE because some
-	 * OXUF936QSE firmwares occasionally respond after Split_Timeout and
-	 * complete the ORB just fine.  Note, we also get RCODE_CANCELLED
-	 * from sbp2_cancel_orbs() if fw_cancel_transaction() == 0.
 	 */
 	spin_lock_irqsave(&card->lock, flags);
 
 	if (orb->rcode == -1)
 		orb->rcode = rcode;
-
-	if (orb->rcode != RCODE_COMPLETE && orb->rcode != RCODE_CANCELLED) {
+	if (orb->rcode != RCODE_COMPLETE) {
 		list_del(&orb->link);
 		spin_unlock_irqrestore(&card->lock, flags);
 
@@ -500,10 +493,11 @@ static void sbp2_send_orb(struct sbp2_orb *orb, struct sbp2_logical_unit *lu,
 			  int node_id, int generation, u64 offset)
 {
 	struct fw_device *device = target_device(lu->tgt);
+	struct sbp2_pointer orb_pointer;
 	unsigned long flags;
 
-	orb->pointer.high = 0;
-	orb->pointer.low = cpu_to_be32(orb->request_bus);
+	orb_pointer.high = 0;
+	orb_pointer.low = cpu_to_be32(orb->request_bus);
 
 	spin_lock_irqsave(&device->card->lock, flags);
 	list_add_tail(&orb->link, &lu->orb_list);
@@ -514,7 +508,7 @@ static void sbp2_send_orb(struct sbp2_orb *orb, struct sbp2_logical_unit *lu,
 
 	fw_send_request(device->card, &orb->t, TCODE_WRITE_BLOCK_REQUEST,
 			node_id, generation, device->max_speed, offset,
-			&orb->pointer, 8, complete_transaction, orb);
+			&orb_pointer, 8, complete_transaction, orb);
 }
 
 static int sbp2_cancel_orbs(struct sbp2_logical_unit *lu)
@@ -532,7 +526,8 @@ static int sbp2_cancel_orbs(struct sbp2_logical_unit *lu)
 
 	list_for_each_entry_safe(orb, next, &list, link) {
 		retval = 0;
-		fw_cancel_transaction(device->card, &orb->t);
+		if (fw_cancel_transaction(device->card, &orb->t) == 0)
+			continue;
 
 		orb->rcode = RCODE_CANCELLED;
 		orb->callback(orb, NULL);
@@ -781,73 +776,6 @@ static int sbp2_lun2int(u16 lun)
 	return scsilun_to_int(&eight_bytes_lun);
 }
 
-static void sbp2_release_target(struct kref *kref)
-{
-	struct sbp2_target *tgt = container_of(kref, struct sbp2_target, kref);
-	struct sbp2_logical_unit *lu, *next;
-	struct Scsi_Host *shost =
-		container_of((void *)tgt, struct Scsi_Host, hostdata[0]);
-	struct scsi_device *sdev;
-	struct fw_device *device = target_device(tgt);
-
-	/* prevent deadlocks */
-	sbp2_unblock(tgt);
-
-	list_for_each_entry_safe(lu, next, &tgt->lu_list, link) {
-		sdev = scsi_device_lookup(shost, 0, 0, sbp2_lun2int(lu->lun));
-		if (sdev) {
-			scsi_remove_device(sdev);
-			scsi_device_put(sdev);
-		}
-		if (lu->login_id != INVALID_LOGIN_ID) {
-			int generation, node_id;
-			/*
-			 * tgt->node_id may be obsolete here if we failed
-			 * during initial login or after a bus reset where
-			 * the topology changed.
-			 */
-			generation = device->generation;
-			smp_rmb(); /* node_id vs. generation */
-			node_id    = device->node_id;
-			sbp2_send_management_orb(lu, node_id, generation,
-						 SBP2_LOGOUT_REQUEST,
-						 lu->login_id, NULL);
-		}
-		fw_core_remove_address_handler(&lu->address_handler);
-		list_del(&lu->link);
-		kfree(lu);
-	}
-	scsi_remove_host(shost);
-	fw_notify("released %s, target %d:0:0\n", tgt->bus_id, shost->host_no);
-
-	fw_unit_put(tgt->unit);
-	scsi_host_put(shost);
-	fw_device_put(device);
-}
-
-static void sbp2_target_get(struct sbp2_target *tgt)
-{
-	kref_get(&tgt->kref);
-}
-
-static void sbp2_target_put(struct sbp2_target *tgt)
-{
-	kref_put(&tgt->kref, sbp2_release_target);
-}
-
-static struct workqueue_struct *sbp2_wq;
-
-/*
- * Always get the target's kref when scheduling work on one its units.
- * Each workqueue job is responsible to call sbp2_target_put() upon return.
- */
-static void sbp2_queue_work(struct sbp2_logical_unit *lu, unsigned long delay)
-{
-	sbp2_target_get(lu->tgt);
-	if (!queue_delayed_work(sbp2_wq, &lu->work, delay))
-		sbp2_target_put(lu->tgt);
-}
-
 /*
  * Write retransmit retry values into the BUSY_TIMEOUT register.
  * - The single-phase retry protocol is supported by all SBP-2 devices, but the
@@ -888,7 +816,7 @@ static void sbp2_login(struct work_struct *work)
 	int generation, node_id, local_node_id;
 
 	if (fw_device_is_shutdown(device))
-		goto out;
+		return;
 
 	generation    = device->generation;
 	smp_rmb();    /* node IDs must not be older than generation */
@@ -910,7 +838,7 @@ static void sbp2_login(struct work_struct *work)
 			/* Let any waiting I/O fail from now on. */
 			sbp2_unblock(lu->tgt);
 		}
-		goto out;
+		return;
 	}
 
 	tgt->node_id	  = node_id;
@@ -936,7 +864,8 @@ static void sbp2_login(struct work_struct *work)
 	if (lu->has_sdev) {
 		sbp2_cancel_orbs(lu);
 		sbp2_conditionally_unblock(lu);
-		goto out;
+
+		return;
 	}
 
 	if (lu->tgt->workarounds & SBP2_WORKAROUND_DELAY_INQUIRY)
@@ -968,7 +897,8 @@ static void sbp2_login(struct work_struct *work)
 	lu->has_sdev = true;
 	scsi_device_put(sdev);
 	sbp2_allow_block(lu);
-	goto out;
+
+	return;
 
  out_logout_login:
 	smp_rmb(); /* generation may have changed */
@@ -982,8 +912,57 @@ static void sbp2_login(struct work_struct *work)
 	 * lu->work already.  Reset the work from reconnect to login.
 	 */
 	PREPARE_DELAYED_WORK(&lu->work, sbp2_login);
- out:
-	sbp2_target_put(tgt);
+}
+
+static void sbp2_reconnect(struct work_struct *work)
+{
+	struct sbp2_logical_unit *lu =
+		container_of(work, struct sbp2_logical_unit, work.work);
+	struct sbp2_target *tgt = lu->tgt;
+	struct fw_device *device = target_device(tgt);
+	int generation, node_id, local_node_id;
+
+	if (fw_device_is_shutdown(device))
+		return;
+
+	generation    = device->generation;
+	smp_rmb();    /* node IDs must not be older than generation */
+	node_id       = device->node_id;
+	local_node_id = device->card->node_id;
+
+	if (sbp2_send_management_orb(lu, node_id, generation,
+				     SBP2_RECONNECT_REQUEST,
+				     lu->login_id, NULL) < 0) {
+		/*
+		 * If reconnect was impossible even though we are in the
+		 * current generation, fall back and try to log in again.
+		 *
+		 * We could check for "Function rejected" status, but
+		 * looking at the bus generation as simpler and more general.
+		 */
+		smp_rmb(); /* get current card generation */
+		if (generation == device->card->generation ||
+		    lu->retries++ >= 5) {
+			fw_error("%s: failed to reconnect\n", tgt->bus_id);
+			lu->retries = 0;
+			PREPARE_DELAYED_WORK(&lu->work, sbp2_login);
+		}
+		sbp2_queue_work(lu, DIV_ROUND_UP(HZ, 5));
+
+		return;
+	}
+
+	tgt->node_id      = node_id;
+	tgt->address_high = local_node_id << 16;
+	smp_wmb();	  /* node IDs must not be older than generation */
+	lu->generation	  = generation;
+
+	fw_notify("%s: reconnected to LUN %04x (%d retries)\n",
+		  tgt->bus_id, lu->lun, lu->retries);
+
+	sbp2_agent_reset(lu);
+	sbp2_cancel_orbs(lu);
+	sbp2_conditionally_unblock(lu);
 }
 
 static int sbp2_add_logical_unit(struct sbp2_target *tgt, int lun_entry)
@@ -1131,6 +1110,7 @@ static void sbp2_init_workarounds(struct sbp2_target *tgt, u32 model,
 }
 
 static struct scsi_host_template scsi_driver_template;
+static int sbp2_remove(struct device *dev);
 
 static int sbp2_probe(struct device *dev)
 {
@@ -1152,7 +1132,6 @@ static int sbp2_probe(struct device *dev)
 	tgt = (struct sbp2_target *)shost->hostdata;
 	dev_set_drvdata(&unit->device, tgt);
 	tgt->unit = unit;
-	kref_init(&tgt->kref);
 	INIT_LIST_HEAD(&tgt->lu_list);
 	tgt->bus_id = dev_name(&unit->device);
 	tgt->guid = (u64)device->config_rom[3] << 32 | device->config_rom[4];
@@ -1165,9 +1144,6 @@ static int sbp2_probe(struct device *dev)
 	if (scsi_add_host(shost, &unit->device) < 0)
 		goto fail_shost_put;
 
-	fw_device_get(device);
-	fw_unit_get(unit);
-
 	/* implicit directory ID */
 	tgt->directory_id = ((unit->directory - device->config_rom) * 4
 			     + CSR_CONFIG_ROM) & 0xffffff;
@@ -1177,7 +1153,7 @@ static int sbp2_probe(struct device *dev)
 
 	if (sbp2_scan_unit_dir(tgt, unit->directory, &model,
 			       &firmware_revision) < 0)
-		goto fail_tgt_put;
+		goto fail_remove;
 
 	sbp2_clamp_management_orb_timeout(tgt);
 	sbp2_init_workarounds(tgt, model, firmware_revision);
@@ -1188,82 +1164,22 @@ static int sbp2_probe(struct device *dev)
 	 * specifies the max payload size as 2 ^ (max_payload + 2), so
 	 * if we set this to max_speed + 7, we get the right value.
 	 */
-	tgt->max_payload = min(device->max_speed + 7, 10U);
-	tgt->max_payload = min(tgt->max_payload, device->card->max_receive - 1);
+	tgt->max_payload = min3(device->max_speed + 7, 10U,
+				device->card->max_receive - 1);
 
 	/* Do the login in a workqueue so we can easily reschedule retries. */
 	list_for_each_entry(lu, &tgt->lu_list, link)
 		sbp2_queue_work(lu, DIV_ROUND_UP(HZ, 5));
+
 	return 0;
 
- fail_tgt_put:
-	sbp2_target_put(tgt);
+ fail_remove:
+	sbp2_remove(dev);
 	return -ENOMEM;
 
  fail_shost_put:
 	scsi_host_put(shost);
 	return -ENOMEM;
-}
-
-static int sbp2_remove(struct device *dev)
-{
-	struct fw_unit *unit = fw_unit(dev);
-	struct sbp2_target *tgt = dev_get_drvdata(&unit->device);
-
-	sbp2_target_put(tgt);
-	return 0;
-}
-
-static void sbp2_reconnect(struct work_struct *work)
-{
-	struct sbp2_logical_unit *lu =
-		container_of(work, struct sbp2_logical_unit, work.work);
-	struct sbp2_target *tgt = lu->tgt;
-	struct fw_device *device = target_device(tgt);
-	int generation, node_id, local_node_id;
-
-	if (fw_device_is_shutdown(device))
-		goto out;
-
-	generation    = device->generation;
-	smp_rmb();    /* node IDs must not be older than generation */
-	node_id       = device->node_id;
-	local_node_id = device->card->node_id;
-
-	if (sbp2_send_management_orb(lu, node_id, generation,
-				     SBP2_RECONNECT_REQUEST,
-				     lu->login_id, NULL) < 0) {
-		/*
-		 * If reconnect was impossible even though we are in the
-		 * current generation, fall back and try to log in again.
-		 *
-		 * We could check for "Function rejected" status, but
-		 * looking at the bus generation as simpler and more general.
-		 */
-		smp_rmb(); /* get current card generation */
-		if (generation == device->card->generation ||
-		    lu->retries++ >= 5) {
-			fw_error("%s: failed to reconnect\n", tgt->bus_id);
-			lu->retries = 0;
-			PREPARE_DELAYED_WORK(&lu->work, sbp2_login);
-		}
-		sbp2_queue_work(lu, DIV_ROUND_UP(HZ, 5));
-		goto out;
-	}
-
-	tgt->node_id      = node_id;
-	tgt->address_high = local_node_id << 16;
-	smp_wmb();	  /* node IDs must not be older than generation */
-	lu->generation	  = generation;
-
-	fw_notify("%s: reconnected to LUN %04x (%d retries)\n",
-		  tgt->bus_id, lu->lun, lu->retries);
-
-	sbp2_agent_reset(lu);
-	sbp2_cancel_orbs(lu);
-	sbp2_conditionally_unblock(lu);
- out:
-	sbp2_target_put(tgt);
 }
 
 static void sbp2_update(struct fw_unit *unit)
@@ -1282,6 +1198,51 @@ static void sbp2_update(struct fw_unit *unit)
 		lu->retries = 0;
 		sbp2_queue_work(lu, 0);
 	}
+}
+
+static int sbp2_remove(struct device *dev)
+{
+	struct fw_unit *unit = fw_unit(dev);
+	struct fw_device *device = fw_parent_device(unit);
+	struct sbp2_target *tgt = dev_get_drvdata(&unit->device);
+	struct sbp2_logical_unit *lu, *next;
+	struct Scsi_Host *shost =
+		container_of((void *)tgt, struct Scsi_Host, hostdata[0]);
+	struct scsi_device *sdev;
+
+	/* prevent deadlocks */
+	sbp2_unblock(tgt);
+
+	list_for_each_entry_safe(lu, next, &tgt->lu_list, link) {
+		cancel_delayed_work_sync(&lu->work);
+		sdev = scsi_device_lookup(shost, 0, 0, sbp2_lun2int(lu->lun));
+		if (sdev) {
+			scsi_remove_device(sdev);
+			scsi_device_put(sdev);
+		}
+		if (lu->login_id != INVALID_LOGIN_ID) {
+			int generation, node_id;
+			/*
+			 * tgt->node_id may be obsolete here if we failed
+			 * during initial login or after a bus reset where
+			 * the topology changed.
+			 */
+			generation = device->generation;
+			smp_rmb(); /* node_id vs. generation */
+			node_id    = device->node_id;
+			sbp2_send_management_orb(lu, node_id, generation,
+						 SBP2_LOGOUT_REQUEST,
+						 lu->login_id, NULL);
+		}
+		fw_core_remove_address_handler(&lu->address_handler);
+		list_del(&lu->link);
+		kfree(lu);
+	}
+	scsi_remove_host(shost);
+	fw_notify("released %s, target %d:0:0\n", tgt->bus_id, shost->host_no);
+
+	scsi_host_put(shost);
+	return 0;
 }
 
 #define SBP2_UNIT_SPEC_ID_ENTRY	0x0000609e
@@ -1403,7 +1364,7 @@ static void complete_command_orb(struct sbp2_orb *base_orb,
 	sbp2_unmap_scatterlist(device->card->device, orb);
 
 	orb->cmd->result = result;
-	orb->done(orb->cmd);
+	orb->cmd->scsi_done(orb->cmd);
 }
 
 static int sbp2_map_scatterlist(struct sbp2_command_orb *orb,
@@ -1468,7 +1429,8 @@ static int sbp2_map_scatterlist(struct sbp2_command_orb *orb,
 
 /* SCSI stack integration */
 
-static int sbp2_scsi_queuecommand_lck(struct scsi_cmnd *cmd, scsi_done_fn_t done)
+static int sbp2_scsi_queuecommand(struct Scsi_Host *shost,
+				  struct scsi_cmnd *cmd)
 {
 	struct sbp2_logical_unit *lu = cmd->device->hostdata;
 	struct fw_device *device = target_device(lu->tgt);
@@ -1482,7 +1444,7 @@ static int sbp2_scsi_queuecommand_lck(struct scsi_cmnd *cmd, scsi_done_fn_t done
 	if (cmd->sc_data_direction == DMA_BIDIRECTIONAL) {
 		fw_error("Can't handle DMA_BIDIRECTIONAL, rejecting command\n");
 		cmd->result = DID_ERROR << 16;
-		done(cmd);
+		cmd->scsi_done(cmd);
 		return 0;
 	}
 
@@ -1495,11 +1457,8 @@ static int sbp2_scsi_queuecommand_lck(struct scsi_cmnd *cmd, scsi_done_fn_t done
 	/* Initialize rcode to something not RCODE_COMPLETE. */
 	orb->base.rcode = -1;
 	kref_init(&orb->base.kref);
-
-	orb->lu   = lu;
-	orb->done = done;
-	orb->cmd  = cmd;
-
+	orb->lu = lu;
+	orb->cmd = cmd;
 	orb->request.next.high = cpu_to_be32(SBP2_ORB_NULL);
 	orb->request.misc = cpu_to_be32(
 		COMMAND_ORB_MAX_PAYLOAD(lu->tgt->max_payload) |
@@ -1533,8 +1492,6 @@ static int sbp2_scsi_queuecommand_lck(struct scsi_cmnd *cmd, scsi_done_fn_t done
 	kref_put(&orb->base.kref, free_orb);
 	return retval;
 }
-
-static DEF_SCSI_QCMD(sbp2_scsi_queuecommand)
 
 static int sbp2_scsi_slave_alloc(struct scsi_device *sdev)
 {
@@ -1658,17 +1615,12 @@ MODULE_ALIAS("sbp2");
 
 static int __init sbp2_init(void)
 {
-	sbp2_wq = create_singlethread_workqueue(KBUILD_MODNAME);
-	if (!sbp2_wq)
-		return -ENOMEM;
-
 	return driver_register(&sbp2_driver.driver);
 }
 
 static void __exit sbp2_cleanup(void)
 {
 	driver_unregister(&sbp2_driver.driver);
-	destroy_workqueue(sbp2_wq);
 }
 
 module_init(sbp2_init);

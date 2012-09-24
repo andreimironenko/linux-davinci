@@ -1,6 +1,4 @@
 /*
- *  linux/drivers/char/tty_ioctl.c
- *
  *  Copyright (C) 1991, 1992, 1993, 1994  Linus Torvalds
  *
  * Modified by Fred N. van Kempen, 01/29/93, to add line disciplines
@@ -21,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/bitops.h>
 #include <linux/mutex.h>
+#include <linux/compat.h>
 
 #include <asm/io.h>
 #include <asm/uaccess.h>
@@ -247,7 +246,7 @@ speed_t tty_termios_baud_rate(struct ktermios *termios)
 	cbaud = termios->c_cflag & CBAUD;
 
 #ifdef BOTHER
-	/* Magic token for arbitary speed via c_ispeed/c_ospeed */
+	/* Magic token for arbitrary speed via c_ispeed/c_ospeed */
 	if (cbaud == BOTHER)
 		return termios->c_ospeed;
 #endif
@@ -283,7 +282,7 @@ speed_t tty_termios_input_baud_rate(struct ktermios *termios)
 	if (cbaud == B0)
 		return tty_termios_baud_rate(termios);
 
-	/* Magic token for arbitary speed via c_ispeed*/
+	/* Magic token for arbitrary speed via c_ispeed*/
 	if (cbaud == BOTHER)
 		return termios->c_ispeed;
 
@@ -309,7 +308,7 @@ EXPORT_SYMBOL(tty_termios_input_baud_rate);
  *	@ospeed: output speed
  *
  *	Encode the speeds set into the passed termios structure. This is
- *	used as a library helper for drivers os that they can report back
+ *	used as a library helper for drivers so that they can report back
  *	the actual speed selected when it differs from the speed requested
  *
  *	For maximal back compatibility with legacy SYS5/POSIX *nix behaviour
@@ -449,7 +448,7 @@ EXPORT_SYMBOL(tty_get_baud_rate);
  *	@new: New termios
  *	@old: Old termios
  *
- *	Propogate the hardware specific terminal setting bits from
+ *	Propagate the hardware specific terminal setting bits from
  *	the old termios structure to the new one. This is used in cases
  *	where the hardware does not support reconfiguration or as a helper
  *	in some cases where only minimal reconfiguration is supported
@@ -486,7 +485,7 @@ int tty_termios_hw_change(struct ktermios *a, struct ktermios *b)
 EXPORT_SYMBOL(tty_termios_hw_change);
 
 /**
- *	change_termios		-	update termios values
+ *	tty_set_termios		-	update termios values
  *	@tty: tty to update
  *	@new_termios: desired new value
  *
@@ -497,7 +496,7 @@ EXPORT_SYMBOL(tty_termios_hw_change);
  *	Locking: termios_mutex
  */
 
-static void change_termios(struct tty_struct *tty, struct ktermios *new_termios)
+int tty_set_termios(struct tty_struct *tty, struct ktermios *new_termios)
 {
 	struct ktermios old_termios;
 	struct tty_ldisc *ld;
@@ -553,7 +552,9 @@ static void change_termios(struct tty_struct *tty, struct ktermios *new_termios)
 		tty_ldisc_deref(ld);
 	}
 	mutex_unlock(&tty->termios_mutex);
+	return 0;
 }
+EXPORT_SYMBOL_GPL(tty_set_termios);
 
 /**
  *	set_termios		-	set termios values for a tty
@@ -562,7 +563,7 @@ static void change_termios(struct tty_struct *tty, struct ktermios *new_termios)
  *	@opt: option information
  *
  *	Helper function to prepare termios data and run necessary other
- *	functions before using change_termios to do the actual changes.
+ *	functions before using tty_set_termios to do the actual changes.
  *
  *	Locking:
  *		Called functions take ldisc and termios_mutex locks
@@ -620,7 +621,7 @@ static int set_termios(struct tty_struct *tty, void __user *arg, int opt)
 			return -EINTR;
 	}
 
-	change_termios(tty, &tmp_termios);
+	tty_set_termios(tty, &tmp_termios);
 
 	/* FIXME: Arguably if tmp_termios == tty->termios AND the
 	   actual requested termios was not tmp_termios then we may
@@ -797,7 +798,7 @@ static int set_sgttyb(struct tty_struct *tty, struct sgttyb __user *sgttyb)
 						termios.c_ospeed);
 #endif
 	mutex_unlock(&tty->termios_mutex);
-	change_termios(tty, &termios);
+	tty_set_termios(tty, &termios);
 	return 0;
 }
 #endif
@@ -950,6 +951,8 @@ int tty_mode_ioctl(struct tty_struct *tty, struct file *file,
 	void __user *p = (void __user *)arg;
 	int ret = 0;
 	struct ktermios kterm;
+
+	BUG_ON(file == NULL);
 
 	if (tty->driver->type == TTY_DRIVER_TYPE_PTY &&
 	    tty->driver->subtype == PTY_TYPE_MASTER)
@@ -1177,3 +1180,19 @@ int n_tty_ioctl_helper(struct tty_struct *tty, struct file *file,
 	}
 }
 EXPORT_SYMBOL(n_tty_ioctl_helper);
+
+#ifdef CONFIG_COMPAT
+long n_tty_compat_ioctl_helper(struct tty_struct *tty, struct file *file,
+					unsigned int cmd, unsigned long arg)
+{
+	switch (cmd) {
+	case TIOCGLCKTRMIOS:
+	case TIOCSLCKTRMIOS:
+		return tty_mode_ioctl(tty, file, cmd, (unsigned long) compat_ptr(arg));
+	default:
+		return -ENOIOCTLCMD;
+	}
+}
+EXPORT_SYMBOL(n_tty_compat_ioctl_helper);
+#endif
+

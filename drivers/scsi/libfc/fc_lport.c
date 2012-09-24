@@ -52,7 +52,7 @@
  * while making the callback. To ensure that the rport is not free'd while
  * processing the callback the rport callbacks are serialized through a
  * single-threaded workqueue. An rport would never be free'd while in a
- * callback handler becuase no other rport work in this queue can be executed
+ * callback handler because no other rport work in this queue can be executed
  * at the same time.
  *
  * When discovery succeeds or fails a callback is made to the lport as
@@ -88,6 +88,8 @@
  */
 
 #include <linux/timer.h>
+#include <linux/delay.h>
+#include <linux/module.h>
 #include <linux/slab.h>
 #include <asm/unaligned.h>
 
@@ -163,7 +165,7 @@ static int fc_frame_drop(struct fc_lport *lport, struct fc_frame *fp)
  * fc_lport_rport_callback() - Event handler for rport events
  * @lport: The lport which is receiving the event
  * @rdata: private remote port data
- * @event: The event that occured
+ * @event: The event that occurred
  *
  * Locking Note: The rport lock should not be held when calling
  *		 this function.
@@ -288,6 +290,8 @@ struct fc_host_statistics *fc_get_host_stats(struct Scsi_Host *shost)
 	struct fc_lport *lport = shost_priv(shost);
 	struct timespec v0, v1;
 	unsigned int cpu;
+	u64 fcp_in_bytes = 0;
+	u64 fcp_out_bytes = 0;
 
 	fcoe_stats = &lport->host_stats;
 	memset(fcoe_stats, 0, sizeof(struct fc_host_statistics));
@@ -310,10 +314,12 @@ struct fc_host_statistics *fc_get_host_stats(struct Scsi_Host *shost)
 		fcoe_stats->fcp_input_requests += stats->InputRequests;
 		fcoe_stats->fcp_output_requests += stats->OutputRequests;
 		fcoe_stats->fcp_control_requests += stats->ControlRequests;
-		fcoe_stats->fcp_input_megabytes += stats->InputMegabytes;
-		fcoe_stats->fcp_output_megabytes += stats->OutputMegabytes;
+		fcp_in_bytes += stats->InputBytes;
+		fcp_out_bytes += stats->OutputBytes;
 		fcoe_stats->link_failure_count += stats->LinkFailureCount;
 	}
+	fcoe_stats->fcp_input_megabytes = div_u64(fcp_in_bytes, 1000000);
+	fcoe_stats->fcp_output_megabytes = div_u64(fcp_out_bytes, 1000000);
 	fcoe_stats->lip_count = -1;
 	fcoe_stats->nos_count = -1;
 	fcoe_stats->loss_of_sync_count = -1;
@@ -375,7 +381,7 @@ static void fc_lport_add_fc4_type(struct fc_lport *lport, enum fc_fh_type type)
 
 /**
  * fc_lport_recv_rlir_req() - Handle received Registered Link Incident Report.
- * @lport: Fibre Channel local port recieving the RLIR
+ * @lport: Fibre Channel local port receiving the RLIR
  * @fp:	   The RLIR request frame
  *
  * Locking Note: The lport lock is expected to be held before calling
@@ -392,7 +398,7 @@ static void fc_lport_recv_rlir_req(struct fc_lport *lport, struct fc_frame *fp)
 
 /**
  * fc_lport_recv_echo_req() - Handle received ECHO request
- * @lport: The local port recieving the ECHO
+ * @lport: The local port receiving the ECHO
  * @fp:	   ECHO request frame
  *
  * Locking Note: The lport lock is expected to be held before calling
@@ -428,7 +434,7 @@ static void fc_lport_recv_echo_req(struct fc_lport *lport,
 
 /**
  * fc_lport_recv_rnid_req() - Handle received Request Node ID data request
- * @lport: The local port recieving the RNID
+ * @lport: The local port receiving the RNID
  * @fp:	   The RNID request frame
  *
  * Locking Note: The lport lock is expected to be held before calling
@@ -487,7 +493,7 @@ static void fc_lport_recv_rnid_req(struct fc_lport *lport,
 
 /**
  * fc_lport_recv_logo_req() - Handle received fabric LOGO request
- * @lport: The local port recieving the LOGO
+ * @lport: The local port receiving the LOGO
  * @fp:	   The LOGO request frame
  *
  * Locking Note: The lport lock is exected to be held before calling
@@ -629,6 +635,7 @@ int fc_lport_destroy(struct fc_lport *lport)
 	lport->tt.fcp_abort_io(lport);
 	lport->tt.disc_stop_final(lport);
 	lport->tt.exch_mgr_reset(lport, 0, 0);
+	fc_fc4_del_lport(lport);
 	return 0;
 }
 EXPORT_SYMBOL(fc_lport_destroy);
@@ -670,7 +677,8 @@ EXPORT_SYMBOL(fc_set_mfs);
  * @lport: The local port receiving the event
  * @event: The discovery event
  */
-void fc_lport_disc_callback(struct fc_lport *lport, enum fc_disc_event event)
+static void fc_lport_disc_callback(struct fc_lport *lport,
+				   enum fc_disc_event event)
 {
 	switch (event) {
 	case DISC_EV_SUCCESS:
@@ -766,7 +774,7 @@ EXPORT_SYMBOL(fc_lport_set_local_id);
 
 /**
  * fc_lport_recv_flogi_req() - Receive a FLOGI request
- * @lport: The local port that recieved the request
+ * @lport: The local port that received the request
  * @rx_fp: The FLOGI frame
  *
  * A received FLOGI request indicates a point-to-point connection.
@@ -845,7 +853,7 @@ out:
 }
 
 /**
- * fc_lport_recv_req() - The generic lport request handler
+ * fc_lport_recv_els_req() - The generic lport ELS request handler
  * @lport: The local port that received the request
  * @fp:	   The request frame
  *
@@ -853,11 +861,11 @@ out:
  * if an rport should handle the request.
  *
  * Locking Note: This function should not be called with the lport
- *		 lock held becuase it will grab the lock.
+ *		 lock held because it will grab the lock.
  */
-static void fc_lport_recv_req(struct fc_lport *lport, struct fc_frame *fp)
+static void fc_lport_recv_els_req(struct fc_lport *lport,
+				  struct fc_frame *fp)
 {
-	struct fc_frame_header *fh = fc_frame_header_get(fp);
 	void (*recv)(struct fc_lport *, struct fc_frame *);
 
 	mutex_lock(&lport->lp_mutex);
@@ -869,8 +877,7 @@ static void fc_lport_recv_req(struct fc_lport *lport, struct fc_frame *fp)
 	 */
 	if (!lport->link_up)
 		fc_frame_free(fp);
-	else if (fh->fh_type == FC_TYPE_ELS &&
-		 fh->fh_r_ctl == FC_RCTL_ELS_REQ) {
+	else {
 		/*
 		 * Check opcode.
 		 */
@@ -899,12 +906,60 @@ static void fc_lport_recv_req(struct fc_lport *lport, struct fc_frame *fp)
 		}
 
 		recv(lport, fp);
-	} else {
-		FC_LPORT_DBG(lport, "dropping invalid frame (eof %x)\n",
-			     fr_eof(fp));
-		fc_frame_free(fp);
 	}
 	mutex_unlock(&lport->lp_mutex);
+}
+
+static int fc_lport_els_prli(struct fc_rport_priv *rdata, u32 spp_len,
+			     const struct fc_els_spp *spp_in,
+			     struct fc_els_spp *spp_out)
+{
+	return FC_SPP_RESP_INVL;
+}
+
+struct fc4_prov fc_lport_els_prov = {
+	.prli = fc_lport_els_prli,
+	.recv = fc_lport_recv_els_req,
+};
+
+/**
+ * fc_lport_recv_req() - The generic lport request handler
+ * @lport: The lport that received the request
+ * @fp: The frame the request is in
+ *
+ * Locking Note: This function should not be called with the lport
+ *		 lock held because it may grab the lock.
+ */
+static void fc_lport_recv_req(struct fc_lport *lport,
+			      struct fc_frame *fp)
+{
+	struct fc_frame_header *fh = fc_frame_header_get(fp);
+	struct fc_seq *sp = fr_seq(fp);
+	struct fc4_prov *prov;
+
+	/*
+	 * Use RCU read lock and module_lock to be sure module doesn't
+	 * deregister and get unloaded while we're calling it.
+	 * try_module_get() is inlined and accepts a NULL parameter.
+	 * Only ELSes and FCP target ops should come through here.
+	 * The locking is unfortunate, and a better scheme is being sought.
+	 */
+
+	rcu_read_lock();
+	if (fh->fh_type >= FC_FC4_PROV_SIZE)
+		goto drop;
+	prov = rcu_dereference(fc_passive_prov[fh->fh_type]);
+	if (!prov || !try_module_get(prov->module))
+		goto drop;
+	rcu_read_unlock();
+	prov->recv(lport, fp);
+	module_put(prov->module);
+	return;
+drop:
+	rcu_read_unlock();
+	FC_LPORT_DBG(lport, "dropping unexpected frame type %x\n", fh->fh_type);
+	fc_frame_free(fp);
+	lport->tt.exch_done(sp);
 }
 
 /**
@@ -973,6 +1028,8 @@ static void fc_lport_enter_reset(struct fc_lport *lport)
 			fc_vport_set_state(lport->vport, FC_VPORT_LINKDOWN);
 	}
 	fc_lport_state_enter(lport, LPORT_ST_RESET);
+	fc_host_post_event(lport->host, fc_get_event_number(),
+			   FCH_EVT_LIPRESET, 0);
 	fc_vports_linkchange(lport);
 	fc_lport_reset_locked(lport);
 	if (lport->link_up)
@@ -1298,7 +1355,6 @@ static void fc_lport_timeout(struct work_struct *work)
 		WARN_ON(1);
 		break;
 	case LPORT_ST_READY:
-		WARN_ON(1);
 		break;
 	case LPORT_ST_RESET:
 		break;
@@ -1419,6 +1475,7 @@ void fc_lport_flogi_resp(struct fc_seq *sp, struct fc_frame *fp,
 			 void *lp_arg)
 {
 	struct fc_lport *lport = lp_arg;
+	struct fc_frame_header *fh;
 	struct fc_els_flogi *flp;
 	u32 did;
 	u16 csp_flags;
@@ -1446,49 +1503,56 @@ void fc_lport_flogi_resp(struct fc_seq *sp, struct fc_frame *fp,
 		goto err;
 	}
 
+	fh = fc_frame_header_get(fp);
 	did = fc_frame_did(fp);
-	if (fc_frame_payload_op(fp) == ELS_LS_ACC && did) {
-		flp = fc_frame_payload_get(fp, sizeof(*flp));
-		if (flp) {
-			mfs = ntohs(flp->fl_csp.sp_bb_data) &
-				FC_SP_BB_DATA_MASK;
-			if (mfs >= FC_SP_MIN_MAX_PAYLOAD &&
-			    mfs < lport->mfs)
-				lport->mfs = mfs;
-			csp_flags = ntohs(flp->fl_csp.sp_features);
-			r_a_tov = ntohl(flp->fl_csp.sp_r_a_tov);
-			e_d_tov = ntohl(flp->fl_csp.sp_e_d_tov);
-			if (csp_flags & FC_SP_FT_EDTR)
-				e_d_tov /= 1000000;
-
-			lport->npiv_enabled = !!(csp_flags & FC_SP_FT_NPIV_ACC);
-
-			if ((csp_flags & FC_SP_FT_FPORT) == 0) {
-				if (e_d_tov > lport->e_d_tov)
-					lport->e_d_tov = e_d_tov;
-				lport->r_a_tov = 2 * e_d_tov;
-				fc_lport_set_port_id(lport, did, fp);
-				printk(KERN_INFO "host%d: libfc: "
-				       "Port (%6.6x) entered "
-				       "point-to-point mode\n",
-				       lport->host->host_no, did);
-				fc_lport_ptp_setup(lport, fc_frame_sid(fp),
-						   get_unaligned_be64(
-							   &flp->fl_wwpn),
-						   get_unaligned_be64(
-							   &flp->fl_wwnn));
-			} else {
-				lport->e_d_tov = e_d_tov;
-				lport->r_a_tov = r_a_tov;
-				fc_host_fabric_name(lport->host) =
-					get_unaligned_be64(&flp->fl_wwnn);
-				fc_lport_set_port_id(lport, did, fp);
-				fc_lport_enter_dns(lport);
-			}
-		}
-	} else {
-		FC_LPORT_DBG(lport, "FLOGI RJT or bad response\n");
+	if (fh->fh_r_ctl != FC_RCTL_ELS_REP || did == 0 ||
+	    fc_frame_payload_op(fp) != ELS_LS_ACC) {
+		FC_LPORT_DBG(lport, "FLOGI not accepted or bad response\n");
 		fc_lport_error(lport, fp);
+		goto err;
+	}
+
+	flp = fc_frame_payload_get(fp, sizeof(*flp));
+	if (!flp) {
+		FC_LPORT_DBG(lport, "FLOGI bad response\n");
+		fc_lport_error(lport, fp);
+		goto err;
+	}
+
+	mfs = ntohs(flp->fl_csp.sp_bb_data) &
+		FC_SP_BB_DATA_MASK;
+	if (mfs >= FC_SP_MIN_MAX_PAYLOAD &&
+	    mfs < lport->mfs)
+		lport->mfs = mfs;
+	csp_flags = ntohs(flp->fl_csp.sp_features);
+	r_a_tov = ntohl(flp->fl_csp.sp_r_a_tov);
+	e_d_tov = ntohl(flp->fl_csp.sp_e_d_tov);
+	if (csp_flags & FC_SP_FT_EDTR)
+		e_d_tov /= 1000000;
+
+	lport->npiv_enabled = !!(csp_flags & FC_SP_FT_NPIV_ACC);
+
+	if ((csp_flags & FC_SP_FT_FPORT) == 0) {
+		if (e_d_tov > lport->e_d_tov)
+			lport->e_d_tov = e_d_tov;
+		lport->r_a_tov = 2 * e_d_tov;
+		fc_lport_set_port_id(lport, did, fp);
+		printk(KERN_INFO "host%d: libfc: "
+		       "Port (%6.6x) entered "
+		       "point-to-point mode\n",
+		       lport->host->host_no, did);
+		fc_lport_ptp_setup(lport, fc_frame_sid(fp),
+				   get_unaligned_be64(
+					   &flp->fl_wwpn),
+				   get_unaligned_be64(
+					   &flp->fl_wwnn));
+	} else {
+		lport->e_d_tov = e_d_tov;
+		lport->r_a_tov = r_a_tov;
+		fc_host_fabric_name(lport->host) =
+			get_unaligned_be64(&flp->fl_wwnn);
+		fc_lport_set_port_id(lport, did, fp);
+		fc_lport_enter_dns(lport);
 	}
 
 out:
@@ -1505,7 +1569,7 @@ EXPORT_SYMBOL(fc_lport_flogi_resp);
  * Locking Note: The lport lock is expected to be held before calling
  * this routine.
  */
-void fc_lport_enter_flogi(struct fc_lport *lport)
+static void fc_lport_enter_flogi(struct fc_lport *lport)
 {
 	struct fc_frame *fp;
 
@@ -1545,6 +1609,7 @@ int fc_lport_config(struct fc_lport *lport)
 
 	fc_lport_add_fc4_type(lport, FC_TYPE_FCP);
 	fc_lport_add_fc4_type(lport, FC_TYPE_CT);
+	fc_fc4_conf_lport_params(lport, FC_TYPE_FCP);
 
 	return 0;
 }
@@ -1582,6 +1647,7 @@ int fc_lport_init(struct fc_lport *lport)
 		fc_host_supported_speeds(lport->host) |= FC_PORTSPEED_1GBIT;
 	if (lport->link_supported_speeds & FC_PORTSPEED_10GBIT)
 		fc_host_supported_speeds(lport->host) |= FC_PORTSPEED_10GBIT;
+	fc_fc4_add_lport(lport);
 
 	return 0;
 }
@@ -1703,8 +1769,10 @@ static int fc_lport_els_request(struct fc_bsg_job *job,
 	info->sg = job->reply_payload.sg_list;
 
 	if (!lport->tt.exch_seq_send(lport, fp, fc_lport_bsg_resp,
-				     NULL, info, tov))
+				     NULL, info, tov)) {
+		kfree(info);
 		return -ECOMM;
+	}
 	return 0;
 }
 
@@ -1762,8 +1830,10 @@ static int fc_lport_ct_request(struct fc_bsg_job *job,
 	info->sg = job->reply_payload.sg_list;
 
 	if (!lport->tt.exch_seq_send(lport, fp, fc_lport_bsg_resp,
-				     NULL, info, tov))
+				     NULL, info, tov)) {
+		kfree(info);
 		return -ECOMM;
+	}
 	return 0;
 }
 

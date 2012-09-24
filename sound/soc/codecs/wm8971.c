@@ -19,13 +19,11 @@
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/i2c.h>
-#include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
-#include <sound/soc-dapm.h>
 #include <sound/initval.h>
 
 #include "wm8971.h"
@@ -225,7 +223,7 @@ static const struct snd_soc_dapm_widget wm8971_dapm_widgets[] = {
 	SND_SOC_DAPM_DAC("Left DAC", "Left Playback", WM8971_PWR2, 8, 0),
 	SND_SOC_DAPM_PGA("Mono Out 1", WM8971_PWR2, 2, 0, NULL, 0),
 
-	SND_SOC_DAPM_MICBIAS("Mic Bias", WM8971_PWR1, 1, 0),
+	SND_SOC_DAPM_SUPPLY("Mic Bias", WM8971_PWR1, 1, 0, NULL, 0),
 	SND_SOC_DAPM_ADC("Right ADC", "Right Capture", WM8971_PWR1, 2, 0),
 	SND_SOC_DAPM_ADC("Left ADC", "Left Capture", WM8971_PWR1, 3, 0),
 
@@ -333,10 +331,11 @@ static const struct snd_soc_dapm_route audio_map[] = {
 
 static int wm8971_add_widgets(struct snd_soc_codec *codec)
 {
-	snd_soc_dapm_new_controls(codec, wm8971_dapm_widgets,
-				  ARRAY_SIZE(wm8971_dapm_widgets));
+	struct snd_soc_dapm_context *dapm = &codec->dapm;
 
-	snd_soc_dapm_add_routes(codec, audio_map, ARRAY_SIZE(audio_map));
+	snd_soc_dapm_new_controls(dapm, wm8971_dapm_widgets,
+				  ARRAY_SIZE(wm8971_dapm_widgets));
+	snd_soc_dapm_add_routes(dapm, audio_map, ARRAY_SIZE(audio_map));
 
 	return 0;
 }
@@ -546,6 +545,9 @@ static int wm8971_set_bias_level(struct snd_soc_codec *codec,
 	case SND_SOC_BIAS_PREPARE:
 		break;
 	case SND_SOC_BIAS_STANDBY:
+		if (codec->dapm.bias_level == SND_SOC_BIAS_OFF)
+			snd_soc_cache_sync(codec);
+
 		/* mute dac and set vmid to 500k, enable VREF */
 		snd_soc_write(codec, WM8971_PWR1, pwr_reg | 0x0140);
 		break;
@@ -553,7 +555,7 @@ static int wm8971_set_bias_level(struct snd_soc_codec *codec,
 		snd_soc_write(codec, WM8971_PWR1, 0x0001);
 		break;
 	}
-	codec->bias_level = level;
+	codec->dapm.bias_level = level;
 	return 0;
 }
 
@@ -564,7 +566,7 @@ static int wm8971_set_bias_level(struct snd_soc_codec *codec,
 #define WM8971_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE |\
 	SNDRV_PCM_FMTBIT_S24_LE)
 
-static struct snd_soc_dai_ops wm8971_dai_ops = {
+static const struct snd_soc_dai_ops wm8971_dai_ops = {
 	.hw_params	= wm8971_pcm_hw_params,
 	.digital_mute	= wm8971_mute,
 	.set_fmt	= wm8971_set_dai_fmt,
@@ -590,12 +592,14 @@ static struct snd_soc_dai_driver wm8971_dai = {
 
 static void wm8971_work(struct work_struct *work)
 {
-	struct snd_soc_codec *codec =
-		container_of(work, struct snd_soc_codec, delayed_work.work);
-	wm8971_set_bias_level(codec, codec->bias_level);
+	struct snd_soc_dapm_context *dapm =
+		container_of(work, struct snd_soc_dapm_context,
+			     delayed_work.work);
+	struct snd_soc_codec *codec = dapm->codec;
+	wm8971_set_bias_level(codec, codec->dapm.bias_level);
 }
 
-static int wm8971_suspend(struct snd_soc_codec *codec, pm_message_t state)
+static int wm8971_suspend(struct snd_soc_codec *codec)
 {
 	wm8971_set_bias_level(codec, SND_SOC_BIAS_OFF);
 	return 0;
@@ -603,28 +607,16 @@ static int wm8971_suspend(struct snd_soc_codec *codec, pm_message_t state)
 
 static int wm8971_resume(struct snd_soc_codec *codec)
 {
-	int i;
-	u8 data[2];
-	u16 *cache = codec->reg_cache;
 	u16 reg;
-
-	/* Sync reg_cache with the hardware */
-	for (i = 0; i < ARRAY_SIZE(wm8971_reg); i++) {
-		if (i + 1 == WM8971_RESET)
-			continue;
-		data[0] = (i << 1) | ((cache[i] >> 8) & 0x0001);
-		data[1] = cache[i] & 0x00ff;
-		codec->hw_write(codec->control_data, data, 2);
-	}
 
 	wm8971_set_bias_level(codec, SND_SOC_BIAS_STANDBY);
 
 	/* charge wm8971 caps */
-	if (codec->suspend_bias_level == SND_SOC_BIAS_ON) {
+	if (codec->dapm.suspend_bias_level == SND_SOC_BIAS_ON) {
 		reg = snd_soc_read(codec, WM8971_PWR1) & 0xfe3e;
 		snd_soc_write(codec, WM8971_PWR1, reg | 0x01c0);
-		codec->bias_level = SND_SOC_BIAS_ON;
-		queue_delayed_work(wm8971_workq, &codec->delayed_work,
+		codec->dapm.bias_level = SND_SOC_BIAS_ON;
+		queue_delayed_work(wm8971_workq, &codec->dapm.delayed_work,
 			msecs_to_jiffies(1000));
 	}
 
@@ -643,7 +635,7 @@ static int wm8971_probe(struct snd_soc_codec *codec)
 		return ret;
 	}
 
-	INIT_DELAYED_WORK(&codec->delayed_work, wm8971_work);
+	INIT_DELAYED_WORK(&codec->dapm.delayed_work, wm8971_work);
 	wm8971_workq = create_workqueue("wm8971");
 	if (wm8971_workq == NULL)
 		return -ENOMEM;
@@ -653,30 +645,19 @@ static int wm8971_probe(struct snd_soc_codec *codec)
 	/* charge output caps - set vmid to 5k for quick power up */
 	reg = snd_soc_read(codec, WM8971_PWR1) & 0xfe3e;
 	snd_soc_write(codec, WM8971_PWR1, reg | 0x01c0);
-	codec->bias_level = SND_SOC_BIAS_STANDBY;
-	queue_delayed_work(wm8971_workq, &codec->delayed_work,
+	codec->dapm.bias_level = SND_SOC_BIAS_STANDBY;
+	queue_delayed_work(wm8971_workq, &codec->dapm.delayed_work,
 		msecs_to_jiffies(1000));
 
 	/* set the update bits */
-	reg = snd_soc_read(codec, WM8971_LDAC);
-	snd_soc_write(codec, WM8971_LDAC, reg | 0x0100);
-	reg = snd_soc_read(codec, WM8971_RDAC);
-	snd_soc_write(codec, WM8971_RDAC, reg | 0x0100);
-
-	reg = snd_soc_read(codec, WM8971_LOUT1V);
-	snd_soc_write(codec, WM8971_LOUT1V, reg | 0x0100);
-	reg = snd_soc_read(codec, WM8971_ROUT1V);
-	snd_soc_write(codec, WM8971_ROUT1V, reg | 0x0100);
-
-	reg = snd_soc_read(codec, WM8971_LOUT2V);
-	snd_soc_write(codec, WM8971_LOUT2V, reg | 0x0100);
-	reg = snd_soc_read(codec, WM8971_ROUT2V);
-	snd_soc_write(codec, WM8971_ROUT2V, reg | 0x0100);
-
-	reg = snd_soc_read(codec, WM8971_LINVOL);
-	snd_soc_write(codec, WM8971_LINVOL, reg | 0x0100);
-	reg = snd_soc_read(codec, WM8971_RINVOL);
-	snd_soc_write(codec, WM8971_RINVOL, reg | 0x0100);
+	snd_soc_update_bits(codec, WM8971_LDAC, 0x0100, 0x0100);
+	snd_soc_update_bits(codec, WM8971_RDAC, 0x0100, 0x0100);
+	snd_soc_update_bits(codec, WM8971_LOUT1V, 0x0100, 0x0100);
+	snd_soc_update_bits(codec, WM8971_ROUT1V, 0x0100, 0x0100);
+	snd_soc_update_bits(codec, WM8971_LOUT2V, 0x0100, 0x0100);
+	snd_soc_update_bits(codec, WM8971_ROUT2V, 0x0100, 0x0100);
+	snd_soc_update_bits(codec, WM8971_LINVOL, 0x0100, 0x0100);
+	snd_soc_update_bits(codec, WM8971_RINVOL, 0x0100, 0x0100);
 
 	snd_soc_add_controls(codec, wm8971_snd_controls,
 				ARRAY_SIZE(wm8971_snd_controls));
@@ -743,7 +724,7 @@ MODULE_DEVICE_TABLE(i2c, wm8971_i2c_id);
 
 static struct i2c_driver wm8971_i2c_driver = {
 	.driver = {
-		.name = "wm8971-codec",
+		.name = "wm8971",
 		.owner = THIS_MODULE,
 	},
 	.probe =    wm8971_i2c_probe,

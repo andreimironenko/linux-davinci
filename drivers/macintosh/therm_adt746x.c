@@ -52,7 +52,7 @@ static const char *sensor_location[3];
 
 static int limit_adjust;
 static int fan_speed = -1;
-static int verbose;
+static bool verbose;
 
 MODULE_AUTHOR("Colin Leroy <colin@colino.net>");
 MODULE_DESCRIPTION("Driver for ADT746x thermostat in iBook G4 and "
@@ -662,7 +662,7 @@ static void thermostat_create_files(void)
 		err |= device_create_file(&of_dev->dev, &dev_attr_sensor2_fan_speed);
 	if (err)
 		printk(KERN_WARNING
-			"Failed to create tempertaure attribute file(s).\n");
+			"Failed to create temperature attribute file(s).\n");
 }
 
 static void thermostat_remove_files(void)

@@ -32,6 +32,7 @@
 #include <drm/radeon_drm.h>
 #include <linux/vgaarb.h>
 #include <linux/vga_switcheroo.h>
+#include <linux/efi.h>
 #include "radeon_reg.h"
 #include "radeon.h"
 #include "atom.h"
@@ -81,6 +82,13 @@ static const char radeon_family_name[][16] = {
 	"JUNIPER",
 	"CYPRESS",
 	"HEMLOCK",
+	"PALM",
+	"SUMO",
+	"SUMO2",
+	"BARTS",
+	"TURKS",
+	"CAICOS",
+	"CAYMAN",
 	"LAST",
 };
 
@@ -180,7 +188,7 @@ int radeon_wb_init(struct radeon_device *rdev)
 	int r;
 
 	if (rdev->wb.wb_obj == NULL) {
-		r = radeon_bo_create(rdev, NULL, RADEON_GPU_PAGE_SIZE, PAGE_SIZE, true,
+		r = radeon_bo_create(rdev, RADEON_GPU_PAGE_SIZE, PAGE_SIZE, true,
 				RADEON_GEM_DOMAIN_GTT, &rdev->wb.wb_obj);
 		if (r) {
 			dev_warn(rdev->dev, "(%d) create WB bo failed\n", r);
@@ -208,14 +216,19 @@ int radeon_wb_init(struct radeon_device *rdev)
 		return r;
 	}
 
+	/* clear wb memory */
+	memset((char *)rdev->wb.wb, 0, RADEON_GPU_PAGE_SIZE);
 	/* disable event_write fences */
 	rdev->wb.use_event = false;
 	/* disabled via module param */
 	if (radeon_no_wb == 1)
 		rdev->wb.enabled = false;
 	else {
-		/* often unreliable on AGP */
 		if (rdev->flags & RADEON_IS_AGP) {
+			/* often unreliable on AGP */
+			rdev->wb.enabled = false;
+		} else if (rdev->family < CHIP_R300) {
+			/* often unreliable on pre-r300 */
 			rdev->wb.enabled = false;
 		} else {
 			rdev->wb.enabled = true;
@@ -223,6 +236,11 @@ int radeon_wb_init(struct radeon_device *rdev)
 			if (rdev->family >= CHIP_R600)
 				rdev->wb.use_event = true;
 		}
+	}
+	/* always use writeback/events on NI */
+	if (ASIC_IS_DCE5(rdev)) {
+		rdev->wb.enabled = true;
+		rdev->wb.use_event = true;
 	}
 
 	dev_info(rdev->dev, "WB %sabled\n", rdev->wb.enabled ? "en" : "dis");
@@ -252,7 +270,7 @@ int radeon_wb_init(struct radeon_device *rdev)
  * Note: GTT start, end, size should be initialized before calling this
  * function on AGP platform.
  *
- * Note: We don't explictly enforce VRAM start to be aligned on VRAM size,
+ * Note: We don't explicitly enforce VRAM start to be aligned on VRAM size,
  * this shouldn't be a problem as we are using the PCI aperture as a reference.
  * Otherwise this would be needed for rv280, all r3xx, and all r4xx, but
  * not IGP.
@@ -286,6 +304,8 @@ void radeon_vram_location(struct radeon_device *rdev, struct radeon_mc *mc, u64 
 		mc->mc_vram_size = mc->aper_size;
 	}
 	mc->vram_end = mc->vram_start + mc->mc_vram_size - 1;
+	if (radeon_vram_limit && radeon_vram_limit < mc->real_vram_size)
+		mc->real_vram_size = radeon_vram_limit;
 	dev_info(rdev->dev, "VRAM: %lluM 0x%016llX - 0x%016llX (%lluM used)\n",
 			mc->mc_vram_size >> 20, mc->vram_start,
 			mc->vram_end, mc->real_vram_size >> 20);
@@ -334,8 +354,16 @@ bool radeon_card_posted(struct radeon_device *rdev)
 {
 	uint32_t reg;
 
+	if (efi_enabled && rdev->pdev->subsystem_vendor == PCI_VENDOR_ID_APPLE)
+		return false;
+
 	/* first check CRTCs */
-	if (ASIC_IS_DCE4(rdev)) {
+	if (ASIC_IS_DCE41(rdev)) {
+		reg = RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC0_REGISTER_OFFSET) |
+			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC1_REGISTER_OFFSET);
+		if (reg & EVERGREEN_CRTC_MASTER_EN)
+			return true;
+	} else if (ASIC_IS_DCE4(rdev)) {
 		reg = RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC0_REGISTER_OFFSET) |
 			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC1_REGISTER_OFFSET) |
 			RREG32(EVERGREEN_CRTC_CONTROL + EVERGREEN_CRTC2_REGISTER_OFFSET) |
@@ -636,20 +664,20 @@ void radeon_check_arguments(struct radeon_device *rdev)
 static void radeon_switcheroo_set_state(struct pci_dev *pdev, enum vga_switcheroo_state state)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
-	struct radeon_device *rdev = dev->dev_private;
 	pm_message_t pmm = { .event = PM_EVENT_SUSPEND };
 	if (state == VGA_SWITCHEROO_ON) {
 		printk(KERN_INFO "radeon: switched on\n");
 		/* don't suspend or resume card normally */
-		rdev->powered_down = false;
+		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
 		radeon_resume_kms(dev);
+		dev->switch_power_state = DRM_SWITCH_POWER_ON;
 		drm_kms_helper_poll_enable(dev);
 	} else {
 		printk(KERN_INFO "radeon: switched off\n");
 		drm_kms_helper_poll_disable(dev);
+		dev->switch_power_state = DRM_SWITCH_POWER_CHANGING;
 		radeon_suspend_kms(dev, pmm);
-		/* don't suspend or resume card normally */
-		rdev->powered_down = true;
+		dev->switch_power_state = DRM_SWITCH_POWER_OFF;
 	}
 }
 
@@ -685,29 +713,32 @@ int radeon_device_init(struct radeon_device *rdev,
 	rdev->gpu_lockup = false;
 	rdev->accel_working = false;
 
-	DRM_INFO("initializing kernel modesetting (%s 0x%04X:0x%04X).\n",
-		radeon_family_name[rdev->family], pdev->vendor, pdev->device);
+	DRM_INFO("initializing kernel modesetting (%s 0x%04X:0x%04X 0x%04X:0x%04X).\n",
+		radeon_family_name[rdev->family], pdev->vendor, pdev->device,
+		pdev->subsystem_vendor, pdev->subsystem_device);
 
 	/* mutex initialization are all done here so we
 	 * can recall function without having locking issues */
-	mutex_init(&rdev->cs_mutex);
-	mutex_init(&rdev->ib_pool.mutex);
-	mutex_init(&rdev->cp.mutex);
+	radeon_mutex_init(&rdev->cs_mutex);
+	radeon_mutex_init(&rdev->ib_pool.mutex);
+	for (i = 0; i < RADEON_NUM_RINGS; ++i)
+		mutex_init(&rdev->ring[i].mutex);
 	mutex_init(&rdev->dc_hw_i2c_mutex);
 	if (rdev->family >= CHIP_R600)
 		spin_lock_init(&rdev->ih.lock);
 	mutex_init(&rdev->gem.mutex);
 	mutex_init(&rdev->pm.mutex);
 	mutex_init(&rdev->vram_mutex);
-	rwlock_init(&rdev->fence_drv.lock);
+	rwlock_init(&rdev->fence_lock);
+	rwlock_init(&rdev->semaphore_drv.lock);
 	INIT_LIST_HEAD(&rdev->gem.objects);
 	init_waitqueue_head(&rdev->irq.vblank_queue);
 	init_waitqueue_head(&rdev->irq.idle_queue);
-
-	/* setup workqueue */
-	rdev->wq = create_workqueue("radeon");
-	if (rdev->wq == NULL)
-		return -ENOMEM;
+	INIT_LIST_HEAD(&rdev->semaphore_drv.bo);
+	/* initialize vm here */
+	rdev->vm_manager.use_bitmap = 1;
+	rdev->vm_manager.max_pfn = 1 << 20;
+	INIT_LIST_HEAD(&rdev->vm_manager.lru_vm);
 
 	/* Set asic functions */
 	r = radeon_asic_init(rdev);
@@ -729,20 +760,28 @@ int radeon_device_init(struct radeon_device *rdev,
 
 	/* set DMA mask + need_dma32 flags.
 	 * PCIE - can handle 40-bits.
-	 * IGP - can handle 40-bits (in theory)
+	 * IGP - can handle 40-bits
 	 * AGP - generally dma32 is safest
-	 * PCI - only dma32
+	 * PCI - dma32 for legacy pci gart, 40 bits on newer asics
 	 */
 	rdev->need_dma32 = false;
 	if (rdev->flags & RADEON_IS_AGP)
 		rdev->need_dma32 = true;
-	if (rdev->flags & RADEON_IS_PCI)
+	if ((rdev->flags & RADEON_IS_PCI) &&
+	    (rdev->family < CHIP_RS400))
 		rdev->need_dma32 = true;
 
 	dma_bits = rdev->need_dma32 ? 32 : 40;
 	r = pci_set_dma_mask(rdev->pdev, DMA_BIT_MASK(dma_bits));
 	if (r) {
+		rdev->need_dma32 = true;
+		dma_bits = 32;
 		printk(KERN_WARNING "radeon: No suitable DMA available.\n");
+	}
+	r = pci_set_consistent_dma_mask(rdev->pdev, DMA_BIT_MASK(dma_bits));
+	if (r) {
+		pci_set_consistent_dma_mask(rdev->pdev, DMA_BIT_MASK(32));
+		printk(KERN_WARNING "radeon: No coherent DMA available.\n");
 	}
 
 	/* Registers mapping */
@@ -773,6 +812,7 @@ int radeon_device_init(struct radeon_device *rdev,
 	vga_client_register(rdev->pdev, rdev, NULL, radeon_vga_set_decode);
 	vga_switcheroo_register_client(rdev->pdev,
 				       radeon_switcheroo_set_state,
+				       NULL,
 				       radeon_switcheroo_can_switch);
 
 	r = radeon_init(rdev);
@@ -790,14 +830,19 @@ int radeon_device_init(struct radeon_device *rdev,
 		if (r)
 			return r;
 	}
-	if (radeon_testing) {
+	if ((radeon_testing & 1)) {
 		radeon_test_moves(rdev);
 	}
+	if ((radeon_testing & 2)) {
+		radeon_test_syncing(rdev);
+	}
 	if (radeon_benchmarking) {
-		radeon_benchmark(rdev);
+		radeon_benchmark(rdev, radeon_benchmarking);
 	}
 	return 0;
 }
+
+static void radeon_debugfs_remove_files(struct radeon_device *rdev);
 
 void radeon_device_fini(struct radeon_device *rdev)
 {
@@ -806,7 +851,6 @@ void radeon_device_fini(struct radeon_device *rdev)
 	/* evict vram memory */
 	radeon_bo_evict_vram(rdev);
 	radeon_fini(rdev);
-	destroy_workqueue(rdev->wq);
 	vga_switcheroo_unregister_client(rdev->pdev);
 	vga_client_register(rdev->pdev, NULL, NULL, NULL);
 	if (rdev->rio_mem)
@@ -814,6 +858,7 @@ void radeon_device_fini(struct radeon_device *rdev)
 	rdev->rio_mem = NULL;
 	iounmap(rdev->rmmio);
 	rdev->rmmio = NULL;
+	radeon_debugfs_remove_files(rdev);
 }
 
 
@@ -825,7 +870,7 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 	struct radeon_device *rdev;
 	struct drm_crtc *crtc;
 	struct drm_connector *connector;
-	int r;
+	int i, r;
 
 	if (dev == NULL || dev->dev_private == NULL) {
 		return -ENODEV;
@@ -835,8 +880,10 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 	}
 	rdev = dev->dev_private;
 
-	if (rdev->powered_down)
+	if (dev->switch_power_state == DRM_SWITCH_POWER_OFF)
 		return 0;
+
+	drm_kms_helper_poll_disable(dev);
 
 	/* turn off display hw */
 	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
@@ -851,7 +898,7 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 		if (rfb == NULL || rfb->obj == NULL) {
 			continue;
 		}
-		robj = rfb->obj->driver_private;
+		robj = gem_to_radeon_bo(rfb->obj);
 		/* don't unpin kernel fb objects */
 		if (!radeon_fbdev_robj_is_fb(rdev, robj)) {
 			r = radeon_bo_reserve(robj, false);
@@ -864,7 +911,8 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 	/* evict vram memory */
 	radeon_bo_evict_vram(rdev);
 	/* wait for gpu to finish processing current batch */
-	radeon_fence_wait_last(rdev);
+	for (i = 0; i < RADEON_NUM_RINGS; i++)
+		radeon_fence_wait_last(rdev, i);
 
 	radeon_save_bios_scratch_regs(rdev);
 
@@ -882,9 +930,9 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 		pci_disable_device(dev->pdev);
 		pci_set_power_state(dev->pdev, PCI_D3hot);
 	}
-	acquire_console_sem();
+	console_lock();
 	radeon_fbdev_set_suspend(rdev, 1);
-	release_console_sem();
+	console_unlock();
 	return 0;
 }
 
@@ -893,14 +941,14 @@ int radeon_resume_kms(struct drm_device *dev)
 	struct drm_connector *connector;
 	struct radeon_device *rdev = dev->dev_private;
 
-	if (rdev->powered_down)
+	if (dev->switch_power_state == DRM_SWITCH_POWER_OFF)
 		return 0;
 
-	acquire_console_sem();
+	console_lock();
 	pci_set_power_state(dev->pdev, PCI_D0);
 	pci_restore_state(dev->pdev);
 	if (pci_enable_device(dev->pdev)) {
-		release_console_sem();
+		console_unlock();
 		return -1;
 	}
 	pci_set_master(dev->pdev);
@@ -911,8 +959,13 @@ int radeon_resume_kms(struct drm_device *dev)
 	radeon_restore_bios_scratch_regs(rdev);
 
 	radeon_fbdev_set_suspend(rdev, 0);
-	release_console_sem();
+	console_unlock();
 
+	/* init dig PHYs, disp eng pll */
+	if (rdev->is_atom_bios) {
+		radeon_atom_encoder_init(rdev);
+		radeon_atom_dcpll_init(rdev);
+	}
 	/* reset hpd state */
 	radeon_hpd_init(rdev);
 	/* blat the mode back in */
@@ -921,14 +974,22 @@ int radeon_resume_kms(struct drm_device *dev)
 	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
 		drm_helper_connector_dpms(connector, DRM_MODE_DPMS_ON);
 	}
+
+	drm_kms_helper_poll_enable(dev);
 	return 0;
 }
 
 int radeon_gpu_reset(struct radeon_device *rdev)
 {
 	int r;
+	int resched;
+
+	/* Prevent CS ioctl from interfering */
+	radeon_mutex_lock(&rdev->cs_mutex);
 
 	radeon_save_bios_scratch_regs(rdev);
+	/* block TTM */
+	resched = ttm_bo_lock_delayed_workqueue(&rdev->mman.bdev);
 	radeon_suspend(rdev);
 
 	r = radeon_asic_reset(rdev);
@@ -937,10 +998,16 @@ int radeon_gpu_reset(struct radeon_device *rdev)
 		radeon_resume(rdev);
 		radeon_restore_bios_scratch_regs(rdev);
 		drm_helper_resume_force_mode(rdev->ddev);
-		return 0;
+		ttm_bo_unlock_delayed_workqueue(&rdev->mman.bdev, resched);
 	}
-	/* bad news, how to tell it to userspace ? */
-	dev_info(rdev->dev, "GPU reset failed\n");
+
+	radeon_mutex_unlock(&rdev->cs_mutex);
+
+	if (r) {
+		/* bad news, how to tell it to userspace ? */
+		dev_info(rdev->dev, "GPU reset failed\n");
+	}
+
 	return r;
 }
 
@@ -948,33 +1015,29 @@ int radeon_gpu_reset(struct radeon_device *rdev)
 /*
  * Debugfs
  */
-struct radeon_debugfs {
-	struct drm_info_list	*files;
-	unsigned		num_files;
-};
-static struct radeon_debugfs _radeon_debugfs[RADEON_DEBUGFS_MAX_NUM_FILES];
-static unsigned _radeon_debugfs_count = 0;
-
 int radeon_debugfs_add_files(struct radeon_device *rdev,
 			     struct drm_info_list *files,
 			     unsigned nfiles)
 {
 	unsigned i;
 
-	for (i = 0; i < _radeon_debugfs_count; i++) {
-		if (_radeon_debugfs[i].files == files) {
+	for (i = 0; i < rdev->debugfs_count; i++) {
+		if (rdev->debugfs[i].files == files) {
 			/* Already registered */
 			return 0;
 		}
 	}
-	if ((_radeon_debugfs_count + nfiles) > RADEON_DEBUGFS_MAX_NUM_FILES) {
-		DRM_ERROR("Reached maximum number of debugfs files.\n");
-		DRM_ERROR("Report so we increase RADEON_DEBUGFS_MAX_NUM_FILES.\n");
+
+	i = rdev->debugfs_count + 1;
+	if (i > RADEON_DEBUGFS_MAX_COMPONENTS) {
+		DRM_ERROR("Reached maximum number of debugfs components.\n");
+		DRM_ERROR("Report so we increase "
+		          "RADEON_DEBUGFS_MAX_COMPONENTS.\n");
 		return -EINVAL;
 	}
-	_radeon_debugfs[_radeon_debugfs_count].files = files;
-	_radeon_debugfs[_radeon_debugfs_count].num_files = nfiles;
-	_radeon_debugfs_count++;
+	rdev->debugfs[rdev->debugfs_count].files = files;
+	rdev->debugfs[rdev->debugfs_count].num_files = nfiles;
+	rdev->debugfs_count = i;
 #if defined(CONFIG_DEBUG_FS)
 	drm_debugfs_create_files(files, nfiles,
 				 rdev->ddev->control->debugfs_root,
@@ -986,6 +1049,22 @@ int radeon_debugfs_add_files(struct radeon_device *rdev,
 	return 0;
 }
 
+static void radeon_debugfs_remove_files(struct radeon_device *rdev)
+{
+#if defined(CONFIG_DEBUG_FS)
+	unsigned i;
+
+	for (i = 0; i < rdev->debugfs_count; i++) {
+		drm_debugfs_remove_files(rdev->debugfs[i].files,
+					 rdev->debugfs[i].num_files,
+					 rdev->ddev->control);
+		drm_debugfs_remove_files(rdev->debugfs[i].files,
+					 rdev->debugfs[i].num_files,
+					 rdev->ddev->primary);
+	}
+#endif
+}
+
 #if defined(CONFIG_DEBUG_FS)
 int radeon_debugfs_init(struct drm_minor *minor)
 {
@@ -994,11 +1073,5 @@ int radeon_debugfs_init(struct drm_minor *minor)
 
 void radeon_debugfs_cleanup(struct drm_minor *minor)
 {
-	unsigned i;
-
-	for (i = 0; i < _radeon_debugfs_count; i++) {
-		drm_debugfs_remove_files(_radeon_debugfs[i].files,
-					 _radeon_debugfs[i].num_files, minor);
-	}
 }
 #endif

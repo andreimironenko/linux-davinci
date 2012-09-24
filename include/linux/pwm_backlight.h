@@ -4,6 +4,8 @@
 #ifndef __LINUX_PWM_BACKLIGHT_H
 #define __LINUX_PWM_BACKLIGHT_H
 
+#include <linux/backlight.h>
+
 struct platform_pwm_backlight_data {
 	const char *pwm_id;
 	int ch;
@@ -13,7 +15,9 @@ struct platform_pwm_backlight_data {
 	unsigned int pwm_period_ns;
 	int (*init)(struct device *dev);
 	int (*notify)(struct device *dev, int brightness);
+	void (*notify_after)(struct device *dev, int brightness);
 	void (*exit)(struct device *dev);
+	int (*check_fb)(struct device *dev, struct fb_info *info);
 };
 
 #endif

@@ -26,6 +26,10 @@
 #include <plat/usb.h>
 #endif
 
+/* USBSS RTL versions */
+#define USBSS_RTL_VERSION_MASK	0xF
+#define USBSS_RTL_VERSION_D	0xD
+
 /**
  * struct usb_cppi41_info - CPPI 4.1 USB implementation details
  * @dma_block:	DMA block number
@@ -42,11 +46,14 @@ struct usb_cppi41_info {
 	u8 q_mgr;
 	u8 num_tx_comp_q;
 	u8 num_rx_comp_q;
-	const u16 *tx_comp_q;
-	const u16 *rx_comp_q;
+	u16 *tx_comp_q;
+	u16 *rx_comp_q;
+	u8 bd_intr_ctrl;
+	u8 grndis_for_host_rx;
+	u32 version;
 };
 
-extern struct usb_cppi41_info usb_cppi41_info;
+extern struct usb_cppi41_info usb_cppi41_info[];
 
 /**
  * cppi41_completion - Tx/Rx completion queue interrupt handling hook
@@ -55,5 +62,4 @@ extern struct usb_cppi41_info usb_cppi41_info;
  * @tx:	bitmask having bit N set if Tx completion queue N is not empty
  */
 void cppi41_completion(struct musb *musb, u32 rx, u32 tx);
-
 #endif	/* _CPPI41_DMA_H_ */

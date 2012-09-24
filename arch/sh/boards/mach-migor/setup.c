@@ -12,7 +12,8 @@
 #include <linux/interrupt.h>
 #include <linux/input.h>
 #include <linux/input/sh_keysc.h>
-#include <linux/mfd/sh_mobile_sdhi.h>
+#include <linux/mmc/host.h>
+#include <linux/mmc/sh_mobile_sdhi.h>
 #include <linux/mtd/physmap.h>
 #include <linux/mtd/nand.h>
 #include <linux/i2c.h>
@@ -20,9 +21,11 @@
 #include <linux/delay.h>
 #include <linux/clk.h>
 #include <linux/gpio.h>
+#include <linux/videodev2.h>
 #include <video/sh_mobile_lcdc.h>
 #include <media/sh_mobile_ceu.h>
 #include <media/ov772x.h>
+#include <media/soc_camera.h>
 #include <media/tw9910.h>
 #include <asm/clock.h>
 #include <asm/machvec.h>
@@ -97,9 +100,6 @@ static struct platform_device sh_keysc_device = {
 	.resource       = sh_keysc_resources,
 	.dev	= {
 		.platform_data	= &sh_keysc_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_KEYSC,
 	},
 };
 
@@ -213,7 +213,7 @@ static struct platform_device migor_nand_flash_device = {
 	}
 };
 
-const static struct fb_videomode migor_lcd_modes[] = {
+static const struct fb_videomode migor_lcd_modes[] = {
 	{
 #if defined(CONFIG_SH_MIGOR_RTA_WVGA)
 		.name = "LB070WV1",
@@ -243,7 +243,7 @@ static struct sh_mobile_lcdc_info sh_mobile_lcdc_info = {
 	.clock_source = LCDC_CLK_BUS,
 	.ch[0] = {
 		.chan = LCDC_CHAN_MAINLCD,
-		.bpp = 16,
+		.fourcc = V4L2_PIX_FMT_RGB565,
 		.interface_type = RGB16,
 		.clock_divider = 2,
 		.lcd_cfg = migor_lcd_modes,
@@ -257,7 +257,7 @@ static struct sh_mobile_lcdc_info sh_mobile_lcdc_info = {
 	.clock_source = LCDC_CLK_PERIPHERAL,
 	.ch[0] = {
 		.chan = LCDC_CHAN_MAINLCD,
-		.bpp = 16,
+		.fourcc = V4L2_PIX_FMT_RGB565,
 		.interface_type = SYS16A,
 		.clock_divider = 10,
 		.lcd_cfg = migor_lcd_modes,
@@ -298,9 +298,6 @@ static struct platform_device migor_lcdc_device = {
 	.resource	= migor_lcdc_resources,
 	.dev	= {
 		.platform_data	= &sh_mobile_lcdc_info,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_LCDC,
 	},
 };
 
@@ -389,16 +386,13 @@ static struct platform_device migor_ceu_device = {
 	.dev	= {
 		.platform_data	= &sh_mobile_ceu_info,
 	},
-	.archdata = {
-		.hwblk_id = HWBLK_CEU,
-	},
 };
 
 static struct resource sdhi_cn9_resources[] = {
 	[0] = {
 		.name	= "SDHI",
 		.start	= 0x04ce0000,
-		.end	= 0x04ce01ff,
+		.end	= 0x04ce00ff,
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
@@ -410,6 +404,7 @@ static struct resource sdhi_cn9_resources[] = {
 static struct sh_mobile_sdhi_info sh7724_sdhi_data = {
 	.dma_slave_tx	= SHDMA_SLAVE_SDHI0_TX,
 	.dma_slave_rx	= SHDMA_SLAVE_SDHI0_RX,
+	.tmio_caps      = MMC_CAP_SDIO_IRQ,
 };
 
 static struct platform_device sdhi_cn9_device = {
@@ -418,9 +413,6 @@ static struct platform_device sdhi_cn9_device = {
 	.resource	= sdhi_cn9_resources,
 	.dev = {
 		.platform_data	= &sh7724_sdhi_data,
-	},
-	.archdata = {
-		.hwblk_id = HWBLK_SDHI,
 	},
 };
 
@@ -446,9 +438,7 @@ static struct i2c_board_info migor_i2c_camera[] = {
 	},
 };
 
-static struct ov772x_camera_info ov7725_info = {
-	.flags		= OV772X_FLAG_8BIT,
-};
+static struct ov772x_camera_info ov7725_info;
 
 static struct soc_camera_link ov7725_link = {
 	.power		= ov7725_power,

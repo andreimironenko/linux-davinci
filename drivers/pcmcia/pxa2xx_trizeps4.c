@@ -30,7 +30,7 @@
 extern void board_pcmcia_power(int power);
 
 static struct pcmcia_irqs irqs[] = {
-	{ 0, IRQ_GPIO(GPIO_PCD), "cs0_cd" }
+	{ .sock = 0, .str = "cs0_cd" }
 	/* on other baseboards we can have more inputs */
 };
 
@@ -53,12 +53,9 @@ static int trizeps_pcmcia_hw_init(struct soc_pcmcia_socket *skt)
 			gpio_free(GPIO_PRDY);
 			return -EINVAL;
 		}
-		skt->socket.pci_irq = IRQ_GPIO(GPIO_PRDY);
+		skt->socket.pci_irq = gpio_to_irq(GPIO_PRDY);
+		irqs[0].irq = gpio_to_irq(GPIO_PCD);
 		break;
-
-#ifndef CONFIG_MACH_TRIZEPS_CONXS
-	case 1:
-#endif
 	default:
 		break;
 	}
@@ -69,15 +66,15 @@ static int trizeps_pcmcia_hw_init(struct soc_pcmcia_socket *skt)
 	for (i = 0; i < ARRAY_SIZE(irqs); i++) {
 		if (irqs[i].sock != skt->nr)
 			continue;
-		if (gpio_request(IRQ_TO_GPIO(irqs[i].irq), irqs[i].str) < 0) {
+		if (gpio_request(irq_to_gpio(irqs[i].irq), irqs[i].str) < 0) {
 			pr_err("%s: sock %d unable to request gpio %d\n",
-				__func__, skt->nr, IRQ_TO_GPIO(irqs[i].irq));
+				__func__, skt->nr, irq_to_gpio(irqs[i].irq));
 			ret = -EBUSY;
 			goto error;
 		}
-		if (gpio_direction_input(IRQ_TO_GPIO(irqs[i].irq)) < 0) {
+		if (gpio_direction_input(irq_to_gpio(irqs[i].irq)) < 0) {
 			pr_err("%s: sock %d unable to set input gpio %d\n",
-				__func__, skt->nr, IRQ_TO_GPIO(irqs[i].irq));
+				__func__, skt->nr, irq_to_gpio(irqs[i].irq));
 			ret = -EINVAL;
 			goto error;
 		}
@@ -86,7 +83,7 @@ static int trizeps_pcmcia_hw_init(struct soc_pcmcia_socket *skt)
 
 error:
 	for (; i >= 0; i--) {
-		gpio_free(IRQ_TO_GPIO(irqs[i].irq));
+		gpio_free(irq_to_gpio(irqs[i].irq));
 	}
 	return (ret);
 }
@@ -97,7 +94,7 @@ static void trizeps_pcmcia_hw_shutdown(struct soc_pcmcia_socket *skt)
 	/* free allocated gpio's */
 	gpio_free(GPIO_PRDY);
 	for (i = 0; i < ARRAY_SIZE(irqs); i++)
-		gpio_free(IRQ_TO_GPIO(irqs[i].irq));
+		gpio_free(irq_to_gpio(irqs[i].irq));
 }
 
 static unsigned long trizeps_pcmcia_status[2];
@@ -225,6 +222,9 @@ static struct platform_device *trizeps_pcmcia_device;
 static int __init trizeps_pcmcia_init(void)
 {
 	int ret;
+
+	if (!machine_is_trizeps4() && !machine_is_trizeps4wl())
+		return -ENODEV;
 
 	trizeps_pcmcia_device = platform_device_alloc("pxa2xx-pcmcia", -1);
 	if (!trizeps_pcmcia_device)

@@ -4,7 +4,7 @@
  * Copyright (C) 2010 Nokia Corporation
  *
  * Contacts: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
- *	     Sakari Ailus <sakari.ailus@maxwell.research.nokia.com>
+ *	     Sakari Ailus <sakari.ailus@iki.fi>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -56,7 +56,6 @@ struct media_device_info {
 #define MEDIA_ENT_T_V4L2_SUBDEV_SENSOR	(MEDIA_ENT_T_V4L2_SUBDEV + 1)
 #define MEDIA_ENT_T_V4L2_SUBDEV_FLASH	(MEDIA_ENT_T_V4L2_SUBDEV + 2)
 #define MEDIA_ENT_T_V4L2_SUBDEV_LENS	(MEDIA_ENT_T_V4L2_SUBDEV + 3)
-#define MEDIA_ENT_T_V4L2_SUBDEV_DECODER	(MEDIA_ENT_T_V4L2_SUBDEV + 4)
 
 #define MEDIA_ENT_FL_DEFAULT		(1 << 0)
 
@@ -95,8 +94,8 @@ struct media_entity_desc {
 	};
 };
 
-#define MEDIA_PAD_FL_INPUT		(1 << 0)
-#define MEDIA_PAD_FL_OUTPUT		(1 << 1)
+#define MEDIA_PAD_FL_SINK		(1 << 0)
+#define MEDIA_PAD_FL_SOURCE		(1 << 1)
 
 struct media_pad_desc {
 	__u32 entity;		/* entity ID */
@@ -125,9 +124,9 @@ struct media_links_enum {
 	__u32 reserved[4];
 };
 
-#define MEDIA_IOC_DEVICE_INFO		_IOWR('M', 1, struct media_device_info)
-#define MEDIA_IOC_ENUM_ENTITIES		_IOWR('M', 2, struct media_entity_desc)
-#define MEDIA_IOC_ENUM_LINKS		_IOWR('M', 3, struct media_links_enum)
-#define MEDIA_IOC_SETUP_LINK		_IOWR('M', 4, struct media_link_desc)
+#define MEDIA_IOC_DEVICE_INFO		_IOWR('|', 0x00, struct media_device_info)
+#define MEDIA_IOC_ENUM_ENTITIES		_IOWR('|', 0x01, struct media_entity_desc)
+#define MEDIA_IOC_ENUM_LINKS		_IOWR('|', 0x02, struct media_links_enum)
+#define MEDIA_IOC_SETUP_LINK		_IOWR('|', 0x03, struct media_link_desc)
 
 #endif /* __LINUX_MEDIA_H */

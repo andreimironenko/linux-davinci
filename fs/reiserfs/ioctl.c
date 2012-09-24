@@ -55,11 +55,11 @@ long reiserfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 				break;
 			}
 
-			err = mnt_want_write(filp->f_path.mnt);
+			err = mnt_want_write_file(filp);
 			if (err)
 				break;
 
-			if (!is_owner_or_cap(inode)) {
+			if (!inode_owner_or_capable(inode)) {
 				err = -EPERM;
 				goto setflags_out;
 			}
@@ -96,18 +96,18 @@ long reiserfs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			inode->i_ctime = CURRENT_TIME_SEC;
 			mark_inode_dirty(inode);
 setflags_out:
-			mnt_drop_write(filp->f_path.mnt);
+			mnt_drop_write_file(filp);
 			break;
 		}
 	case REISERFS_IOC_GETVERSION:
 		err = put_user(inode->i_generation, (int __user *)arg);
 		break;
 	case REISERFS_IOC_SETVERSION:
-		if (!is_owner_or_cap(inode)) {
+		if (!inode_owner_or_capable(inode)) {
 			err = -EPERM;
 			break;
 		}
-		err = mnt_want_write(filp->f_path.mnt);
+		err = mnt_want_write_file(filp);
 		if (err)
 			break;
 		if (get_user(inode->i_generation, (int __user *)arg)) {
@@ -117,7 +117,7 @@ setflags_out:
 		inode->i_ctime = CURRENT_TIME_SEC;
 		mark_inode_dirty(inode);
 setversion_out:
-		mnt_drop_write(filp->f_path.mnt);
+		mnt_drop_write_file(filp);
 		break;
 	default:
 		err = -ENOTTY;

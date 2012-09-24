@@ -21,13 +21,13 @@
 
 #include <linux/init.h>
 #include <linux/device.h>
-#include <linux/sysdev.h>
 #include <linux/amba/bus.h>
 #include <linux/amba/pl061.h>
 #include <linux/amba/mmci.h>
 #include <linux/io.h>
 
 #include <mach/hardware.h>
+#include <asm/hardware/vic.h>
 #include <asm/irq.h>
 #include <asm/mach-types.h>
 
@@ -59,19 +59,14 @@ static struct pl061_platform_data gpio3_plat_data = {
 };
 
 #define UART3_IRQ	{ IRQ_SIC_UART3, NO_IRQ }
-#define UART3_DMA	{ 0x86, 0x87 }
 #define SCI1_IRQ	{ IRQ_SIC_SCI3, NO_IRQ }
-#define SCI1_DMA	{ 0x88, 0x89 }
 #define MMCI1_IRQ	{ IRQ_MMCI1A, IRQ_SIC_MMCI1B }
-#define MMCI1_DMA	{ 0x85, 0 }
 
 /*
  * These devices are connected via the core APB bridge
  */
 #define GPIO2_IRQ	{ IRQ_GPIOINT2, NO_IRQ }
-#define GPIO2_DMA	{ 0, 0 }
 #define GPIO3_IRQ	{ IRQ_GPIOINT3, NO_IRQ }
-#define GPIO3_DMA	{ 0, 0 }
 
 /*
  * These devices are connected via the DMA APB bridge
@@ -108,9 +103,12 @@ static void __init versatile_pb_init(void)
 
 MACHINE_START(VERSATILE_PB, "ARM-Versatile PB")
 	/* Maintainer: ARM Ltd/Deep Blue Solutions Ltd */
-	.boot_params	= 0x00000100,
+	.atag_offset	= 0x100,
 	.map_io		= versatile_map_io,
+	.init_early	= versatile_init_early,
 	.init_irq	= versatile_init_irq,
+	.handle_irq	= vic_handle_irq,
 	.timer		= &versatile_timer,
 	.init_machine	= versatile_pb_init,
+	.restart	= versatile_restart,
 MACHINE_END

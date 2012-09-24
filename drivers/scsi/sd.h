@@ -9,12 +9,6 @@
 #define SD_MAJORS	16
 
 /*
- * This is limited by the naming scheme enforced in sd_probe,
- * add another character to it if you really need more disks.
- */
-#define SD_MAX_DISKS	(((26 * 26) + 26 + 1) * 26)
-
-/*
  * Time out in seconds for disks and Magneto-opticals (which are slower).
  */
 #define SD_TIMEOUT		(30 * HZ)
@@ -43,6 +37,15 @@ enum {
 	SD_MEMPOOL_SIZE = 2,	/* CDB pool size */
 };
 
+enum {
+	SD_LBP_FULL = 0,	/* Full logical block provisioning */
+	SD_LBP_UNMAP,		/* Use UNMAP command */
+	SD_LBP_WS16,		/* Use WRITE SAME(16) with UNMAP bit */
+	SD_LBP_WS10,		/* Use WRITE SAME(10) with UNMAP bit */
+	SD_LBP_ZERO,		/* Use WRITE SAME(10) with zero payload */
+	SD_LBP_DISABLE,		/* Discard disabled due to failed cmd */
+};
+
 struct scsi_disk {
 	struct scsi_driver *driver;	/* always &sd_template */
 	struct scsi_device *device;
@@ -50,22 +53,27 @@ struct scsi_disk {
 	struct gendisk	*disk;
 	atomic_t	openers;
 	sector_t	capacity;	/* size in 512-byte sectors */
+	u32		max_ws_blocks;
+	u32		max_unmap_blocks;
+	u32		unmap_granularity;
+	u32		unmap_alignment;
 	u32		index;
 	unsigned int	physical_block_size;
 	u8		media_present;
 	u8		write_prot;
 	u8		protection_type;/* Data Integrity Field */
-	unsigned	previous_state : 1;
+	u8		provisioning_mode;
 	unsigned	ATO : 1;	/* state of disk ATO bit */
 	unsigned	WCE : 1;	/* state of disk WCE bit */
 	unsigned	RCD : 1;	/* state of disk RCD bit, unused */
 	unsigned	DPOFUA : 1;	/* state of disk DPOFUA bit */
 	unsigned	first_scan : 1;
-	unsigned	thin_provisioning : 1;
-	unsigned	unmap : 1;
-	unsigned	tpws : 1;
-	unsigned	tpu : 1;
-	unsigned	tpvpd : 1;
+	unsigned	lbpme : 1;
+	unsigned	lbprz : 1;
+	unsigned	lbpu : 1;
+	unsigned	lbpws : 1;
+	unsigned	lbpws10 : 1;
+	unsigned	lbpvpd : 1;
 };
 #define to_scsi_disk(obj) container_of(obj,struct scsi_disk,dev)
 

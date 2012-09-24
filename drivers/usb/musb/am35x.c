@@ -27,6 +27,7 @@
  */
 
 #include <linux/init.h>
+#include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
@@ -87,6 +88,8 @@
 #define USB_MENTOR_CORE_OFFSET	0x400
 
 #ifdef CONFIG_USB_TI_CPPI41_DMA
+#define CPPI41_QMGR_REG0SIZE	0x3fff
+
 /*
  * CPPI 4.1 resources used for USB OTG controller module:
  *
@@ -103,8 +106,10 @@
  * ---------------------------------
  */
 
-static const u16 tx_comp_q[] = { 63, 64 };
-static const u16 rx_comp_q[] = { 65, 66 };
+static u16 tx_comp_q[] = {63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 63,
+				63, 63};
+static u16 rx_comp_q[] = {65, 65, 65, 65, 65, 65, 65, 65, 65, 65, 65, 65, 65,
+				65, 65};
 
 /* Fair scheduling */
 u32 dma_sched_table[] = {
@@ -196,20 +201,22 @@ static const u32 assigned_queues[] = { 0xffffffff, 0xffffffff, 0x7 };
 
 int __devinit cppi41_init(struct musb *musb)
 {
+	struct usb_cppi41_info *cppi_info = &usb_cppi41_info[musb->id];
 	u16 numch, blknum, order, i;
 
 	/* init cppi info structure  */
-	usb_cppi41_info.dma_block = 0;
+	cppi_info->dma_block = 0;
 	for (i = 0 ; i < USB_CPPI41_NUM_CH ; i++)
-		usb_cppi41_info.ep_dma_ch[i] = i;
+		cppi_info->ep_dma_ch[i] = i;
 
-	usb_cppi41_info.q_mgr = 0;
-	usb_cppi41_info.num_tx_comp_q = 4;
-	usb_cppi41_info.num_rx_comp_q = 4;
-	usb_cppi41_info.tx_comp_q = tx_comp_q;
-	usb_cppi41_info.rx_comp_q = rx_comp_q;
+	cppi_info->q_mgr = 0;
+	cppi_info->num_tx_comp_q = 15;
+	cppi_info->num_rx_comp_q = 15;
+	cppi_info->tx_comp_q = tx_comp_q;
+	cppi_info->rx_comp_q = rx_comp_q;
+	cppi_info->bd_intr_ctrl = 0; /* am35x dont support bd interrupt */
 
-	blknum = usb_cppi41_info.dma_block;
+	blknum = cppi_info->dma_block;
 
 	/* Queue manager information */
 	cppi41_queue_mgr[0].num_queue = 96;
@@ -235,7 +242,7 @@ int __devinit cppi41_init(struct musb *musb)
 	cppi41_dma_block[0].sched_table_base = musb->ctrl_base + 0x2800;
 
 	/* Initialize for Linking RAM region 0 alone */
-	cppi41_queue_mgr_init(usb_cppi41_info.q_mgr, 0, 0x3fff);
+	cppi41_queue_mgr_init(cppi_info->q_mgr, 0, CPPI41_QMGR_REG0SIZE);
 
 	numch =  USB_CPPI41_NUM_CH * 2;
 	order = get_count_order(numch);
@@ -244,9 +251,22 @@ int __devinit cppi41_init(struct musb *musb)
 	if (order < 5)
 		order = 5;
 
-	cppi41_dma_block_init(blknum, usb_cppi41_info.q_mgr, order,
+	cppi41_dma_block_init(blknum, cppi_info->q_mgr, order,
 			dma_sched_table, numch);
 	return 0;
+}
+void cppi41_free(void)
+{
+	u32 numch, blknum, order;
+	struct usb_cppi41_info *cppi_info = &usb_cppi41_info[0];
+
+	numch =  USB_CPPI41_NUM_CH * 2;
+	order = get_count_order(numch);
+	blknum = cppi_info->dma_block;
+
+	cppi41_dma_block_uninit(blknum, cppi_info->q_mgr, order,
+			dma_sched_table, numch);
+	cppi41_queue_mgr_uninit(cppi_info->q_mgr);
 }
 #endif /* CONFIG_USB_TI_CPPI41_DMA */
 
@@ -293,11 +313,7 @@ static void am35x_musb_disable(struct musb *musb)
 	musb_writel(reg_base, USB_END_OF_INTR_REG, 0);
 }
 
-#ifdef CONFIG_USB_MUSB_HDRC_HCD
 #define portstate(stmt)		stmt
-#else
-#define portstate(stmt)
-#endif
 
 static void am35x_musb_set_vbus(struct musb *musb, int is_on)
 {
@@ -320,7 +336,8 @@ static void otg_timer(unsigned long _musb)
 	 * status change events (from the transceiver) otherwise.
 	 */
 	devctl = musb_readb(mregs, MUSB_DEVCTL);
-	DBG(7, "Poll devctl %02x (%s)\n", devctl, otg_state_string(musb));
+	dev_dbg(musb->controller, "Poll devctl %02x (%s)\n", devctl,
+		otg_state_string(musb->xceiv->state));
 
 	spin_lock_irqsave(&musb->lock, flags);
 	switch (musb->xceiv->state) {
@@ -371,20 +388,22 @@ static void am35x_musb_try_idle(struct musb *musb, unsigned long timeout)
 	/* Never idle if active, or when VBUS timeout is not set as host */
 	if (musb->is_active || (musb->a_wait_bcon == 0 &&
 				musb->xceiv->state == OTG_STATE_A_WAIT_BCON)) {
-		DBG(4, "%s active, deleting timer\n", otg_state_string(musb));
+		dev_dbg(musb->controller, "%s active, deleting timer\n",
+			otg_state_string(musb->xceiv->state));
 		del_timer(&otg_workaround);
 		last_timer = jiffies;
 		return;
 	}
 
 	if (time_after(last_timer, timeout) && timer_pending(&otg_workaround)) {
-		DBG(4, "Longer idle timer already pending, ignoring...\n");
+		dev_dbg(musb->controller, "Longer idle timer already pending, ignoring...\n");
 		return;
 	}
 	last_timer = timeout;
 
-	DBG(4, "%s inactive, starting idle timer for %u ms\n",
-	    otg_state_string(musb), jiffies_to_msecs(timeout - jiffies));
+	dev_dbg(musb->controller, "%s inactive, starting idle timer for %u ms\n",
+		otg_state_string(musb->xceiv->state),
+		jiffies_to_msecs(timeout - jiffies));
 	mod_timer(&otg_workaround, timeout);
 }
 
@@ -422,7 +441,7 @@ static irqreturn_t am35x_musb_interrupt(int irq, void *hci)
 			tx = (pend1 >> 31)  | ((pend2 & 1) ? (1 << 1) : 0);
 			rx = (pend2 >> 1) & 0x3;
 
-			DBG(4, "CPPI 4.1 IRQ: Tx %x, Rx %x\n", tx, rx);
+			dev_dbg(musb->controller, "CPPI 4.1 IRQ: Tx %x, Rx %x\n", tx, rx);
 			cppi41_completion(musb, rx, tx);
 			ret = IRQ_HANDLED;
 		}
@@ -497,9 +516,9 @@ static irqreturn_t am35x_musb_interrupt(int irq, void *hci)
 		}
 
 		/* NOTE: this must complete power-on within 100 ms. */
-		DBG(2, "VBUS %s (%s)%s, devctl %02x\n",
+		dev_dbg(musb->controller, "VBUS %s (%s)%s, devctl %02x\n",
 				drvvbus ? "on" : "off",
-				otg_state_string(musb),
+				otg_state_string(musb->xceiv->state),
 				err ? " ERROR" : "",
 				devctl);
 		ret = IRQ_HANDLED;
@@ -557,8 +576,8 @@ static int am35x_musb_init(struct musb *musb)
 	if (!rev)
 		return -ENODEV;
 
-	usb_nop_xceiv_register();
-	musb->xceiv = otg_get_transceiver();
+	usb_nop_xceiv_register(musb->id);
+	musb->xceiv = otg_get_transceiver(musb->id);
 	if (!musb->xceiv)
 		return -ENODEV;
 
@@ -574,7 +593,7 @@ static int am35x_musb_init(struct musb *musb)
 
 	/* Start the on-chip PHY and its PLL. */
 	if (data->set_phy_power)
-		data->set_phy_power(1);
+		data->set_phy_power(0, 1);
 
 	msleep(5);
 
@@ -602,10 +621,10 @@ static int am35x_musb_exit(struct musb *musb)
 
 	/* Shutdown the on-chip PHY and its PLL. */
 	if (data->set_phy_power)
-		data->set_phy_power(0);
+		data->set_phy_power(0, 0);
 
 	otg_put_transceiver(musb->xceiv);
-	usb_nop_xceiv_unregister();
+	usb_nop_xceiv_unregister(musb->id);
 
 	return 0;
 }
@@ -680,12 +699,13 @@ static int __init am35x_probe(struct platform_device *pdev)
 		goto err0;
 	}
 
-	musb = platform_device_alloc("musb-hdrc", -1);
+	musb = platform_device_alloc("musb-hdrc", pdev->id);
 	if (!musb) {
 		dev_err(&pdev->dev, "failed to allocate musb device\n");
 		goto err1;
 	}
 
+	dev_set_name(&pdev->dev, "musb-am35x");
 	phy_clk = clk_get(&pdev->dev, "fck");
 	if (IS_ERR(phy_clk)) {
 		dev_err(&pdev->dev, "failed to get PHY clock\n");
@@ -773,7 +793,7 @@ static int __exit am35x_remove(struct platform_device *pdev)
 	struct am35x_glue	*glue = platform_get_drvdata(pdev);
 
 	platform_device_del(glue->musb);
-	platform_device_put(glue->musb);
+	/*platform_device_put(glue->musb);*/
 	clk_disable(glue->clk);
 	clk_disable(glue->phy_clk);
 	clk_put(glue->clk);
@@ -792,7 +812,7 @@ static int am35x_suspend(struct device *dev)
 
 	/* Shutdown the on-chip PHY and its PLL. */
 	if (data->set_phy_power)
-		data->set_phy_power(0);
+		data->set_phy_power(0, 0);
 
 	clk_disable(glue->phy_clk);
 	clk_disable(glue->clk);
@@ -809,7 +829,7 @@ static int am35x_resume(struct device *dev)
 
 	/* Start the on-chip PHY and its PLL. */
 	if (data->set_phy_power)
-		data->set_phy_power(1);
+		data->set_phy_power(0, 1);
 
 	ret = clk_enable(glue->phy_clk);
 	if (ret) {
@@ -857,7 +877,7 @@ subsys_initcall(am35x_init);
 static void __exit am35x_exit(void)
 {
 #ifdef CONFIG_USB_TI_CPPI41_DMA
-	cppi41_exit();
+	cppi41_free();
 #endif
 	platform_driver_unregister(&am35x_driver);
 }

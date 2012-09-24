@@ -55,7 +55,7 @@ module_param(timer_margin, uint, 0);
 MODULE_PARM_DESC(timer_margin, "initial watchdog timeout (in seconds)");
 
 static unsigned int wdt_trgr_pattern = 0x1234;
-static spinlock_t wdt_lock;
+static DEFINE_SPINLOCK(wdt_lock);
 
 struct omap_wdt_dev {
 	void __iomem    *base;          /* physical */
@@ -124,6 +124,8 @@ static void omap_wdt_set_timeout(struct omap_wdt_dev *wdev)
 	u32 pre_margin = GET_WLDR_VAL(timer_margin);
 	void __iomem *base = wdev->base;
 
+	pm_runtime_get_sync(wdev->dev);
+
 	/* just count up at 32 KHz */
 	while (__raw_readl(base + OMAP_WATCHDOG_WPS) & 0x04)
 		cpu_relax();
@@ -131,6 +133,8 @@ static void omap_wdt_set_timeout(struct omap_wdt_dev *wdev)
 	__raw_writel(pre_margin, base + OMAP_WATCHDOG_LDR);
 	while (__raw_readl(base + OMAP_WATCHDOG_WPS) & 0x04)
 		cpu_relax();
+
+	pm_runtime_put_sync(wdev->dev);
 }
 
 /*
@@ -160,6 +164,8 @@ static int omap_wdt_open(struct inode *inode, struct file *file)
 	omap_wdt_ping(wdev); /* trigger loading of new timeout value */
 	omap_wdt_enable(wdev);
 
+	pm_runtime_put_sync(wdev->dev);
+
 	return nonseekable_open(inode, file);
 }
 
@@ -171,6 +177,7 @@ static int omap_wdt_release(struct inode *inode, struct file *file)
 	 *      Shut off the timer unless NOWAYOUT is defined.
 	 */
 #ifndef CONFIG_WATCHDOG_NOWAYOUT
+	pm_runtime_get_sync(wdev->dev);
 
 	omap_wdt_disable(wdev);
 
@@ -190,9 +197,11 @@ static ssize_t omap_wdt_write(struct file *file, const char __user *data,
 
 	/* Refresh LOAD_TIME. */
 	if (len) {
+		pm_runtime_get_sync(wdev->dev);
 		spin_lock(&wdt_lock);
 		omap_wdt_ping(wdev);
 		spin_unlock(&wdt_lock);
+		pm_runtime_put_sync(wdev->dev);
 	}
 	return len;
 }
@@ -223,16 +232,20 @@ static long omap_wdt_ioctl(struct file *file, unsigned int cmd,
 		if (cpu_is_omap24xx())
 			return put_user(omap_prcm_get_reset_sources(),
 					(int __user *)arg);
+		return put_user(0, (int __user *)arg);
 	case WDIOC_KEEPALIVE:
+		pm_runtime_get_sync(wdev->dev);
 		spin_lock(&wdt_lock);
 		omap_wdt_ping(wdev);
 		spin_unlock(&wdt_lock);
+		pm_runtime_put_sync(wdev->dev);
 		return 0;
 	case WDIOC_SETTIMEOUT:
 		if (get_user(new_margin, (int __user *)arg))
 			return -EFAULT;
 		omap_wdt_adjust_timeout(new_margin);
 
+		pm_runtime_get_sync(wdev->dev);
 		spin_lock(&wdt_lock);
 		omap_wdt_disable(wdev);
 		omap_wdt_set_timeout(wdev);
@@ -240,6 +253,7 @@ static long omap_wdt_ioctl(struct file *file, unsigned int cmd,
 
 		omap_wdt_ping(wdev);
 		spin_unlock(&wdt_lock);
+		pm_runtime_put_sync(wdev->dev);
 		/* Fall */
 	case WDIOC_GETTIMEOUT:
 		return put_user(timer_margin, (int __user *)arg);
@@ -325,6 +339,7 @@ static int __devinit omap_wdt_probe(struct platform_device *pdev)
 	return 0;
 
 err_misc:
+	pm_runtime_disable(wdev->dev);
 	platform_set_drvdata(pdev, NULL);
 	iounmap(wdev->base);
 
@@ -345,8 +360,11 @@ static void omap_wdt_shutdown(struct platform_device *pdev)
 {
 	struct omap_wdt_dev *wdev = platform_get_drvdata(pdev);
 
-	if (wdev->omap_wdt_users)
+	if (wdev->omap_wdt_users) {
+		pm_runtime_get_sync(wdev->dev);
 		omap_wdt_disable(wdev);
+		pm_runtime_put_sync(wdev->dev);
+	}
 }
 
 static int __devexit omap_wdt_remove(struct platform_device *pdev)
@@ -354,6 +372,7 @@ static int __devexit omap_wdt_remove(struct platform_device *pdev)
 	struct omap_wdt_dev *wdev = platform_get_drvdata(pdev);
 	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
+	pm_runtime_disable(wdev->dev);
 	if (!res)
 		return -ENOENT;
 
@@ -381,8 +400,11 @@ static int omap_wdt_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct omap_wdt_dev *wdev = platform_get_drvdata(pdev);
 
-	if (wdev->omap_wdt_users)
+	if (wdev->omap_wdt_users) {
+		pm_runtime_get_sync(wdev->dev);
 		omap_wdt_disable(wdev);
+		pm_runtime_put_sync(wdev->dev);
+	}
 
 	return 0;
 }
@@ -392,8 +414,10 @@ static int omap_wdt_resume(struct platform_device *pdev)
 	struct omap_wdt_dev *wdev = platform_get_drvdata(pdev);
 
 	if (wdev->omap_wdt_users) {
+		pm_runtime_get_sync(wdev->dev);
 		omap_wdt_enable(wdev);
 		omap_wdt_ping(wdev);
+		pm_runtime_put_sync(wdev->dev);
 	}
 
 	return 0;
@@ -416,19 +440,7 @@ static struct platform_driver omap_wdt_driver = {
 	},
 };
 
-static int __init omap_wdt_init(void)
-{
-	spin_lock_init(&wdt_lock);
-	return platform_driver_register(&omap_wdt_driver);
-}
-
-static void __exit omap_wdt_exit(void)
-{
-	platform_driver_unregister(&omap_wdt_driver);
-}
-
-module_init(omap_wdt_init);
-module_exit(omap_wdt_exit);
+module_platform_driver(omap_wdt_driver);
 
 MODULE_AUTHOR("George G. Davis");
 MODULE_LICENSE("GPL");

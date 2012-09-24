@@ -20,7 +20,6 @@
 #include <linux/smp.h>
 #include <linux/perf_event.h>
 #include <linux/interrupt.h>
-#include <linux/module.h>
 #include <linux/kdebug.h>
 
 #include <asm/system.h>
@@ -135,7 +134,7 @@ asmlinkage int lookup_fault(unsigned long pc, unsigned long ret_pc,
 
 	default:
 		break;
-	};
+	}
 
 	memset(&regs, 0, sizeof (regs));
 	regs.pc = pc;
@@ -240,10 +239,9 @@ asmlinkage void do_sparc_fault(struct pt_regs *regs, int text_fault, int write,
 	 * only copy the information from the master page table,
 	 * nothing more.
 	 */
+	code = SEGV_MAPERR;
 	if (!ARCH_SUN4C && address >= TASK_SIZE)
 		goto vmalloc_fault;
-
-	code = SEGV_MAPERR;
 
 	/*
 	 * If we're in an interrupt or have no user
@@ -252,7 +250,7 @@ asmlinkage void do_sparc_fault(struct pt_regs *regs, int text_fault, int write,
         if (in_atomic() || !mm)
                 goto no_context;
 
-	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, 0, regs, address);
+	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
 
 	down_read(&mm->mmap_sem);
 
@@ -302,12 +300,10 @@ good_area:
 	}
 	if (fault & VM_FAULT_MAJOR) {
 		current->maj_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, 0,
-			      regs, address);
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MAJ, 1, regs, address);
 	} else {
 		current->min_flt++;
-		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, 0,
-			      regs, address);
+		perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS_MIN, 1, regs, address);
 	}
 	up_read(&mm->mmap_sem);
 	return;

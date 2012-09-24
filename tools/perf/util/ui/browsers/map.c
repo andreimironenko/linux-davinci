@@ -1,5 +1,7 @@
 #include "../libslang.h"
 #include <elf.h>
+#include <newt.h>
+#include <inttypes.h>
 #include <sys/ttydefaults.h>
 #include <ctype.h>
 #include <string.h>
@@ -40,7 +42,7 @@ static int ui_entry__read(const char *title, char *bf, size_t size, int width)
 out_free_form:
 	newtPopWindow();
 	newtFormDestroy(form);
-	return 0;
+	return err;
 }
 
 struct map_browser {
@@ -57,7 +59,7 @@ static void map_browser__write(struct ui_browser *self, void *nd, int row)
 	int width;
 
 	ui_browser__set_percent_color(self, 0, current_entry);
-	slsmg_printf("%*llx %*llx %c ",
+	slsmg_printf("%*" PRIx64 " %*" PRIx64 " %c ",
 		     mb->addrlen, sym->start, mb->addrlen, sym->end,
 		     sym->binding == STB_GLOBAL ? 'g' :
 		     sym->binding == STB_LOCAL  ? 'l' : 'w');
@@ -107,11 +109,8 @@ static int map_browser__run(struct map_browser *self)
 			     verbose ? "" : "restart with -v to use") < 0)
 		return -1;
 
-	if (verbose)
-		ui_browser__add_exit_key(&self->b, '/');
-
 	while (1) {
-		key = ui_browser__run(&self->b);
+		key = ui_browser__run(&self->b, 0);
 
 		if (verbose && key == '/')
 			map_browser__search(self);
@@ -150,6 +149,6 @@ int map__browse(struct map *self)
 		++mb.b.nr_entries;
 	}
 
-	mb.addrlen = snprintf(tmp, sizeof(tmp), "%llx", maxaddr);
+	mb.addrlen = snprintf(tmp, sizeof(tmp), "%" PRIx64, maxaddr);
 	return map_browser__run(&mb);
 }

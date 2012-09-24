@@ -16,10 +16,11 @@
 #include <linux/leds.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
+#include <linux/module.h>
 
 #include <asm/geode.h>
 
-static struct gpio_led net5501_leds[] = {
+static const struct gpio_led net5501_leds[] = {
 	{
 		.name = "error",
 		.gpio = 6,

@@ -11,7 +11,7 @@ Input parameters:		IN PMINI_ADAPTER Adapter   - Miniport Adapter Context
 
 
 Return:				BCM_STATUS_SUCCESS - If Wakeup of the HW Interface was successful.
-						Other           - If an error occured.
+						Other           - If an error occurred.
 */
 
 
@@ -26,7 +26,7 @@ Input parameters:		IN PMINI_ADAPTER Adapter   - Miniport Adapter Context
 
 
 Return:				BCM_STATUS_SUCCESS - If Idle mode response related HW configuration was successful.
-						Other           - If an error occured.
+						Other           - If an error occurred.
 */
 
 /*
@@ -46,6 +46,7 @@ int InterfaceIdleModeRespond(PMINI_ADAPTER Adapter, unsigned int* puiBuffer)
 {
 	int	status = STATUS_SUCCESS;
 	unsigned int	uiRegRead = 0;
+	int bytes;
 
 	BCM_DEBUG_PRINT(Adapter,DBG_TYPE_OTHERS, IDLE_MODE, DBG_LVL_ALL,"SubType of Message :0x%X", ntohl(*puiBuffer));
 
@@ -77,16 +78,16 @@ int InterfaceIdleModeRespond(PMINI_ADAPTER Adapter, unsigned int* puiBuffer)
 			else if(Adapter->ulPowerSaveMode != DEVICE_POWERSAVE_MODE_AS_PROTOCOL_IDLE_MODE)
 			{
 				//clear on read Register
-				status = rdmalt(Adapter, DEVICE_INT_OUT_EP_REG0, &uiRegRead, sizeof(uiRegRead));
-				if(status)
-				{
+				bytes = rdmalt(Adapter, DEVICE_INT_OUT_EP_REG0, &uiRegRead, sizeof(uiRegRead));
+				if (bytes < 0) {
+					status = bytes;
 					BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0, "rdm failed while clearing H/W Abort Reg0");
 					return status;
 				}
 				//clear on read Register
-				status = rdmalt (Adapter, DEVICE_INT_OUT_EP_REG1, &uiRegRead, sizeof(uiRegRead));
-				if(status)
-				{
+				bytes = rdmalt(Adapter, DEVICE_INT_OUT_EP_REG1, &uiRegRead, sizeof(uiRegRead));
+				if (bytes < 0) {
+					status = bytes;
 					BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0, "rdm failed while clearing H/W Abort	Reg1");
 					return status;
 				}
@@ -98,14 +99,6 @@ int InterfaceIdleModeRespond(PMINI_ADAPTER Adapter, unsigned int* puiBuffer)
 			Adapter->bTriedToWakeUpFromlowPowerMode = FALSE;
 
 			wake_up(&Adapter->lowpower_mode_wait_queue);
-		#if 0
-			if(Adapter->LEDInfo.led_thread_running & BCM_LED_THREAD_RUNNING_ACTIVELY)
-			{
-				BCM_DEBUG_PRINT(Adapter,DBG_TYPE_OTHERS, IDLE_MODE, DBG_LVL_ALL,"LED Thread is Running. Hence Setting the LED Event as IDLEMODE_EXIT");
-				Adapter->DriverState = IDLEMODE_EXIT;
-				wake_up(&Adapter->LEDInfo.notify_led_event);
-			}
-		#endif
 
 		}
 		else
@@ -125,9 +118,9 @@ int InterfaceIdleModeRespond(PMINI_ADAPTER Adapter, unsigned int* puiBuffer)
 					Adapter->chip_id== BCS220_3)
 			{
 
-				status = rdmalt(Adapter, HPM_CONFIG_MSW, &uiRegRead, sizeof(uiRegRead));
-				if(status)
-				{
+				bytes = rdmalt(Adapter, HPM_CONFIG_MSW, &uiRegRead, sizeof(uiRegRead));
+				if (bytes < 0) {
+					status = bytes;
 					BCM_DEBUG_PRINT(Adapter,DBG_TYPE_OTHERS, IDLE_MODE, DBG_LVL_ALL, "rdm failed while Reading HPM_CONFIG_LDO145 Reg 0\n");
 					return status;
 				}
@@ -154,17 +147,7 @@ int InterfaceIdleModeRespond(PMINI_ADAPTER Adapter, unsigned int* puiBuffer)
 	return status;
 }
 
-
-VOID InterfaceWriteIdleModeWakePattern(PMINI_ADAPTER Adapter)
-{
-/*	BeceemWriteMemoryUshort(Adapter, Host2CPU_Mailbox_Low, 0x1d1e);
-	BeceemWriteMemoryUshort(Adapter, Host2CPU_Mailbox_Low, 0x1d1e);
-	BeceemWriteMemoryUshort(Adapter, Host2CPU_Mailbox_Upp, 0xd0ea);
-	BeceemWriteMemoryUshort(Adapter, Host2CPU_Mailbox_Upp, 0xd0ea);*/
-	return;
-}
-
-int InterfaceAbortIdlemode(PMINI_ADAPTER Adapter, unsigned int Pattern)
+static int InterfaceAbortIdlemode(PMINI_ADAPTER Adapter, unsigned int Pattern)
 {
 	int 	status = STATUS_SUCCESS;
 	unsigned int value;
@@ -284,6 +267,8 @@ void InterfaceHandleShutdownModeWakeup(PMINI_ADAPTER Adapter)
 {
 	unsigned int uiRegVal = 0;
 	INT Status = 0;
+	int bytes;
+
 	if(Adapter->ulPowerSaveMode == DEVICE_POWERSAVE_MODE_AS_MANUAL_CLOCK_GATING)
 	{
 		// clear idlemode interrupt.
@@ -300,16 +285,16 @@ void InterfaceHandleShutdownModeWakeup(PMINI_ADAPTER Adapter)
 	{
 
         //clear Interrupt EP registers.
-		Status = rdmalt(Adapter,DEVICE_INT_OUT_EP_REG0, &uiRegVal, sizeof(uiRegVal));
-		if(Status)
-		{
+		bytes = rdmalt(Adapter,DEVICE_INT_OUT_EP_REG0, &uiRegVal, sizeof(uiRegVal));
+		if (bytes < 0) {
+			Status = bytes;
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"RDM of DEVICE_INT_OUT_EP_REG0 failed with Err :%d", Status);
 			return;
 		}
 
-        Status = rdmalt(Adapter,DEVICE_INT_OUT_EP_REG1, &uiRegVal, sizeof(uiRegVal));
-		if(Status)
-		{
+		bytes = rdmalt(Adapter,DEVICE_INT_OUT_EP_REG1, &uiRegVal, sizeof(uiRegVal));
+		if (bytes < 0) {
+			Status = bytes;
 			BCM_DEBUG_PRINT(Adapter,DBG_TYPE_PRINTK, 0, 0,"RDM of DEVICE_INT_OUT_EP_REG1 failed with Err :%d", Status);
 			return;
 		}

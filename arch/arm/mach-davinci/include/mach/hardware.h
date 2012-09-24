@@ -21,10 +21,6 @@
  */
 #define DAVINCI_SYSTEM_MODULE_BASE        0x01C40000
 
-#ifndef __ASSEMBLER__
-extern void __iomem  *davinci_sysmodbase;
-#define DAVINCI_SYSMODULE_VIRT(x)	(davinci_sysmodbase + (x))
-#endif
 /*
  * I/O mapping
  */

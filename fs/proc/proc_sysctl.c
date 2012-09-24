@@ -3,8 +3,10 @@
  */
 #include <linux/init.h>
 #include <linux/sysctl.h>
+#include <linux/poll.h>
 #include <linux/proc_fs.h>
 #include <linux/security.h>
+#include <linux/namei.h>
 #include "internal.h"
 
 static const struct dentry_operations proc_sys_dentry_operations;
@@ -12,6 +14,15 @@ static const struct file_operations proc_sys_file_operations;
 static const struct inode_operations proc_sys_inode_operations;
 static const struct file_operations proc_sys_dir_file_operations;
 static const struct inode_operations proc_sys_dir_operations;
+
+void proc_sys_poll_notify(struct ctl_table_poll *poll)
+{
+	if (!poll)
+		return;
+
+	atomic_inc(&poll->event);
+	wake_up_interruptible(&poll->wait);
+}
 
 static struct inode *proc_sys_make_inode(struct super_block *sb,
 		struct ctl_table_header *head, struct ctl_table *table)
@@ -31,7 +42,6 @@ static struct inode *proc_sys_make_inode(struct super_block *sb,
 	ei->sysctl_entry = table;
 
 	inode->i_mtime = inode->i_atime = inode->i_ctime = CURRENT_TIME;
-	inode->i_flags |= S_PRIVATE; /* tell selinux to ignore this inode */
 	inode->i_mode = table->mode;
 	if (!table->child) {
 		inode->i_mode |= S_IFREG;
@@ -39,7 +49,7 @@ static struct inode *proc_sys_make_inode(struct super_block *sb,
 		inode->i_fop = &proc_sys_file_operations;
 	} else {
 		inode->i_mode |= S_IFDIR;
-		inode->i_nlink = 0;
+		clear_nlink(inode);
 		inode->i_op = &proc_sys_dir_operations;
 		inode->i_fop = &proc_sys_dir_file_operations;
 	}
@@ -120,7 +130,7 @@ static struct dentry *proc_sys_lookup(struct inode *dir, struct dentry *dentry,
 		goto out;
 
 	err = NULL;
-	dentry->d_op = &proc_sys_dentry_operations;
+	d_set_d_op(dentry, &proc_sys_dentry_operations);
 	d_add(dentry, inode);
 
 out:
@@ -176,6 +186,39 @@ static ssize_t proc_sys_write(struct file *filp, const char __user *buf,
 	return proc_sys_call_handler(filp, (void __user *)buf, count, ppos, 1);
 }
 
+static int proc_sys_open(struct inode *inode, struct file *filp)
+{
+	struct ctl_table *table = PROC_I(inode)->sysctl_entry;
+
+	if (table->poll)
+		filp->private_data = proc_sys_poll_event(table->poll);
+
+	return 0;
+}
+
+static unsigned int proc_sys_poll(struct file *filp, poll_table *wait)
+{
+	struct inode *inode = filp->f_path.dentry->d_inode;
+	struct ctl_table *table = PROC_I(inode)->sysctl_entry;
+	unsigned long event = (unsigned long)filp->private_data;
+	unsigned int ret = DEFAULT_POLLMASK;
+
+	if (!table->proc_handler)
+		goto out;
+
+	if (!table->poll)
+		goto out;
+
+	poll_wait(filp, &table->poll->wait, wait);
+
+	if (event != atomic_read(&table->poll->event)) {
+		filp->private_data = proc_sys_poll_event(table->poll);
+		ret = POLLIN | POLLRDNORM | POLLERR | POLLPRI;
+	}
+
+out:
+	return ret;
+}
 
 static int proc_sys_fill_cache(struct file *filp, void *dirent,
 				filldir_t filldir,
@@ -201,7 +244,7 @@ static int proc_sys_fill_cache(struct file *filp, void *dirent,
 				dput(child);
 				return -ENOMEM;
 			} else {
-				child->d_op = &proc_sys_dentry_operations;
+				d_set_d_op(child, &proc_sys_dentry_operations);
 				d_add(child, inode);
 			}
 		} else {
@@ -316,7 +359,7 @@ static int proc_sys_permission(struct inode *inode, int mask)
 	if (!table) /* global root - r-xr-xr-x */
 		error = mask & MAY_WRITE ? -EACCES : 0;
 	else /* Use the permissions on the sysctl table entry */
-		error = sysctl_perm(head->root, table, mask);
+		error = sysctl_perm(head->root, table, mask & ~MAY_NOT_BLOCK);
 
 	sysctl_head_finish(head);
 	return error;
@@ -364,12 +407,15 @@ static int proc_sys_getattr(struct vfsmount *mnt, struct dentry *dentry, struct 
 }
 
 static const struct file_operations proc_sys_file_operations = {
+	.open		= proc_sys_open,
+	.poll		= proc_sys_poll,
 	.read		= proc_sys_read,
 	.write		= proc_sys_write,
 	.llseek		= default_llseek,
 };
 
 static const struct file_operations proc_sys_dir_file_operations = {
+	.read		= generic_read_dir,
 	.readdir	= proc_sys_readdir,
 	.llseek		= generic_file_llseek,
 };
@@ -389,23 +435,33 @@ static const struct inode_operations proc_sys_dir_operations = {
 
 static int proc_sys_revalidate(struct dentry *dentry, struct nameidata *nd)
 {
+	if (nd->flags & LOOKUP_RCU)
+		return -ECHILD;
 	return !PROC_I(dentry->d_inode)->sysctl->unregistering;
 }
 
-static int proc_sys_delete(struct dentry *dentry)
+static int proc_sys_delete(const struct dentry *dentry)
 {
 	return !!PROC_I(dentry->d_inode)->sysctl->unregistering;
 }
 
-static int proc_sys_compare(struct dentry *dir, struct qstr *qstr,
-			    struct qstr *name)
+static int proc_sys_compare(const struct dentry *parent,
+		const struct inode *pinode,
+		const struct dentry *dentry, const struct inode *inode,
+		unsigned int len, const char *str, const struct qstr *name)
 {
-	struct dentry *dentry = container_of(qstr, struct dentry, d_name);
-	if (qstr->len != name->len)
+	struct ctl_table_header *head;
+	/* Although proc doesn't have negative dentries, rcu-walk means
+	 * that inode here can be NULL */
+	/* AV: can it, indeed? */
+	if (!inode)
 		return 1;
-	if (memcmp(qstr->name, name->name, name->len))
+	if (name->len != len)
 		return 1;
-	return !sysctl_is_seen(PROC_I(dentry->d_inode)->sysctl);
+	if (memcmp(name->name, str, len))
+		return 1;
+	head = rcu_dereference(PROC_I(inode)->sysctl);
+	return !head || !sysctl_is_seen(head);
 }
 
 static const struct dentry_operations proc_sys_dentry_operations = {

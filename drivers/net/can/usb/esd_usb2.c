@@ -284,7 +284,7 @@ static void esd_usb2_rx_event(struct esd_usb2_net_priv *priv,
 				break;
 			}
 
-			/* Error occured during transmission? */
+			/* Error occurred during transmission? */
 			if (!(ecc & SJA1000_ECC_DIR))
 				cf->data[2] |= CAN_ERR_PROT_TX;
 
@@ -659,7 +659,7 @@ failed:
 static void unlink_all_urbs(struct esd_usb2 *dev)
 {
 	struct esd_usb2_net_priv *priv;
-	int i;
+	int i, j;
 
 	usb_kill_anchored_urbs(&dev->rx_submitted);
 	for (i = 0; i < dev->net_count; i++) {
@@ -668,8 +668,8 @@ static void unlink_all_urbs(struct esd_usb2 *dev)
 			usb_kill_anchored_urbs(&priv->tx_submitted);
 			atomic_set(&priv->active_tx_jobs, 0);
 
-			for (i = 0; i < MAX_TX_URBS; i++)
-				priv->tx_contexts[i].echo_index = MAX_TX_URBS;
+			for (j = 0; j < MAX_TX_URBS; j++)
+				priv->tx_contexts[j].echo_index = MAX_TX_URBS;
 		}
 	}
 }
@@ -1108,25 +1108,4 @@ static struct usb_driver esd_usb2_driver = {
 	.id_table = esd_usb2_table,
 };
 
-static int __init esd_usb2_init(void)
-{
-	int err;
-
-	/* register this driver with the USB subsystem */
-	err = usb_register(&esd_usb2_driver);
-
-	if (err) {
-		err("usb_register failed. Error number %d\n", err);
-		return err;
-	}
-
-	return 0;
-}
-module_init(esd_usb2_init);
-
-static void __exit esd_usb2_exit(void)
-{
-	/* deregister this driver with the USB subsystem */
-	usb_deregister(&esd_usb2_driver);
-}
-module_exit(esd_usb2_exit);
+module_usb_driver(esd_usb2_driver);

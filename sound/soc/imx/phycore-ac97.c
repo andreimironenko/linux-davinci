@@ -17,7 +17,6 @@
 #include <sound/core.h>
 #include <sound/pcm.h>
 #include <sound/soc.h>
-#include <sound/soc-dapm.h>
 #include <asm/mach-types.h>
 
 static struct snd_soc_card imx_phycore;
@@ -39,6 +38,7 @@ static struct snd_soc_dai_link imx_phycore_dai_ac97[] = {
 
 static struct snd_soc_card imx_phycore = {
 	.name		= "PhyCORE-ac97-audio",
+	.owner		= THIS_MODULE,
 	.dai_link	= imx_phycore_dai_ac97,
 	.num_links	= ARRAY_SIZE(imx_phycore_dai_ac97),
 };

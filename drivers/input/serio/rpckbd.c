@@ -90,7 +90,7 @@ static int rpckbd_open(struct serio *port)
 
 	if (request_irq(IRQ_KEYBOARDTX, rpckbd_tx, 0, "rpckbd", port) != 0) {
 		printk(KERN_ERR "rpckbd.c: Could not allocate keyboard transmit IRQ\n");
-		free_irq(IRQ_KEYBOARDRX, NULL);
+		free_irq(IRQ_KEYBOARDRX, port);
 		return -EBUSY;
 	}
 
@@ -143,16 +143,4 @@ static struct platform_driver rpckbd_driver = {
 		.owner	= THIS_MODULE,
 	},
 };
-
-static int __init rpckbd_init(void)
-{
-	return platform_driver_register(&rpckbd_driver);
-}
-
-static void __exit rpckbd_exit(void)
-{
-	platform_driver_unregister(&rpckbd_driver);
-}
-
-module_init(rpckbd_init);
-module_exit(rpckbd_exit);
+module_platform_driver(rpckbd_driver);
