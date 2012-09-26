@@ -32,14 +32,26 @@
 #include "davinci-i2s.h"
 #include "davinci-mcasp.h"
 
+#define AM
+
 // DSP B, codec is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
- #define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
+//#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
 // DSP B, cpu is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
 //#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_IB_NF)
 
 //David's changes
 // DSP A, codec is clock master, recv clk falling edge CLKR + xmit clk rising edge CLKX
 //#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
+//#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_IF)
+
+//#define AUDIO_FORMAT (SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM| SND_SOC_DAIFMT_NB_NF)
+//#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_NB_NF)
+
+//Tested:
+//null #define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_NB_NF)
+//null#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_IF)
+//null#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_NB_IF)
+#define AUDIO_FORMAT (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_NF)
 
 static int htc_hw_params(struct snd_pcm_substream *substream,
 			 struct snd_pcm_hw_params *params)
@@ -81,7 +93,7 @@ static struct snd_soc_ops htc_ops = {
 	.hw_params = htc_hw_params,
 };
 
-#if 0
+#ifndef AM
 /* davinci-htc machine dapm widgets */
 static const struct snd_soc_dapm_widget aic3x_dapm_widgets[] = {
 	SND_SOC_DAPM_HP("Headphone Jack", NULL),
@@ -89,9 +101,37 @@ static const struct snd_soc_dapm_widget aic3x_dapm_widgets[] = {
 	SND_SOC_DAPM_MIC("Mic Jack", NULL),
 	SND_SOC_DAPM_LINE("Line In", NULL),
 };
+#endif
+
+/* davinci-htc machine dapm widgets */
+static const struct snd_soc_dapm_widget aic3x_dapm_widgets[] = {
+
+#ifndef AM
+	SND_SOC_DAPM_LINE("Line Out", NULL),
+	SND_SOC_DAPM_LINE("Line In", NULL),
+#endif
+
+	SND_SOC_DAPM_HP("Headphone Jack", NULL),
+	SND_SOC_DAPM_LINE("Line In", NULL),
+	SND_SOC_DAPM_LINE("Line Out", NULL),
+	SND_SOC_DAPM_MIC("Mic Jack", NULL),
+
+};
 
 /* davinci-htc machine audio_mapnections to the codec pins */
 static const struct snd_soc_dapm_route audio_map[] = {
+
+		{ "Headphone Jack", NULL, "LHPOUT"},
+		{ "Headphone Jack", NULL, "RHPOUT"},
+
+		{ "Line Out", NULL, "LOUT" },
+		{ "Line Out", NULL, "ROUT" },
+
+		{ "LLINEIN", NULL, "Line In"},
+		{ "RLINEIN", NULL, "Line In"},
+
+		{ "MICIN", NULL, "Mic Jack"},
+#ifndef AM
 	/* Headphone connected to HPLOUT, HPROUT */
 	{"Headphone Jack", NULL, "HPLOUT"},
 	{"Headphone Jack", NULL, "HPROUT"},
@@ -110,13 +150,24 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"LINE2L", NULL, "Line In"},
 	{"LINE1R", NULL, "Line In"},
 	{"LINE2R", NULL, "Line In"},
-};
+
+
+	/* Lineout connected to HPLOUT, HPROUT */
+	{"Line out", NULL, "LOUT"},
+	{"Line out", NULL, "ROUT"},
+
+	/* Davinci line in is connected to LLINEIN/RLINEIN*/
+	{"LLINEIN", NULL, "Line In"},
+	{"RLINEIN", NULL, "Line In"}
 #endif
 
+
+};
+
 /* Logic for a aic3x as connected on a davinci-htc */
-static int htc_aic3x_init(struct snd_soc_codec *codec)
+static int htc_aic23_init(struct snd_soc_codec *codec)
 {
-#if 0
+
 	/* Add davinci-htc specific widgets */
 	snd_soc_dapm_new_controls(codec, aic3x_dapm_widgets,
 				  ARRAY_SIZE(aic3x_dapm_widgets));
@@ -124,20 +175,25 @@ static int htc_aic3x_init(struct snd_soc_codec *codec)
 	/* Set up davinci-htc specific audio path audio_map */
 	snd_soc_dapm_add_routes(codec, audio_map, ARRAY_SIZE(audio_map));
 
+#ifndef AM
 	/* not connected */
-	snd_soc_dapm_disable_pin(codec, "MONO_LOUT");
-	snd_soc_dapm_disable_pin(codec, "HPLCOM");
-	snd_soc_dapm_disable_pin(codec, "HPRCOM");
+	//snd_soc_dapm_disable_pin(codec, "MONO_LOUT");
+	//snd_soc_dapm_disable_pin(codec, "HPLCOM");
+	//snd_soc_dapm_disable_pin(codec, "HPRCOM");
 
 	/* always connected */
-	snd_soc_dapm_enable_pin(codec, "Headphone Jack");
+	//snd_soc_dapm_enable_pin(codec, "Headphone Jack");
 	snd_soc_dapm_enable_pin(codec, "Line Out");
-	snd_soc_dapm_enable_pin(codec, "Mic Jack");
+	//snd_soc_dapm_enable_pin(codec, "Mic Jack");
 	snd_soc_dapm_enable_pin(codec, "Line In");
 #endif
 
-	snd_soc_dapm_sync(codec);
+	snd_soc_dapm_enable_pin(codec, "Headphone Jack");
+	snd_soc_dapm_enable_pin(codec, "Line In");
+	snd_soc_dapm_enable_pin(codec, "Line Out");
+	snd_soc_dapm_enable_pin(codec, "Mic Jack");
 
+	snd_soc_dapm_sync(codec);
 	return 0;
 }
 
@@ -147,7 +203,7 @@ static struct snd_soc_dai_link htc_dai = {
 	.stream_name = "TLV320",
 	.cpu_dai = &davinci_i2s_dai,
 	.codec_dai = &tlv320aic23_dai,
-	.init = htc_aic3x_init,
+	.init = htc_aic23_init,
 	.ops = &htc_ops,
 };
 

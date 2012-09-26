@@ -38,8 +38,10 @@
 
 #define AIC23_VERSION "0.1"
 
-//#define DEBUG
-//#define DEBUG_WRITES
+#define AM
+
+#define DEBUG
+#define DEBUG_WRITES
 
 /*
  * AIC23 register cache
@@ -130,15 +132,29 @@ static int tlv320aic23_write(struct snd_soc_codec *codec, unsigned int reg,
 
 static const char *rec_src_text[] = { "Line", "Mic" };
 static const char *deemph_text[] = {"None", "32Khz", "44.1Khz", "48Khz"};
+static const char *switch_off_on[] = { "Off", "On"}; //Off = 0, On = 1
+static const char *switch_on_off[] = { "On", "Off"}; //On = 0, Off = 1
+static const char *switch_normal_muted[] = { "Normal", "Muted"}; //Normal = 0, Muted =1
+static const char *switch_mic_boost[] = {"0 dB", "20 dB"};
+static const char *switch_disabled_enabled[] = {"Disabled", "Enabled"};
+
 
 static const struct soc_enum rec_src_enum =
 	SOC_ENUM_SINGLE(TLV320AIC23_ANLG, 2, 2, rec_src_text);
 
+#ifndef AM
 static const struct snd_kcontrol_new tlv320aic23_rec_src_mux_controls =
-SOC_DAPM_ENUM("Input Select", rec_src_enum);
+    SOC_DAPM_ENUM("Input Select", rec_src_enum);
+#else
+    static const struct snd_kcontrol_new tlv320aic23_rec_src_mux_controls =
+    SOC_DAPM_ENUM("Line Capture Route", rec_src_enum);
+#endif
 
+#ifndef AM
 static const struct soc_enum tlv320aic23_rec_src =
 	SOC_ENUM_SINGLE(TLV320AIC23_ANLG, 2, 2, rec_src_text);
+#endif
+
 static const struct soc_enum tlv320aic23_deemph =
 	SOC_ENUM_SINGLE(TLV320AIC23_DIGT, 1, 4, deemph_text);
 
@@ -192,6 +208,7 @@ static int snd_soc_tlv320aic23_get_volsw(struct snd_kcontrol *kcontrol,
 	.put = snd_soc_tlv320aic23_put_volsw, \
 	.private_value =  SOC_SINGLE_VALUE(reg, shift, max, invert) }
 
+#ifndef AM
 static const struct snd_kcontrol_new tlv320aic23_snd_controls[] = {
 	SOC_DOUBLE_R_TLV("Digital Playback Volume", TLV320AIC23_LCHNVOL,
 			 TLV320AIC23_RCHNVOL, 0, 127, 0, out_gain_tlv),
@@ -205,25 +222,108 @@ static const struct snd_kcontrol_new tlv320aic23_snd_controls[] = {
 	SOC_TLV320AIC23_SINGLE_TLV("Sidetone Volume", TLV320AIC23_ANLG,
 				  6, 4, 0, sidetone_vol_tlv),
 	SOC_ENUM("Playback De-emphasis", tlv320aic23_deemph),
+	SOC_ENUM("Input Switch", tlv320aic23_rec_src)
 };
+#endif
+
+static const struct soc_enum tlv320aic23_playback_switch =
+	SOC_ENUM_SINGLE(TLV320AIC23_DIGT, 3, 2, switch_off_on);
+
+static const struct soc_enum tlv320aic23_left_capture_switch =
+	SOC_ENUM_SINGLE(TLV320AIC23_LINVOL,7, 2, switch_normal_muted);
+
+static const struct soc_enum tlv320aic23_right_capture_switch =
+	SOC_ENUM_SINGLE(TLV320AIC23_RINVOL,7, 2, switch_normal_muted);
+
+static const struct soc_enum tlv320aic23_line_input_switch =
+	SOC_ENUM_SINGLE(TLV320AIC23_PWR, 0, 2, switch_on_off);
+
+static const struct soc_enum tlv320aic23_mic_input_switch =
+	SOC_ENUM_SINGLE(TLV320AIC23_PWR, 1, 2, switch_on_off);
+
+static const struct soc_enum tlv320aic23_micm_input_switch =
+	SOC_ENUM_SINGLE(TLV320AIC23_ANLG, 1, 2, switch_normal_muted);
+
+static const struct soc_enum tlv320aic23_micb_input_switch =
+	SOC_ENUM_SINGLE(TLV320AIC23_ANLG, 0, 2, switch_mic_boost);
+
+static const struct soc_enum tlv320aic23_adchp_input_switch =
+	SOC_ENUM_SINGLE(TLV320AIC23_DIGT, 0, 2, switch_disabled_enabled);
+
+static const struct soc_enum tlv320aic23_adc_input_switch =
+		SOC_ENUM_SINGLE(TLV320AIC23_PWR, 2, 2, switch_on_off);
+
+
+static const struct snd_kcontrol_new tlv320aic23_snd_controls[] = {
+
+	SOC_DOUBLE_R_TLV("Speaker Playback Volume", TLV320AIC23_LCHNVOL,
+			 TLV320AIC23_RCHNVOL, 0, 127, 0, out_gain_tlv),
+	//SOC_SINGLE("Playback Switch", TLV320AIC23_DIGT, 3, 1, 1),
+	SOC_DOUBLE_R_TLV("Capture Volume", TLV320AIC23_LINVOL,
+			 TLV320AIC23_RINVOL, 0, 31, 0, input_gain_tlv),
+	//SOC_DOUBLE_R("Capture Switch", TLV320AIC23_LINVOL,
+	//		 		     TLV320AIC23_RINVOL, 7, 1, 0),
+	SOC_ENUM("De-emphasis Capture", tlv320aic23_deemph),
+	SOC_ENUM("DACM Playback Switch", tlv320aic23_playback_switch),
+	SOC_ENUM("Left Capture Switch", tlv320aic23_left_capture_switch),
+	SOC_ENUM("Right Capture Switch", tlv320aic23_right_capture_switch),
+	SOC_ENUM("PwrMic Capture Switch", tlv320aic23_mic_input_switch),
+	SOC_ENUM("PwrLine Capture Switch",tlv320aic23_line_input_switch),
+	SOC_ENUM("MICM Capture Switch",tlv320aic23_micm_input_switch),
+	SOC_ENUM("MICB Capture Switch",tlv320aic23_micb_input_switch),
+    SOC_ENUM("ADCHP Capture Switch",tlv320aic23_adchp_input_switch),
+    SOC_ENUM("PwrADC Capture Switch",tlv320aic23_adc_input_switch),
+
+
+	SOC_DOUBLE_R("Simult.Update Playback Switch", TLV320AIC23_LINVOL,
+			TLV320AIC23_RINVOL, 8, 1, 1),
+};
+
+
+static const struct soc_enum tlv320aic23_line_bypass =
+	SOC_ENUM_SINGLE(TLV320AIC23_ANLG, 3, 2, switch_off_on);
+
+static const struct soc_enum tlv320aic23_mic_sidetone =
+	SOC_ENUM_SINGLE(TLV320AIC23_ANLG, 5, 2, switch_off_on);
+
+static const struct soc_enum tlv320aic23_playback =
+	SOC_ENUM_SINGLE(TLV320AIC23_ANLG, 4, 2, switch_off_on);
+
+
 
 /* PGA Mixer controls for Line and Mic switch */
 static const struct snd_kcontrol_new tlv320aic23_output_mixer_controls[] = {
+
+#ifndef AM
 	SOC_DAPM_SINGLE("Line Bypass Switch", TLV320AIC23_ANLG, 3, 1, 0),
 	SOC_DAPM_SINGLE("Mic Sidetone Switch", TLV320AIC23_ANLG, 5, 1, 0),
 	SOC_DAPM_SINGLE("Playback Switch", TLV320AIC23_ANLG, 4, 1, 0),
+#else
+	SOC_DAPM_ENUM("Line Bypass Switch", tlv320aic23_line_bypass),
+	SOC_DAPM_ENUM("Mic Sidetone Switch", tlv320aic23_mic_sidetone),
+	SOC_DAPM_ENUM("Playback Switch", tlv320aic23_playback),
+#endif
 };
 
+
 static const struct snd_soc_dapm_widget tlv320aic23_dapm_widgets[] = {
-#if 0
 	SND_SOC_DAPM_DAC("DAC", "Playback", TLV320AIC23_PWR, 3, 1),
 	SND_SOC_DAPM_ADC("ADC", "Capture", TLV320AIC23_PWR, 2, 1),
-#endif
-	SND_SOC_DAPM_MUX("Capture Source", SND_SOC_NOPM, 0, 0,
+
+	SND_SOC_DAPM_MUX("Input Mux", TLV320AIC23_PWR, 0, 1,
 			 &tlv320aic23_rec_src_mux_controls),
+
+
+#ifndef AM
 	SND_SOC_DAPM_MIXER("Output Mixer", TLV320AIC23_PWR, 4, 1,
 			   &tlv320aic23_output_mixer_controls[0],
 			   ARRAY_SIZE(tlv320aic23_output_mixer_controls)),
+#endif
+
+    SND_SOC_DAPM_MIXER_NAMED_CTL("Output Mixer", TLV320AIC23_PWR, 4, 1,
+			   &tlv320aic23_output_mixer_controls[0],
+			   ARRAY_SIZE(tlv320aic23_output_mixer_controls)),
+
 	SND_SOC_DAPM_PGA("Line Input", TLV320AIC23_PWR, 0, 1, NULL, 0),
 	SND_SOC_DAPM_PGA("Mic Input", TLV320AIC23_PWR, 1, 1, NULL, 0),
 
@@ -241,9 +341,7 @@ static const struct snd_soc_dapm_widget tlv320aic23_dapm_widgets[] = {
 static const struct snd_soc_dapm_route intercon[] = {
 	/* Output Mixer */
 	{"Output Mixer", "Line Bypass Switch", "Line Input"},
-#if 0
 	{"Output Mixer", "Playback Switch", "DAC"},
-#endif
 	{"Output Mixer", "Mic Sidetone Switch", "Mic Input"},
 
 	/* Outputs */
@@ -255,15 +353,12 @@ static const struct snd_soc_dapm_route intercon[] = {
 	/* Inputs */
 	{"Line Input", "NULL", "LLINEIN"},
 	{"Line Input", "NULL", "RLINEIN"},
-
 	{"Mic Input", "NULL", "MICIN"},
 
 	/* input mux */
-	{"Capture Source", "Line", "Line Input"},
-	{"Capture Source", "Mic", "Mic Input"},
-#if 0
-	{"ADC", NULL, "Capture Source"},
-#endif
+	{"Input Mux", "Line", "Line Input"},
+	{"Input Mux", "Mic", "Mic Input"},
+	{"ADC", NULL, "Input Mux"},
 
 };
 
@@ -487,12 +582,12 @@ static int tlv320aic23_pcm_prepare(struct snd_pcm_substream *substream,
 	struct snd_soc_device *socdev = rtd->socdev;
 	struct snd_soc_codec *codec = socdev->card->codec;
 
-	//pr_info("tlv320aic23_pcm_prepare\n");
+	pr_info("tlv320aic23_pcm_prepare\n");
 
 	/* set active */
 	// DJS - avoid rewriting the register if its already set to the desired value
 	// this fixes an issue where occasional glitches were occurring
-	if(tlv320aic23_read_reg_cache(codec, TLV320AIC23_ACTIVE) != 0x0001)
+	//if(tlv320aic23_read_reg_cache(codec, TLV320AIC23_ACTIVE) != 0x0001)
 		tlv320aic23_write(codec, TLV320AIC23_ACTIVE, 0x0001);
 
 	return 0;
@@ -506,7 +601,7 @@ static void tlv320aic23_shutdown(struct snd_pcm_substream *substream,
 	struct snd_soc_codec *codec = socdev->card->codec;
 	struct aic23 *aic23 = container_of(codec, struct aic23, codec);
 
-//	pr_info("tlv320aic23_shutdown\n");
+	pr_info("tlv320aic23_shutdown\n");
 
 	/* deactivate */
 	if (!codec->active) {
@@ -524,7 +619,7 @@ static int tlv320aic23_mute(struct snd_soc_dai *dai, int mute)
 	struct snd_soc_codec *codec = dai->codec;
 	u16 reg, oreg;
 
-	//pr_info("tlv320aic23_mute: %d\n", mute);
+	pr_info("tlv320aic23_mute: %d\n", mute);
 
 	oreg = reg = tlv320aic23_read_reg_cache(codec, TLV320AIC23_DIGT);
 	if (mute) {
@@ -547,7 +642,7 @@ static int tlv320aic23_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	struct snd_soc_codec *codec = codec_dai->codec;
 	u16 iface_reg;
 
-	//pr_info("tlv320aic23_set_dai_fmt: %u\n", fmt);
+	pr_info("tlv320aic23_set_dai_fmt: %u\n", fmt);
 
 	iface_reg =
 	    tlv320aic23_read_reg_cache(codec, TLV320AIC23_DIGT_FMT) & (~0x03);
@@ -605,21 +700,50 @@ static int tlv320aic23_set_bias_level(struct snd_soc_codec *codec,
 
 	switch (level) {
 	case SND_SOC_BIAS_ON:
-//		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_ON\n");
+		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_ON\n");
 		/* vref/mid, osc on, dac unmute */
 		tlv320aic23_write(codec, TLV320AIC23_PWR, reg);
+		u16 pwr = reg;
+
+#ifndef AM
+		//Switch on MIC_ON |             LINE_IN_ON              | ADC_ON
+		pwr &= (~TLV320AIC23_MIC_OFF) | (~TLV320AIC23_LINE_OFF) | (~TLV320AIC23_ADC_OFF);
+		tlv320aic23_write(codec, TLV320AIC23_PWR, pwr);
+
+		u16 anlg = tlv320aic23_read_reg_cache(codec, TLV320AIC23_ANLG);
+		//ACTIVATE LINE-IN
+		anlg &= (~TLV320AIC23_INSEL_MIC);
+		tlv320aic23_write(codec, TLV320AIC23_ANLG, anlg);
+
+		//UNMUTE LINE-IN LEFT
+		u16 linvol = tlv320aic23_read_reg_cache(codec, TLV320AIC23_LINVOL);
+		linvol &= (~TLV320AIC23_LIM_MUTED);
+		tlv320aic23_write(codec, TLV320AIC23_LINVOL, linvol);
+
+		//UNMUTE LINE-IN RIGHT
+		u16 rinvol = tlv320aic23_read_reg_cache(codec, TLV320AIC23_RINVOL);
+		rinvol &= (~TLV320AIC23_LIM_MUTED);
+		tlv320aic23_write(codec, TLV320AIC23_RINVOL, rinvol);
+#endif
 		break;
+
 	case SND_SOC_BIAS_PREPARE:
-//		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_ON\n");
+		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_ON\n");
 		break;
 	case SND_SOC_BIAS_STANDBY:
-//		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_STANDBY\n");
+		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_STANDBY\n");
 		/* everything off except vref/vmid, */
+#ifndef AM
 		tlv320aic23_write(codec, TLV320AIC23_PWR, reg | \
 			TLV320AIC23_CLK_OFF);
+#else
+		tlv320aic23_write(codec, TLV320AIC23_PWR, reg);
+#endif
+
+
 		break;
 	case SND_SOC_BIAS_OFF:
-//		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_OFF\n");
+		pr_info("tlv320aic23_set_bias_level: SND_SOC_BIAS_OFF\n");
 		/* everything off, dac mute, inactive */
 		tlv320aic23_write(codec, TLV320AIC23_ACTIVE, 0x0);
 		tlv320aic23_write(codec, TLV320AIC23_PWR, 0xffff);
@@ -666,7 +790,7 @@ static int tlv320aic23_suspend(struct platform_device *pdev,
 	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
 	struct snd_soc_codec *codec = socdev->card->codec;
 
-//	pr_info("tlv320aic23_suspend\n");
+	pr_info("tlv320aic23_suspend\n");
 
 	tlv320aic23_write(codec, TLV320AIC23_ACTIVE, 0x0);
 	tlv320aic23_set_bias_level(codec, SND_SOC_BIAS_OFF);
@@ -680,7 +804,7 @@ static int tlv320aic23_resume(struct platform_device *pdev)
 	struct snd_soc_codec *codec = socdev->card->codec;
 	u16 reg;
 
-//	pr_info("tlv320aic23_resume\n");
+	pr_info("tlv320aic23_resume\n");
 
 	/* Sync reg_cache with the hardware */
 	for (reg = 0; reg <= TLV320AIC23_ACTIVE; reg++) {

@@ -77,6 +77,7 @@
 #define DAVINCI_MCBSP_SRGR_FWID(v)	((v) << 8)
 #define DAVINCI_MCBSP_SRGR_FPER(v)	((v) << 16)
 #define DAVINCI_MCBSP_SRGR_FSGM		(1 << 28)
+#define DAVINCI_MCBSP_SRGR_CLKSM    (1 << 29)
 
 #define DAVINCI_MCBSP_PCR_CLKRP		(1 << 0)
 #define DAVINCI_MCBSP_PCR_CLKXP		(1 << 1)
@@ -97,6 +98,8 @@ enum {
 	DAVINCI_MCBSP_WORD_32,
 };
 
+#define DAVINCI_MCBSP_DEBUG
+
 struct davinci_mcbsp_dev {
 	/*
 	 * dma_params must be first because rtd->dai->cpu_dai->private_data
@@ -115,12 +118,23 @@ struct davinci_mcbsp_dev {
 static inline void davinci_mcbsp_write_reg(struct davinci_mcbsp_dev *dev,
 					   int reg, u32 val)
 {
+#ifdef DAVINCI_MCBSP_DEBUG
+   	printk(KERN_DEBUG "davinci_mcbsp_write reg = %d, val = %d\n", reg, val);
+#endif
 	__raw_writel(val, dev->base + reg);
 }
 
 static inline u32 davinci_mcbsp_read_reg(struct davinci_mcbsp_dev *dev, int reg)
 {
-	return __raw_readl(dev->base + reg);
+
+
+   	u32 val = __raw_readl(dev->base + reg);
+   	#ifdef DAVINCI_MCBSP_DEBUG
+   	printk(KERN_DEBUG "davinci_mcbsp_read reg = %d, val = %d\n", reg, val);
+    #endif
+
+
+   	return val;
 }
 
 static void toggle_clock(struct davinci_mcbsp_dev *dev, int playback)
@@ -140,6 +154,19 @@ static void davinci_mcbsp_start(struct davinci_mcbsp_dev *dev,
 	struct snd_soc_device *socdev = rtd->socdev;
 	struct snd_soc_platform *platform = socdev->card->platform;
 	int playback = (substream->stream == SNDRV_PCM_STREAM_PLAYBACK);
+
+
+#ifdef DAVINCI_MCBSP_DEBUG
+
+   	printk(KERN_DEBUG "davinci_mcbsp_start() in mode: ");
+
+   	if(playback)
+   		printk(KERN_DEBUG "Playback \n");
+   	else
+   		printk(KERN_DEBUG "Capture \n");
+
+#endif
+
 	u32 spcr;
 	u32 mask = playback ? DAVINCI_MCBSP_SPCR_XRST : DAVINCI_MCBSP_SPCR_RRST;
 	spcr = davinci_mcbsp_read_reg(dev, DAVINCI_MCBSP_SPCR_REG);
