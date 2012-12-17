@@ -124,10 +124,10 @@ static struct i2c_board_info i2c_ioboard_info[] = {
 #endif
 
 static struct davinci_i2c_platform_data i2c_pdata = {
-	.bus_freq	= 400			/* kHz, original EVM */,
-	//.bus_freq	= 100			/* kHz, used in HTC */,
-	.bus_delay = 0      		/* usec, original EVM*/,
-	//.bus_delay	= 100		/* usec, used in HTC */,
+	//.bus_freq	= 400			/* kHz, original EVM */,
+	.bus_freq	= 100			/* kHz, used in HTC */,
+	//.bus_delay = 0      		/* usec, original EVM*/,
+	.bus_delay	= 100		/* usec, used in HTC */,
 	.sda_pin    = 21            /* GIO21*/,
 	.scl_pin    = 20            /* GIO20*/,
 };

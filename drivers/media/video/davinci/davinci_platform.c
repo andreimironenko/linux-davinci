@@ -56,6 +56,7 @@
 #define DM644X_DDR2_CNTL_BASE	(0x20000000)
 #define VENC_27MHZ		(27000000)
 #define VENC_74_25MHZ		(74250000)
+#define VENC_72MHZ		(72000000)
 
 struct davinci_venc_state {
 	spinlock_t lock;
@@ -447,6 +448,9 @@ int davinci_enc_select_venc_clock(int clk)
 		__raw_writel(0x3a, IO_ADDRESS(SYS_VPSS_CLKCTL));
 	} else {
 		dev_err(venc->vdev, "Desired VENC clock not available\n");
+		dev_err(venc->vdev, "pll1_venc_clk_rate = l%u \n",pll1_venc_clk_rate);
+	    dev_err(venc->vdev, "pll2_venc_clk_rate = l%u \n",pll2_venc_clk_rate);
+
 		return -EINVAL;
 	}
 
@@ -1130,7 +1134,8 @@ static void davinci_enc_set_1080i(struct vid_enc_mode_info *mode_info)
 
 static void davinci_enc_set_internal_hd(struct vid_enc_mode_info *mode_info)
 {
-	if (davinci_enc_select_venc_clock(VENC_74_25MHZ) < 0)
+	//if (davinci_enc_select_venc_clock(VENC_74_25MHZ) < 0)
+	if (davinci_enc_select_venc_clock(VENC_72MHZ) < 0)
 		dev_err(venc->vdev, "PLL's doesnot yield required VENC clk\n");
 
 	ths7303_setval(THS7303_FILTER_MODE_720P_1080I);
