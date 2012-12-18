@@ -54,9 +54,8 @@
 #define DM365_TVP5146_SEL	(0x5)
 #define DM365_VIDEO_MUX_MASK	(0x7)
 #define DM644X_DDR2_CNTL_BASE	(0x20000000)
-#define VENC_27MHZ		(27000000)
-#define VENC_74_25MHZ		(74250000)
-#define VENC_72MHZ		(72000000)
+#define VENC_LOWER_LIMIT_27MHZ	        (27000000)
+#define VENC_UPPER_LIMIT_74_25MHZ		(74250000)
 
 struct davinci_venc_state {
 	spinlock_t lock;
@@ -428,7 +427,7 @@ static void remove_sysfs_files(struct system_device *dev)
  * Description:
  *  Select the venc input clock based on the clk value.
  */
-int davinci_enc_select_venc_clock(int clk)
+int davinci_enc_select_venc_clock()
 {
 	struct clk *pll1_venc_clk, *pll2_venc_clk;
 	unsigned int pll1_venc_clk_rate, pll2_venc_clk_rate;
@@ -439,9 +438,11 @@ int davinci_enc_select_venc_clock(int clk)
 	pll2_venc_clk = clk_get(NULL, "pll2_sysclk5");
 	pll2_venc_clk_rate = clk_get_rate(pll2_venc_clk);
 
-	if (clk == pll1_venc_clk_rate)
+	if (pll1_venc_clk_rate >= VENC_LOWER_LIMIT_27MHZ &&
+			pll1_venc_clk_rate <= VENC_UPPER_LIMIT_74_25MHZ)
 		__raw_writel(0x18, IO_ADDRESS(SYS_VPSS_CLKCTL));
-	else if (clk == pll2_venc_clk_rate)
+	else if (pll2_venc_clk_rate >= VENC_LOWER_LIMIT_27MHZ &&
+			pll2_venc_clk_rate <= VENC_UPPER_LIMIT_74_25MHZ)
 		__raw_writel(0x38, IO_ADDRESS(SYS_VPSS_CLKCTL));
 	else if (cpu_is_davinci_dm368()) {
 		enable_hd_clk();
@@ -573,7 +574,7 @@ static void enableDigitalOutput(int bEnable)
 
 	} else {
 		/* Initialize the VPSS Clock Control register */
-		if (davinci_enc_select_venc_clock(VENC_27MHZ) < 0)
+		if (davinci_enc_select_venc_clock() < 0)
 			dev_err(venc->vdev, "PLL's doesnot yield required\
 					VENC clk\n");
 		if (cpu_is_davinci_dm644x())
@@ -726,7 +727,7 @@ static void davinci_enc_set_525p(struct vid_enc_mode_info *mode_info)
 {
 	enableDigitalOutput(0);
 	if (cpu_is_davinci_dm365()) {
-		if (davinci_enc_select_venc_clock(VENC_27MHZ) < 0)
+		if (davinci_enc_select_venc_clock() < 0)
 			dev_err(venc->vdev, "PLL's doesnot yield required\
 					VENC clk\n");
 	} else
@@ -769,7 +770,7 @@ static void davinci_enc_set_625p(struct vid_enc_mode_info *mode_info)
 {
 	enableDigitalOutput(0);
 	if (cpu_is_davinci_dm365()) {
-		if (davinci_enc_select_venc_clock(VENC_27MHZ) < 0)
+		if (davinci_enc_select_venc_clock() < 0)
 			dev_err(venc->vdev, "PLL's doesnot yield required\
 					VENC clk\n");
 	} else
@@ -1134,8 +1135,7 @@ static void davinci_enc_set_1080i(struct vid_enc_mode_info *mode_info)
 
 static void davinci_enc_set_internal_hd(struct vid_enc_mode_info *mode_info)
 {
-	//if (davinci_enc_select_venc_clock(VENC_74_25MHZ) < 0)
-	if (davinci_enc_select_venc_clock(VENC_72MHZ) < 0)
+	if (davinci_enc_select_venc_clock() < 0)
 		dev_err(venc->vdev, "PLL's doesnot yield required VENC clk\n");
 
 	ths7303_setval(THS7303_FILTER_MODE_720P_1080I);

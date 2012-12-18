@@ -35,7 +35,7 @@
 #ifdef __KERNEL__
 extern void enable_lcd(void);
 extern void enable_hd_clk(void);
-int davinci_enc_select_venc_clock(int clk);
+int davinci_enc_select_venc_clock(void);
 void davinci_enc_set_display_timing(struct vid_enc_mode_info *mode);
 void davinci_enc_set_mode_platform(int channel, struct vid_enc_device_mgr *mgr);
 
