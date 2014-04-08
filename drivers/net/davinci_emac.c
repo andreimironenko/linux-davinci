@@ -2346,7 +2346,7 @@ static void emac_adjust_link(struct net_device *ndev)
  */
 static int emac_devioctl(struct net_device *ndev, struct ifreq *ifrq, int cmd)
 {
-	dev_warn(&ndev->dev, "DaVinci EMAC: ioctl not supported\n");
+	//dev_warn(&ndev->dev, "DaVinci EMAC: ioctl not supported\n");
 
 	if (!(netif_running(ndev)))
 		return -EINVAL;
