@@ -78,3 +78,5 @@ GTAGS
 *.orig
 *~
 \#*#
+
+arch/arm/configs/tisdk_dm365-htc_defconfig
